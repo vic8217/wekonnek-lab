@@ -1,0 +1,229 @@
+###############################################################################
+#  WEKONNEK SELF-HOSTED ROUTING SERVER — Full Google Maps Alternative
+#  Production Docker Compose — PH-only deployment
+#  
+#  Services:
+#    OSRM       → Driving directions, distance matrix, map matching, trip optimization
+#    Valhalla   → Walking/cycling/motorcycle routing, isochrones, elevation
+#    Photon     → Forward geocoding, autocomplete
+#    PostGIS    → POI storage, reverse geocoding, spatial queries
+#    POI API    → Express API aggregating all services
+#    Nginx      → Gateway with auth, rate limiting, caching, SSL
+###############################################################################
+
+services:
+  # ═══════════════════════════════════════════════
+  #  OSRM Backend — Open Source Routing Machine
+  #  Provides: /route (driving), /table, /match, /trip
+  # ═══════════════════════════════════════════════
+  osrm-backend:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    container_name: wekonnek-osrm
+    restart: unless-stopped
+    ports:
+      - "5050:5000"
+    volumes:
+      - ./data/osrm:/data
+    command: >
+      osrm-routed
+      --algorithm mld
+      /data/philippines-latest.osrm
+      --max-table-size 1000
+      --max-trip-size 100
+      --max-matching-size 200
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/route/v1/driving/121.0,14.5;121.1,14.6"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - routing-net
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 8G
+
+  # ═══════════════════════════════════════════════
+  #  Valhalla — Multi-modal routing engine
+  #  Provides: walking/cycling/motorcycle routing, isochrones, elevation
+  # ═══════════════════════════════════════════════
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: wekonnek-valhalla
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data/valhalla:/custom_files
+    environment:
+      tile_urls: "https://download.geofabrik.de/asia/philippines-latest.osm.pbf"
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "True"
+      build_admins: "True"
+      build_time_zones: "True"
+      force_rebuild: "False"
+      serve_tiles: "True"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - routing-net
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+  # ═══════════════════════════════════════════════
+  #  Photon — Forward geocoding & autocomplete
+  #  OSM-based geocoder by Komoot
+  # ═══════════════════════════════════════════════
+  photon:
+    image: komoot/photon:latest
+    container_name: wekonnek-photon
+    restart: unless-stopped
+    ports:
+      - "2322:2322"
+    volumes:
+      - photon_data:/photon/photon_data
+    environment:
+      PHOTON_COUNTRY: "PH"
+    command: >
+      java -jar photon.jar
+      -listen-ip 0.0.0.0
+      -listen-port 2322
+      -data-dir /photon/photon_data
+      -languages en,fil
+      -country-codes ph
+      -enable-update-api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2322/api?q=Manila&limit=1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - routing-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ═══════════════════════════════════════════════
+  #  PostgreSQL + PostGIS — POI storage
+  # ═══════════════════════════════════════════════
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: wekonnek-poi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wekonnek_poi
+      POSTGRES_USER: ${DB_USER:-wekonnek}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-wekonnek_secure_2024}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wekonnek} -d wekonnek_poi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - routing-net
+
+  # ═══════════════════════════════════════════════
+  #  POI API — Unified routing & location services
+  #  Node.js Express aggregating OSRM + Valhalla + Photon + PostGIS
+  # ═══════════════════════════════════════════════
+  poi-api:
+    build:
+      context: ./poi-api
+      dockerfile: Dockerfile
+    container_name: wekonnek-poi-api
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: wekonnek_poi
+      DB_USER: ${DB_USER:-wekonnek}
+      DB_PASSWORD: ${DB_PASSWORD:-wekonnek_secure_2024}
+      OSRM_URL: http://osrm-backend:5000
+      VALHALLA_URL: http://valhalla:8002
+      PHOTON_URL: http://photon:2322
+    depends_on:
+      postgres:
+        condition: service_healthy
+      osrm-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - routing-net
+
+  # ═══════════════════════════════════════════════
+  #  Nginx — Reverse proxy + SSL + API key auth
+  # ═══════════════════════════════════════════════
+  nginx:
+    image: nginx:alpine
+    container_name: wekonnek-routing-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/api_keys.conf:/etc/nginx/api_keys.conf:ro
+      - ./logs/nginx:/var/log/nginx
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - osrm-backend
+      - poi-api
+    networks:
+      - routing-net
+
+  # ═══════════════════════════════════════════════
+  #  Watchtower — Auto-update containers
+  # ═══════════════════════════════════════════════
+  watchtower:
+    image: containrrr/watchtower
+    container_name: wekonnek-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_SCHEDULE: "0 0 4 * * *"
+    networks:
+      - routing-net
+
+volumes:
+  pgdata:
+    driver: local
+  nginx_cache:
+    driver: local
+  photon_data:
+    driver: local
+
+networks:
+  routing-net:
+    driver: bridge

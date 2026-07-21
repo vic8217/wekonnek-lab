@@ -1,0 +1,302 @@
+@import "tailwindcss";
+
+/* Lufga Font Family - Regular */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaRegular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaItalic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Thin */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaThin.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaThinItalic.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Extra Light */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaExtraLight.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaExtraLightItalic.ttf") format("truetype");
+  font-weight: 200;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Light */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaLight.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaLightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Medium */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaMedium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaMediumItalic.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Semi Bold */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaSemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaSemiBoldItalic.ttf") format("truetype");
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Bold */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaBold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaBoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Extra Bold */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaExtraBoldItalic.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Lufga Font Family - Black */
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaBlack.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/lufga/LufgaBlackItalic.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --background: #FFFAF3;
+  --foreground: #171717;
+  --blue-primary: #165BB8;
+  --red-primary: #DB0002;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-blue-primary: var(--blue-primary);
+  --color-red-primary: var(--red-primary);
+  --font-sans: "Lufga", Arial, Helvetica, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  height: -webkit-fill-available;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Lufga", Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  overscroll-behavior-y: none;
+}
+
+* {
+  font-family: "Lufga", Arial, Helvetica, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* PWA mobile-app feel */
+input, textarea, select, button {
+  font-size: 16px; /* Prevent iOS zoom on focus */
+}
+
+/* Smooth touch scrolling */
+.mobile-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Pull-to-refresh prevention */
+body.pwa-mode {
+  overscroll-behavior-y: contain;
+}
+
+/* Active press state for mobile buttons */
+.mobile-press:active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
+}
+
+/* Status bar area for standalone PWA */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Disable text selection on interactive elements */
+nav, .no-select {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* iOS standalone mode fixes */
+@media screen and (display-mode: standalone) {
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-33.333%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+  will-change: transform;
+}
+
+/* Leaflet Map Styles */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  z-index: 0;
+}
+
+.custom-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Hide scrollbar for horizontal scrolling areas */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area for bottom nav on iOS */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* QR scan line animation */
+@keyframes scan-line {
+  0% { top: 0; }
+  50% { top: calc(100% - 2px); }
+  100% { top: 0; }
+}
+
+.animate-scan-line {
+  animation: scan-line 2s ease-in-out infinite;
+  position: absolute;
+}
+
+/* Bottom sheet slide-up animation */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}

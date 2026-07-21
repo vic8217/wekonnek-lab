@@ -1,0 +1,67 @@
+###############################################################################
+#  Local Dev Compose — Lightweight routing services only
+#  Skips: Postgres (use local), Nginx, Watchtower, POI API (run locally)
+#  
+#  Usage:
+#    1. Build OSRM data:  ./scripts/build-osrm.sh
+#    2. Start services:   docker compose -f docker-compose.dev.yml up -d
+#    3. Run POI API:      cd poi-api && npm run dev
+###############################################################################
+
+services:
+  osrm-backend:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    container_name: wekonnek-osrm
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./data/osrm:/data
+    command: >
+      osrm-routed
+      --algorithm mld
+      /data/philippines-latest.osrm
+      --max-table-size 500
+      --max-trip-size 50
+      --max-matching-size 100
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/route/v1/driving/121.0,14.5;121.1,14.6"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: wekonnek-valhalla
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data/valhalla:/custom_files
+    environment:
+      tile_urls: "https://download.geofabrik.de/asia/philippines-latest.osm.pbf"
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      force_rebuild: "False"
+      serve_tiles: "True"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G

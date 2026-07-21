@@ -1,0 +1,25 @@
+# Environment
+.env
+
+# Data files (large)
+data/osrm/*.osm.pbf
+data/osrm/*.osrm*
+data/valhalla/*
+!data/valhalla/.gitkeep
+
+# Logs
+logs/
+
+# SSL certs
+nginx/ssl/*.pem
+
+# Database backups
+backups/
+
+# Node
+poi-api/node_modules/
+poi-api/package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,273 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
+import { WalletPaymentGateway } from '@prisma/client';
+import {
+  getSubscriptionAmount,
+  computeExpiry,
+  getPlansResponse,
+} from './subscription-plans';
+
+interface UpgradeInput {
+  tier: string;
+  plan: string;
+  payment_method?: string; // 'online' | 'manual'
+  gateway?: string;
+  payment_proof_url?: string;
+  auto_renew?: boolean;
+}
+
+const ONLINE_GATEWAYS = new Set(['gcash', 'maya', 'card', 'xendit', 'paymongo', 'grab_pay']);
+
+function serializePayment(p: any) {
+  if (!p) return p;
+  return {
+    id: p.id,
+    merchant_id: p.merchantId,
+    merchantId: p.merchantId,
+    tier: p.tier,
+    plan: p.plan,
+    amount: p.amount,
+    payment_method: p.paymentMethod,
+    paymentMethod: p.paymentMethod,
+    gateway: p.gateway,
+    status: p.status,
+    payment_proof_url: p.paymentProofUrl,
+    payment_ref: p.paymentRef,
+    payment_url: p.paymentUrl,
+    period_start: p.periodStart,
+    period_end: p.periodEnd,
+    rejection_reason: p.rejectionReason,
+    reviewed_at: p.reviewedAt,
+    created_at: p.createdAt,
+    createdAt: p.createdAt,
+    updated_at: p.updatedAt,
+    merchant: p.merchant
+      ? {
+          id: p.merchant.id,
+          name: p.merchant.name,
+          slug: p.merchant.slug,
+          subscription_tier: p.merchant.subscriptionTier,
+          subscription_plan: p.merchant.subscriptionPlan,
+        }
+      : undefined,
+  };
+}
+
+@Injectable()
+export class SubscriptionsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly paymentGateway: PaymentGatewayService,
+  ) {}
+
+  getPlans() {
+    return getPlansResponse();
+  }
+
+  private async resolveMerchantForUser(userId: string) {
+    const merchant = await this.prisma.merchant.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!merchant) {
+      throw new NotFoundException('No merchant profile found for this account');
+    }
+    return merchant;
+  }
+
+  /** Create an upgrade/renewal request. Online → gateway URL; manual → pending admin review. */
+  async upgrade(userId: string, input: UpgradeInput) {
+    const tier = (input.tier || '').toLowerCase();
+    const plan = (input.plan || '').toLowerCase();
+    const amount = getSubscriptionAmount(tier, plan);
+    if (!amount) {
+      throw new BadRequestException('Invalid subscription tier or plan');
+    }
+
+    const merchant = await this.resolveMerchantForUser(userId);
+    const method = (input.payment_method || 'online').toLowerCase();
+    const isOnline = method === 'online' || ONLINE_GATEWAYS.has(method);
+
+    const payment = await this.prisma.subscriptionPayment.create({
+      data: {
+        merchantId: merchant.id,
+        tier,
+        plan,
+        amount,
+        paymentMethod: isOnline ? 'online' : 'manual',
+        gateway: isOnline ? (input.gateway || 'xendit').toLowerCase() : null,
+        status: 'pending',
+        paymentProofUrl: input.payment_proof_url ?? null,
+      },
+    });
+
+    if (isOnline) {
+      try {
+        const gateway = this.resolveGateway(input.gateway);
+        const appUrl = process.env.APP_BASE_URL || 'http://localhost:3001';
+        const result = await this.paymentGateway.createPayment({
+          gateway,
+          amount,
+          description: `WeKonnek ${tier} (${plan}) subscription`,
+          paymentMethod: 'gcash',
+          redirectSuccess: `${appUrl}/merchant/subscription/upgrade?paid=1`,
+          redirectFailed: `${appUrl}/merchant/subscription/upgrade?paid=0`,
+          metadata: {
+            subscriptionPaymentId: String(payment.id),
+            merchantId: String(merchant.id),
+          },
+        });
+        const updated = await this.prisma.subscriptionPayment.update({
+          where: { id: payment.id },
+          data: {
+            paymentRef: result.gatewayTransactionId,
+            paymentUrl: result.paymentUrl,
+          },
+        });
+        return serializePayment(updated);
+      } catch (err: any) {
+        return {
+          ...serializePayment(payment),
+          payment_error:
+            err?.message || 'Online payment could not be initialized',
+        };
+      }
+    }
+
+    // Manual: also flag the auto-renew preference if provided
+    if (input.auto_renew != null) {
+      await this.prisma.merchant
+        .update({
+          where: { id: merchant.id },
+          data: { autoRenew: !!input.auto_renew },
+        })
+        .catch(() => undefined);
+    }
+
+    return serializePayment(payment);
+  }
+
+  private resolveGateway(requested?: string): WalletPaymentGateway {
+    const g = (requested || '').toLowerCase();
+    if (g === 'maya') return WalletPaymentGateway.maya;
+    if (g === 'paymongo') return WalletPaymentGateway.paymongo;
+    if (g === 'xendit') return WalletPaymentGateway.xendit;
+    return WalletPaymentGateway.xendit;
+  }
+
+  async history(userId: string) {
+    const merchant = await this.resolveMerchantForUser(userId);
+    const payments = await this.prisma.subscriptionPayment.findMany({
+      where: { merchantId: merchant.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    return payments.map(serializePayment);
+  }
+
+  /** Admin: list subscription payments (optionally filter by status). */
+  async findAll(status?: string) {
+    const where: any = {};
+    if (status && status !== 'all') where.status = status;
+    const payments = await this.prisma.subscriptionPayment.findMany({
+      where,
+      include: { merchant: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return payments.map(serializePayment);
+  }
+
+  /** Activate a paid/approved subscription on the merchant. */
+  private async activate(paymentId: number, reviewedBy?: string) {
+    const payment = await this.prisma.subscriptionPayment.findUnique({
+      where: { id: paymentId },
+    });
+    if (!payment) throw new NotFoundException('Subscription payment not found');
+
+    const start = new Date();
+    const end = computeExpiry(payment.plan, start);
+
+    await this.prisma.$transaction([
+      this.prisma.subscriptionPayment.update({
+        where: { id: paymentId },
+        data: {
+          status: 'paid',
+          periodStart: start,
+          periodEnd: end,
+          reviewedBy: reviewedBy ?? null,
+          reviewedAt: reviewedBy ? new Date() : null,
+        },
+      }),
+      this.prisma.merchant.update({
+        where: { id: payment.merchantId },
+        data: {
+          subscriptionTier: payment.tier,
+          subscriptionPlan: payment.plan,
+          subscriptionAmount: payment.amount,
+          subscriptionStatus: 'active',
+          subscriptionStartedAt: start,
+          subscriptionExpiresAt: end,
+        },
+      }),
+    ]);
+
+    const updated = await this.prisma.subscriptionPayment.findUnique({
+      where: { id: paymentId },
+      include: { merchant: true },
+    });
+    return serializePayment(updated);
+  }
+
+  /** Admin approve a manual subscription payment. */
+  async approve(id: number, reviewedBy?: string) {
+    const payment = await this.prisma.subscriptionPayment.findUnique({
+      where: { id: Number(id) },
+    });
+    if (!payment) throw new NotFoundException('Subscription payment not found');
+    if (payment.status === 'paid') {
+      throw new BadRequestException('This payment is already approved');
+    }
+    return this.activate(Number(id), reviewedBy);
+  }
+
+  /** Admin reject a manual subscription payment. */
+  async reject(id: number, reason?: string, reviewedBy?: string) {
+    const payment = await this.prisma.subscriptionPayment.findUnique({
+      where: { id: Number(id) },
+    });
+    if (!payment) throw new NotFoundException('Subscription payment not found');
+    const updated = await this.prisma.subscriptionPayment.update({
+      where: { id: Number(id) },
+      data: {
+        status: 'rejected',
+        rejectionReason: reason ?? null,
+        reviewedBy: reviewedBy ?? null,
+        reviewedAt: new Date(),
+      },
+      include: { merchant: true },
+    });
+    return serializePayment(updated);
+  }
+
+  /** Called by the payment webhook to confirm an online subscription payment. */
+  async markPaidByGateway(
+    subscriptionPaymentId: string,
+    status: 'completed' | 'failed',
+  ) {
+    if (!subscriptionPaymentId) return;
+    const id = Number(subscriptionPaymentId);
+    if (Number.isNaN(id)) return;
+    if (status === 'failed') {
+      await this.prisma.subscriptionPayment
+        .update({ where: { id }, data: { status: 'failed' } })
+        .catch(() => undefined);
+      return;
+    }
+    await this.activate(id).catch(() => undefined);
+  }
+}

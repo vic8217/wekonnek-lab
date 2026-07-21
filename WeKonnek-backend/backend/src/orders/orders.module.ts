@@ -1,0 +1,14 @@
+import { Module } from '@nestjs/common';
+import { OrdersService } from './orders.service';
+import { OrdersController } from './orders.controller';
+import { PaymentsWebhookController } from './payments-webhook.controller';
+import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
+import { NotificationsModule } from '../modules/notifications/notifications.module';
+
+@Module({
+  imports: [NotificationsModule],
+  controllers: [OrdersController, PaymentsWebhookController],
+  providers: [OrdersService, PaymentGatewayService],
+  exports: [OrdersService],
+})
+export class MarketplaceOrdersModule {}
