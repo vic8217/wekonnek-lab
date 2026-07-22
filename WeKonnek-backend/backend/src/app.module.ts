@@ -21,6 +21,8 @@ import { UploadModule } from './upload/upload.module';
 import { MarketplaceOrdersModule } from './orders/orders.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { MerchantApplicationsModule } from './merchant-applications/merchant-applications.module';
+import { CoordinatorApplicationsModule } from './coordinator-applications/coordinator-applications.module';
+import { ManagementZonesModule } from './management-zones/management-zones.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -76,6 +78,8 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     MarketplaceOrdersModule,
     ReservationsModule,
     MerchantApplicationsModule,
+    CoordinatorApplicationsModule,
+    ManagementZonesModule,
     SubscriptionsModule,
     ReviewsModule,
     PromotionsModule,

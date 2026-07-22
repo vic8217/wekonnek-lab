@@ -92,12 +92,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (!res.ok) {
-        clearAuth();
-        setUser(undefined);
+        // Only discard a session when the backend explicitly rejects it.
+        // A temporary 5xx/proxy outage must not log an already authenticated
+        // user out or create a redirect loop.
+        if (res.status === 401 || res.status === 403) {
+          clearAuth();
+          setUser(undefined);
+        } else {
+          setUser(cachedUserOrUndefined());
+        }
         return;
       }
 
-      const profile = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setUser(cachedUserOrUndefined());
+        return;
+      }
+      const profile = await res.json().catch(() => null);
+      if (!profile || typeof profile !== 'object') {
+        setUser(cachedUserOrUndefined());
+        return;
+      }
       const userType = (profile.userType ?? profile.user_type ?? profile.role ?? 'customer') as UserType;
       const authUser: AuthUser = {
         id: profile.id ?? profile.userId ?? '',
@@ -113,7 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(USER_KEY, JSON.stringify(authUser));
       setUser(authUser);
     } catch {
-      setUser(undefined);
+      // Keep the last verified local session during transient network errors.
+      setUser(cachedUserOrUndefined());
     } finally {
       setLoading(false);
     }
@@ -180,11 +197,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+function cachedUserOrUndefined(): AuthUser | undefined {
+  return getUser() ?? undefined;
+}
+
 export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function useRequireAuth(allowedTypes: UserType[]) {
+export function useRequireAuth(allowedTypes: UserType[], loginPath: string = ROUTES.login) {
   const auth = useAuth();
   const router = useRouter();
 
@@ -199,24 +220,17 @@ export function useRequireAuth(allowedTypes: UserType[]) {
       const token = getToken();
       if (cachedUser && token) return;
 
-      router.push(ROUTES.login);
+      router.push(loginPath);
       return;
     }
 
     if (!allowedTypes.includes(auth.user.userType)) {
-      switch (auth.user.userType) {
-        case 'admin':
-        case 'staff':
-          router.push(ROUTES.adminDashboard);
-          break;
-        case 'merchant':
-          router.push(ROUTES.merchantDashboard);
-          break;
-        default:
-          router.push(ROUTES.customerDashboard);
-      }
+      // Keep portal entry points independent. A session for one portal should
+      // not hijack another portal's URL (for example, a merchant visiting
+      // /admin still needs to be able to reach the admin sign-in screen).
+      router.replace(loginPath);
     }
-  }, [auth.loading, auth.user, allowedTypes, router]);
+  }, [auth.loading, auth.user, allowedTypes, loginPath, router]);
 
   return auth;
 }

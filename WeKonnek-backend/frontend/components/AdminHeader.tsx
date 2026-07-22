@@ -2,13 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import ChangePasswordModal from './ChangePasswordModal';
 
 export default function AdminHeader({ onMenuClick }: { onMenuClick?: () => void }) {
-  const router = useRouter();
   const { user: authUser, signOut } = useAuth();
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
@@ -93,7 +91,7 @@ export default function AdminHeader({ onMenuClick }: { onMenuClick?: () => void 
               <span className="text-xs text-gray-500 capitalize">{userType}</span>
             </div>
             <button
-              onClick={()=>signOut()}
+              onClick={() => signOut('/admin/login')}
               className="ml-2 p-1 hover:bg-gray-100 rounded transition-colors"
               title="Sign Out"
             >

@@ -21,6 +21,11 @@ interface MerchantApplication {
   reviewed_by?: string;
   reviewed_at?: string;
   rejection_reason?: string;
+  merchant_code?: string;
+  assignment_status?: 'assigned' | 'unassigned';
+  assigned_coordinator_id?: string;
+  city_municipality?: string;
+  barangay?: string;
 }
 
 export default function MerchantApplicationsPage() {
@@ -33,6 +38,8 @@ export default function MerchantApplicationsPage() {
 
   useEffect(() => {
     fetchApplications();
+    // The selected filter is the trigger; fetchApplications is intentionally not memoized.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFilter]);
 
   const fetchApplications = async () => {
@@ -68,7 +75,7 @@ export default function MerchantApplicationsPage() {
       total: allApps.length,
     };
 
-    allApps.forEach((app: any) => {
+    allApps.forEach((app: MerchantApplication) => {
       if (app.status === 'pending') counts.pending++;
       if (app.status === 'reviewing') counts.reviewing++;
       if (app.status === 'approved') counts.approved++;
@@ -107,16 +114,19 @@ export default function MerchantApplicationsPage() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('Failed to update application status');
+      const updated = await res.json();
+      if (!res.ok) throw new Error(updated.message || 'Failed to update application status');
 
-      toast.success(`Application ${newStatus} successfully!`);
+      toast.success(newStatus === 'approved' && updated.merchant_code
+        ? `Approved. Merchant code: ${updated.merchant_code}`
+        : `Application ${newStatus} successfully!`, { duration: 8000 });
       fetchApplications();
       const counts = await getStatusCounts();
       setStatusCounts(counts);
       setShowViewModal(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error updating status:', error);
-      toast.error(error.message || 'Failed to update application status');
+      toast.error(error instanceof Error ? error.message : 'Failed to update application status');
     }
   };
 
@@ -315,19 +325,20 @@ export default function MerchantApplicationsPage() {
                   <th className="px-6 py-3 text-left text-sm font-semibold">Payment</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Submitted</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Status</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold">Coordinator</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                       Loading applications...
                     </td>
                   </tr>
                 ) : filteredApplications.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                       No applications found
                     </td>
                   </tr>
@@ -369,6 +380,7 @@ export default function MerchantApplicationsPage() {
                           {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
                         </span>
                       </td>
+                      <td className="px-6 py-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${app.assignment_status === 'assigned' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{app.assignment_status === 'assigned' ? 'Assigned' : 'Unassigned'}</span></td>
                       <td className="px-6 py-4">
                         <button
                           onClick={() => handleView(app)}
@@ -434,6 +446,10 @@ export default function MerchantApplicationsPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
                     <p className="text-gray-900">{selectedApplication.payment_method || 'N/A'}</p>
                   </div>
+                  {selectedApplication.merchant_code && <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Merchant Code</label>
+                    <p className="font-mono font-bold tracking-wider text-blue-700">{selectedApplication.merchant_code}</p>
+                  </div>}
                 </div>
 
                 {/* Action Buttons */}

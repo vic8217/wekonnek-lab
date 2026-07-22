@@ -462,16 +462,17 @@ async function main() {
   // Demo accounts get an explicit password so they can sign in via the
   // email/password form. (Real customers usually onboard through phone + OTP,
   // which sets no password.) Passwords match backend/set-demo-passwords.mjs.
-  const [adminPw, merchantPw, customerPw, riderPw] = await Promise.all([
+  const [adminPw, merchantPw, customerPw, riderPw, coordinatorPw] = await Promise.all([
     bcrypt.hash('admin123', 10),
     bcrypt.hash('merchant123', 10),
     bcrypt.hash('customer123', 10),
     bcrypt.hash('rider123', 10),
+    bcrypt.hash('coordinator123', 10),
   ]);
   const users = await Promise.all([
     prisma.user.upsert({
       where: { phone: '+639170000001' },
-      update: { password: adminPw },
+      update: { password: adminPw, role: 'admin', isActive: true },
       create: {
         phone: '+639170000001',
         email: 'admin@wekonnek.com',
@@ -484,7 +485,7 @@ async function main() {
     }),
     prisma.user.upsert({
       where: { phone: '+639170000002' },
-      update: { password: merchantPw },
+      update: { password: merchantPw, role: 'merchant', isActive: true },
       create: {
         phone: '+639170000002',
         email: 'merchant@wekonnek.com',
@@ -497,7 +498,7 @@ async function main() {
     }),
     prisma.user.upsert({
       where: { phone: '+639170000003' },
-      update: { password: customerPw },
+      update: { password: customerPw, role: 'customer', isActive: true },
       create: {
         phone: '+639170000003',
         email: 'customer@wekonnek.com',
@@ -510,7 +511,7 @@ async function main() {
     }),
     prisma.user.upsert({
       where: { phone: '+639170000004' },
-      update: { password: riderPw },
+      update: { password: riderPw, role: 'rider', isActive: true },
       create: {
         phone: '+639170000004',
         email: 'rider@wekonnek.com',
@@ -521,9 +522,32 @@ async function main() {
         password: riderPw,
       },
     }),
+    prisma.user.upsert({
+      where: { phone: '+639170000005' },
+      update: {
+        email: 'coordinator@wekonnek.com',
+        password: coordinatorPw,
+        role: 'staff',
+        isActive: true,
+      },
+      create: {
+        phone: '+639170000005',
+        email: 'coordinator@wekonnek.com',
+        firstName: 'Zone',
+        lastName: 'Coordinator',
+        role: 'staff',
+        isActive: true,
+        password: coordinatorPw,
+      },
+    }),
   ]);
 
-  console.log(`  ✓ ${users.length} users (admin/admin123, merchant/merchant123, customer/customer123, rider/rider123)`);
+  await prisma.merchant.update({
+    where: { id: merchants[0].id },
+    data: { userId: users[1].id, merchantCode: 'WKM-DEMO2026' },
+  });
+
+  console.log(`  ✓ ${users.length} users (admin/admin123, merchant/merchant123, customer/customer123, rider/rider123, coordinator/coordinator123)`);
 
   // ─── Zones ────────────────────────────────────
   const zones = await Promise.all([

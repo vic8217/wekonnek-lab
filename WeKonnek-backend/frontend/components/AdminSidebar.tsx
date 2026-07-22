@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import Image from 'next/image';
 import { getToken, getUser } from '@/hooks/use-auth';
 
 // Authentication is forwarded through the same-origin Next.js auth proxy.
@@ -119,6 +118,34 @@ export default function AdminSidebar({
             </Link>
 
             <Link
+              href="/admin/coordinators"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/admin/coordinators')
+                  ? 'bg-[#DB0002] text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H2v-2a4 4 0 014-4h3m6 6H9v-2a4 4 0 018 0v2zM8 11a4 4 0 100-8 4 4 0 000 8zm8 1a3 3 0 100-6 3 3 0 000 6z" />
+              </svg>
+              <span className="font-medium">Coordinator Management</span>
+            </Link>
+
+            <Link
+              href="/admin/coordinator-resources"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/admin/coordinator-resources')
+                  ? 'bg-[#DB0002] text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253" />
+              </svg>
+              <span className="font-medium">Coordinator Resources</span>
+            </Link>
+
+            <Link
               href="/admin/subscriptions"
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 isActive('/admin/subscriptions')
@@ -172,7 +199,7 @@ export default function AdminSidebar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              <span className="font-medium">Delivery Zones</span>
+              <span className="font-medium">Coordinator Zones</span>
             </Link>
 
             <Link

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
+import { Flame, Gift, Star, Ticket, Zap, type LucideIcon } from 'lucide-react';
 import { getToken } from '@/hooks/use-auth';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -37,10 +39,10 @@ interface LoyaltyData {
 }
 
 const MOCK_FLASH_SALES: FlashSale[] = [
-  { id: '1', name: 'Chickenjoy 2pc + Drink', image: '', originalPrice: 169, salePrice: 99, endsAt: new Date(Date.now() + 3 * 3600 * 1000).toISOString(), soldPercent: 72 },
-  { id: '2', name: 'Large Pepperoni Pizza', image: '', originalPrice: 499, salePrice: 299, endsAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(), soldPercent: 45 },
-  { id: '3', name: 'Milk Tea Bundle (3 cups)', image: '', originalPrice: 297, salePrice: 199, endsAt: new Date(Date.now() + 2 * 3600 * 1000).toISOString(), soldPercent: 88 },
-  { id: '4', name: 'Sushi Platter (12pc)', image: '', originalPrice: 650, salePrice: 399, endsAt: new Date(Date.now() + 4 * 3600 * 1000).toISOString(), soldPercent: 31 },
+  { id: '1', name: 'Chickenjoy 2pc + Drink', image: '/images/menu-family-meal.png', originalPrice: 169, salePrice: 99, endsAt: new Date(Date.now() + 3 * 3600 * 1000).toISOString(), soldPercent: 72 },
+  { id: '2', name: 'Large Pepperoni Pizza', image: '/images/menu-house-pasta.png', originalPrice: 499, salePrice: 299, endsAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(), soldPercent: 45 },
+  { id: '3', name: 'Milk Tea Bundle (3 cups)', image: '/images/menu-caramel-macchiato.png', originalPrice: 297, salePrice: 199, endsAt: new Date(Date.now() + 2 * 3600 * 1000).toISOString(), soldPercent: 88 },
+  { id: '4', name: 'Sushi Platter (12pc)', image: '/images/menu-club-sandwich.png', originalPrice: 650, salePrice: 399, endsAt: new Date(Date.now() + 4 * 3600 * 1000).toISOString(), soldPercent: 31 },
 ];
 
 const MOCK_DAILY_DEALS: DailyDeal[] = [
@@ -90,11 +92,11 @@ function FlashCountdown({ target }: { target: string }) {
 }
 
 function HeroCountdown() {
-  const endOfDay = new Date();
-  endOfDay.setHours(23, 59, 59, 999);
   const [time, setTime] = useState('');
 
   useEffect(() => {
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
     const tick = () => {
       const diff = Math.max(0, endOfDay.getTime() - Date.now());
       const h = Math.floor(diff / 3600000);
@@ -144,8 +146,8 @@ export default function DealsPage() {
         nextTier: d.next_tier || d.nextTier || 'Silver',
         pointsToNext: d.points_to_next || d.pointsToNext || 0,
         progress: d.progress || 0,
-        history: (d.history || []).map((h: any) => ({
-          date: h.date || h.created_at,
+        history: (d.history || []).map((h: { date?: string; created_at?: string; description: string; points: number }) => ({
+          date: h.date || h.created_at || new Date().toISOString(),
           description: h.description,
           points: h.points,
         })),
@@ -157,56 +159,57 @@ export default function DealsPage() {
     }
   };
 
-  const tabs: { id: DealTab; label: string; emoji: string }[] = [
-    { id: 'flash', label: 'Flash Sales', emoji: '⚡' },
-    { id: 'daily', label: 'Daily Deals', emoji: '🔥' },
-    { id: 'vouchers', label: 'Vouchers', emoji: '🎟️' },
-    { id: 'loyalty', label: 'Loyalty', emoji: '⭐' },
+  const tabs: { id: DealTab; label: string; icon: LucideIcon }[] = [
+    { id: 'flash', label: 'Flash Sales', icon: Zap },
+    { id: 'daily', label: 'Daily Deals', icon: Flame },
+    { id: 'vouchers', label: 'Vouchers', icon: Ticket },
+    { id: 'loyalty', label: 'Loyalty', icon: Star },
   ];
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="box-border w-full px-5 py-5 sm:px-8 lg:px-10 xl:px-6 2xl:px-8">
       {/* Hero Banner */}
-      <div className="bg-gradient-to-br from-[#DB0002] via-red-600 to-red-800 px-6 py-8 mx-4 mt-4 rounded-2xl relative overflow-hidden">
+      <div className="relative min-h-56 overflow-hidden rounded-[28px] bg-gradient-to-r from-[#ed0712] via-[#d90010] to-[#8f0011] px-7 py-8 shadow-[0_18px_45px_rgba(219,0,2,.22)] lg:px-12 lg:py-10">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-8 translate-x-8" />
         <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full translate-y-6 -translate-x-6" />
-        <div className="relative z-10">
+        <div className="relative z-10 flex min-h-40 flex-col justify-center">
           <p className="text-red-200 text-sm font-medium">Limited Time Only</p>
-          <h1 className="text-2xl font-bold text-white mt-1">Today&apos;s Deals</h1>
+          <h1 className="mt-1 text-3xl font-black text-white lg:text-5xl">Today&apos;s Deals</h1>
           <p className="text-red-100 text-sm mt-1 mb-4">Ends in</p>
           <HeroCountdown />
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-4 mt-5 bg-gray-100 rounded-xl mx-4 p-1">
-        {tabs.map((tab) => (
+      <div className="mt-5 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 sm:grid-cols-4">
+        {tabs.map((tab) => { const Icon = tab.icon; return (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all ${
+            className={`flex min-h-14 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-all ${
               activeTab === tab.id
                 ? 'bg-white text-[#DB0002] shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            <span className="block text-sm mb-0.5">{tab.emoji}</span>
+            <Icon size={18} />
             {tab.label}
           </button>
-        ))}
+        )})}
       </div>
 
-      <div className="px-4 py-5">
+      <div className="py-6">
         {/* Flash Sales Tab */}
         {activeTab === 'flash' && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-4">
             {MOCK_FLASH_SALES.map((item) => (
-              <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="h-28 bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center">
-                  <span className="text-3xl">🍽️</span>
+              <div key={item.id} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-xl">
+                <div className="relative h-32 overflow-hidden bg-slate-100 sm:h-44 xl:h-52">
+                  <Image src={item.image} alt={item.name} fill sizes="(max-width:1024px) 50vw, 25vw" className="object-cover transition duration-300 group-hover:scale-105" />
+                  <span className="absolute left-3 top-3 rounded-full bg-[#DB0002] px-3 py-1 text-[10px] font-black text-white">FLASH SALE</span>
                 </div>
-                <div className="p-3">
-                  <p className="text-xs font-semibold text-gray-800 line-clamp-2 leading-tight">{item.name}</p>
+                <div className="p-4">
+                  <p className="line-clamp-2 text-sm font-black leading-tight text-gray-800 sm:text-base">{item.name}</p>
                   <div className="flex items-baseline gap-1.5 mt-2">
                     <span className="text-sm font-bold text-[#DB0002]">₱{item.salePrice}</span>
                     <span className="text-xs text-gray-400 line-through">₱{item.originalPrice}</span>
@@ -224,7 +227,7 @@ export default function DealsPage() {
                   <div className="text-[10px] text-orange-500 font-medium mt-1.5">
                     <FlashCountdown target={item.endsAt} />
                   </div>
-                  <button className="w-full mt-2 py-2 bg-[#DB0002] text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors">
+                  <button className="mt-3 min-h-11 w-full rounded-xl bg-[#DB0002] text-sm font-bold text-white transition-colors hover:bg-red-700">
                     Buy Now
                   </button>
                 </div>
@@ -235,11 +238,11 @@ export default function DealsPage() {
 
         {/* Daily Deals Tab */}
         {activeTab === 'daily' && (
-          <div className="space-y-3">
+          <div className="grid gap-4 lg:grid-cols-2">
             {MOCK_DAILY_DEALS.map((deal) => (
               <div
                 key={deal.id}
-                className={`bg-gradient-to-r ${deal.gradient} rounded-2xl p-5 text-white relative overflow-hidden`}
+                className={`relative min-h-52 overflow-hidden rounded-2xl bg-gradient-to-r ${deal.gradient} p-7 text-white shadow-sm`}
               >
                 <div className="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -translate-y-4 translate-x-4" />
                 <div className="relative z-10">
@@ -265,8 +268,8 @@ export default function DealsPage() {
         {/* Vouchers Tab */}
         {activeTab === 'vouchers' && (
           <div className="flex flex-col items-center justify-center py-12">
-            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-4">
-              <span className="text-3xl">🎟️</span>
+            <div className="mb-4 flex size-20 items-center justify-center rounded-full bg-red-50 text-[#DB0002]">
+              <Gift size={36} />
             </div>
             <h3 className="text-lg font-bold text-gray-900">My Vouchers</h3>
             <p className="text-sm text-gray-500 mt-1 text-center">View and manage your collected vouchers</p>
@@ -281,7 +284,7 @@ export default function DealsPage() {
 
         {/* Loyalty Tab */}
         {activeTab === 'loyalty' && (
-          <div className="space-y-5">
+          <div className="grid gap-5 xl:grid-cols-2">
             {loadingLoyalty ? (
               <div className="flex items-center justify-center py-12">
                 <div className="w-8 h-8 border-3 border-[#DB0002] border-t-transparent rounded-full animate-spin" />

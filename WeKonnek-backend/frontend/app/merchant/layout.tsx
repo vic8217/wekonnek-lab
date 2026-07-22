@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/hooks/use-auth';
 import MerchantSidebar from '@/components/MerchantSidebar';
 import MerchantHeader from '@/components/MerchantHeader';
@@ -12,7 +13,13 @@ export default function MerchantLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, refreshAuth } = useRequireAuth(['merchant']);
+  const pathname = usePathname();
+  if (pathname === '/merchant') return children;
+  return <ProtectedMerchantLayout>{children}</ProtectedMerchantLayout>;
+}
+
+function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading, refreshAuth } = useRequireAuth(['merchant'], '/merchant');
 
   useEffect(() => {
     if (!loading && !user) refreshAuth();

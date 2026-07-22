@@ -18,7 +18,9 @@ export default function ConditionalFooter() {
                      pathname?.startsWith('/admin') || 
                      pathname?.startsWith('/merchant') || 
                      pathname?.startsWith('/customer') ||
-                     pathname?.startsWith('/auth');
+                     pathname?.startsWith('/auth') ||
+                     pathname === '/coordinator' ||
+                     pathname?.startsWith('/coordinator/');
 
   if (hideFooter) {
     return null;

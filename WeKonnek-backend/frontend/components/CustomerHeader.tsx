@@ -54,17 +54,23 @@ export default function CustomerHeader() {
   return (
     <>
       {/* ========== MOBILE HEADER ========== */}
-      <header className="lg:hidden bg-white">
+      <header className="xl:hidden bg-white">
         {/* Top bar - White with logo and search */}
         <div className="px-4 pt-3 pb-2">
           <div className="flex items-center justify-between">
             <Link href="/customer/dashboard" className="flex items-center space-x-2">
-              <div className="w-9 h-9 bg-gradient-to-br from-[#DB0002] to-[#FF6B35] rounded-xl flex items-center justify-center shadow-sm">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
-                </svg>
-              </div>
-              <span className="text-lg font-bold text-gray-900">WeKonnek</span>
+              <Image
+                src="/images/weKonnekLogov1.png"
+                alt="WeKonnek"
+                width={48}
+                height={48}
+                priority
+                className="size-11 object-contain"
+              />
+              <span className="text-lg font-black tracking-tight">
+                <span className="text-[#075cff]">WE</span>
+                <span className="text-[#ff0719]">KONNEK</span>
+              </span>
             </Link>
             <div className="flex items-center">
               <button className="p-2" title="Search" onClick={() => setShowMobileSearch(!showMobileSearch)}>
@@ -146,7 +152,7 @@ export default function CustomerHeader() {
       </header>
 
       {/* ========== DESKTOP HEADER ========== */}
-      <header className="hidden lg:block bg-white text-white border-b border-gray-200 px-6 py-4">
+      <header className="hidden xl:block bg-white text-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-2">
             <Image

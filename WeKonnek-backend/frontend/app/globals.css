@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+@layer components {
+  .merchant-input {
+    @apply min-h-[47px] rounded-xl border border-[#ccd8e9] bg-white px-4 py-3 text-sm text-slate-600 outline-none transition focus-within:border-[#075cff] focus-within:ring-2 focus-within:ring-[#075cff]/10;
+  }
+  .coord-input {
+    @apply block min-h-10 w-full rounded-lg border border-[#ccd8e9] bg-white px-3 py-2 text-xs font-medium text-slate-600 outline-none transition focus:border-[#075cff] focus:ring-2 focus:ring-[#075cff]/10;
+  }
+  .contact-input {
+    @apply block min-h-11 w-full rounded-xl border border-[#ccd8e9] bg-white px-4 py-3 text-sm font-normal text-slate-600 outline-none transition focus:border-[#075cff] focus:ring-2 focus:ring-[#075cff]/10;
+  }
+}
+
 /* Lufga Font Family - Regular */
 @font-face {
   font-family: "Lufga";

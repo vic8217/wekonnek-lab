@@ -60,6 +60,7 @@ model SubCategory {
 
 model Merchant {
   id                 Int       @id @default(autoincrement())
+  merchantCode       String?   @unique @map("merchant_code") @db.VarChar(20)
   userId             String?   @map("user_id") @db.Uuid
   name               String    @db.VarChar(255)
   slug               String    @unique @db.VarChar(255)
@@ -123,11 +124,22 @@ model Merchant {
 
 model MerchantApplication {
   id                      Int       @id @default(autoincrement())
+  merchantCode            String?   @unique @map("merchant_code") @db.VarChar(20)
   userId                  String?   @map("user_id") @db.Uuid
   businessName            String    @map("business_name") @db.VarChar(255)
   email                   String    @db.VarChar(255)
   phone                   String?   @db.VarChar(20)
   address                 String?   @db.Text
+  contactName             String?   @map("contact_name") @db.VarChar(255)
+  categoryName            String?   @map("category_name") @db.VarChar(150)
+  cityMunicipality        String?   @map("city_municipality") @db.VarChar(100)
+  barangay                String?   @db.VarChar(150)
+  latitude                Decimal?  @db.Decimal(10, 7)
+  longitude               Decimal?  @db.Decimal(10, 7)
+  businessDescription     String?   @map("business_description") @db.Text
+  source                  String    @default("merchant_application") @db.VarChar(50)
+  assignedCoordinatorId   String?   @map("assigned_coordinator_id") @db.Uuid
+  assignedAt              DateTime? @map("assigned_at") @db.Timestamptz
   subscriptionTier        String    @default("basic") @map("subscription_tier") @db.VarChar(50)
   subscriptionPlan        String    @default("weekly") @map("subscription_plan") @db.VarChar(50)
   subscriptionAmount      Decimal   @map("subscription_amount") @db.Decimal(10, 2)
@@ -149,7 +161,39 @@ model MerchantApplication {
 
   @@index([userId])
   @@index([status])
+  @@index([cityMunicipality, barangay])
+  @@index([assignedCoordinatorId])
   @@map("merchant_applications")
+}
+
+model CoordinatorApplication {
+  id                    Int       @id @default(autoincrement())
+  fullName              String    @map("full_name") @db.VarChar(255)
+  mobileNumber          String    @map("mobile_number") @db.VarChar(30)
+  email                 String    @db.VarChar(255)
+  region                String    @db.VarChar(100)
+  provinceDistrict      String    @map("province_district") @db.VarChar(100)
+  cityMunicipality      String    @map("city_municipality") @db.VarChar(100)
+  barangay              String?   @db.VarChar(150)
+  preferredCoverageArea String?   @map("preferred_coverage_area") @db.Text
+  latitude              Decimal   @db.Decimal(10, 7)
+  longitude             Decimal   @db.Decimal(10, 7)
+  background            String?   @db.VarChar(150)
+  occupation            String?   @db.VarChar(255)
+  motivation            String?   @db.Text
+  monthlyCapacity       String?   @map("monthly_capacity") @db.VarChar(50)
+  referred              String?   @db.VarChar(100)
+  status                String    @default("pending") @db.VarChar(50)
+  managementZoneId      String?   @map("management_zone_id") @db.Uuid
+  submittedAt           DateTime  @default(now()) @map("submitted_at") @db.Timestamptz
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  managementZone ManagementZone? @relation(fields: [managementZoneId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([cityMunicipality])
+  @@index([managementZoneId])
+  @@map("coordinator_applications")
 }
 
 model SubscriptionPayment {
@@ -767,6 +811,43 @@ model Zone {
   preferredByRiders User[]      @relation("RiderPreferredZone")
 
   @@map("zones")
+}
+
+/// Administrative/coordinator zones. Kept separate from delivery polygons so
+/// congressional coverage does not change rider pricing or routing behavior.
+model ManagementZone {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  coverages ManagementZoneCoverage[]
+  coordinatorApplications CoordinatorApplication[]
+
+  @@map("management_zones")
+}
+
+model ManagementZoneCoverage {
+  id               String   @id @default(uuid()) @db.Uuid
+  zoneId           String   @map("zone_id") @db.Uuid
+  regionCode       String   @map("region_code")
+  regionName       String   @map("region_name")
+  provinceCode     String?  @map("province_code")
+  provinceName     String?  @map("province_name")
+  cityMunicipalityCode String @map("city_municipality_code")
+  cityMunicipalityName String @map("city_municipality_name")
+  congressionalDistrict String @map("congressional_district")
+  areas             Json     @default("[]")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  zone ManagementZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@unique([zoneId, cityMunicipalityCode, congressionalDistrict])
+  @@index([cityMunicipalityCode, congressionalDistrict])
+  @@map("management_zone_coverages")
 }
 
 /// Join table: a rider can serve many zones, and a zone can have many riders.

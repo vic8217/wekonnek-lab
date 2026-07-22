@@ -15,9 +15,13 @@ const PUBLIC_PREFIXES = [
   '/customer/express',
   '/customer/reserve',
   '/customer/search',
+  '/customer/explore',
   '/customer/deals',
   '/customer/map',
   '/customer/cart',
+  // Guests may reach checkout with a locally saved cart. The checkout page's
+  // own auth gate then offers sign-in/registration without losing the cart.
+  '/customer/checkout',
 ];
 
 function isPublicRoute(pathname: string): boolean {
@@ -54,6 +58,9 @@ export default function CustomerLayout({
 
   const isGuest = !user && !getToken();
   const onPublicRoute = isPublicRoute(pathname);
+  const isDashboard = pathname === '/customer/dashboard';
+  const isMarketplaceCategory = pathname.startsWith('/customer/explore/');
+  const usesStandaloneDesktop = isDashboard || isMarketplaceCategory;
 
   if (loading && !onPublicRoute) {
     return (
@@ -75,10 +82,10 @@ export default function CustomerLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <CustomerHeader />
+      <div className={usesStandaloneDesktop ? 'xl:hidden' : ''}><CustomerHeader /></div>
 
       {/* Desktop layout: sidebar + main */}
-      <div className="hidden lg:flex">
+      <div className={usesStandaloneDesktop ? 'hidden' : 'hidden xl:flex'}>
         <CustomerSidebar />
         <main className="flex-1 p-6">
           <PortalBackButton />
@@ -86,8 +93,10 @@ export default function CustomerLayout({
         </main>
       </div>
 
+      {usesStandaloneDesktop && <div className="hidden xl:block">{children}</div>}
+
       {/* Mobile layout: full width content + bottom nav */}
-      <div className="lg:hidden">
+      <div className="xl:hidden">
         <main className="pb-20">
           <div className="px-4 pt-3 empty:hidden">
             <PortalBackButton />

@@ -1,75 +1,79 @@
 'use client';
 
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import { useEffect, useRef } from 'react';
 import L from 'leaflet';
-
-// Fix for default marker icon in Leaflet with Next.js
-if (typeof window !== 'undefined') {
-  delete (L.Icon.Default.prototype as any)._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  });
-}
-
-// Component to handle map clicks
-function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
-  useMapEvents({
-    click: (e) => {
-      onMapClick(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-}
-
-// Component to handle map center updates
-function MapCenterUpdater({ center }: { center: [number, number] }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom());
-  }, [center, map]);
-  return null;
-}
 
 interface LocationMapProps {
   selectedLocation: [number, number] | null;
   defaultCenter: [number, number];
   onMapClick: (lat: number, lng: number) => void;
-  onMarkerDrag: (e: L.DragEndEvent) => void;
+  onMarkerDrag: (event: L.DragEndEvent) => void;
+  selectedZoom?: number;
 }
+
+const pinIcon = L.divIcon({
+  className: '',
+  html: '<span style="display:block;width:26px;height:26px;border:4px solid white;border-radius:50% 50% 50% 0;background:#ff0719;box-shadow:0 4px 12px rgba(15,23,42,.28);transform:rotate(-45deg)"><span style="display:block;width:6px;height:6px;margin:6px;border-radius:9999px;background:white"></span></span>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 26],
+});
 
 export default function LocationMap({
   selectedLocation,
   defaultCenter,
   onMapClick,
   onMarkerDrag,
+  selectedZoom = 15,
 }: LocationMapProps) {
-  return (
-    <MapContainer
-      center={selectedLocation || defaultCenter}
-      zoom={selectedLocation ? 15 : 10}
-      style={{ height: '100%', width: '100%' }}
-      scrollWheelZoom={true}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-      />
-      <MapClickHandler onMapClick={onMapClick} />
-      {selectedLocation && (
-        <>
-          <MapCenterUpdater center={selectedLocation} />
-          <Marker
-            position={selectedLocation}
-            draggable={true}
-            eventHandlers={{
-              dragend: onMarkerDrag,
-            }}
-          />
-        </>
-      )}
-    </MapContainer>
-  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const callbacksRef = useRef({ onMapClick, onMarkerDrag });
+  const initialRef = useRef({ selectedLocation, defaultCenter, selectedZoom });
+
+  useEffect(() => {
+    callbacksRef.current = { onMapClick, onMarkerDrag };
+  }, [onMapClick, onMarkerDrag]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || mapRef.current) return;
+
+    const initial = initialRef.current;
+    const map = L.map(container, {
+      center: initial.selectedLocation ?? initial.defaultCenter,
+      zoom: initial.selectedLocation ? initial.selectedZoom : 10,
+      scrollWheelZoom: true,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 20,
+    }).addTo(map);
+    map.on('click', event => callbacksRef.current.onMapClick(event.latlng.lat, event.latlng.lng));
+    mapRef.current = map;
+
+    const resizeTimer = window.setTimeout(() => map.invalidateSize(), 0);
+    return () => {
+      window.clearTimeout(resizeTimer);
+      markerRef.current = null;
+      mapRef.current = null;
+      map.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !selectedLocation) return;
+
+    if (!markerRef.current) {
+      const marker = L.marker(selectedLocation, { draggable: true, icon: pinIcon }).addTo(map);
+      marker.on('dragend', event => callbacksRef.current.onMarkerDrag(event as L.DragEndEvent));
+      markerRef.current = marker;
+    } else {
+      markerRef.current.setLatLng(selectedLocation);
+    }
+    map.setView(selectedLocation, selectedZoom, { animate: true });
+  }, [selectedLocation, selectedZoom]);
+
+  return <div ref={containerRef} className="h-full w-full" aria-label="Select coverage location on map" />;
 }

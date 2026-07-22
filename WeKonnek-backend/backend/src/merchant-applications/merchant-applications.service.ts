@@ -2,9 +2,11 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeExpiry } from '../subscriptions/subscription-plans';
+import { randomBytes } from 'crypto';
 
 function serializeApplication(a: any) {
   if (!a) return a;
@@ -14,9 +16,22 @@ function serializeApplication(a: any) {
     userId: a.userId,
     business_name: a.businessName,
     businessName: a.businessName,
+    merchant_code: a.merchantCode,
+    merchantCode: a.merchantCode,
     email: a.email,
     phone: a.phone,
     address: a.address,
+    contact_name: a.contactName,
+    category_name: a.categoryName,
+    city_municipality: a.cityMunicipality,
+    barangay: a.barangay,
+    latitude: a.latitude,
+    longitude: a.longitude,
+    business_description: a.businessDescription,
+    source: a.source,
+    assigned_coordinator_id: a.assignedCoordinatorId,
+    assignment_status: a.assignedCoordinatorId ? 'assigned' : 'unassigned',
+    assigned_at: a.assignedAt,
     subscription_tier: a.subscriptionTier,
     subscriptionTier: a.subscriptionTier,
     subscription_plan: a.subscriptionPlan,
@@ -67,6 +82,14 @@ export class MerchantApplicationsService {
         email: input.email,
         phone: input.phone ?? null,
         address: input.address ?? null,
+        contactName: input.contact_name ?? input.contactName ?? null,
+        categoryName: input.category_name ?? input.categoryName ?? null,
+        cityMunicipality: input.city_municipality ?? input.cityMunicipality ?? null,
+        barangay: input.barangay ?? null,
+        latitude: input.latitude !== undefined && input.latitude !== '' ? Number(input.latitude) : null,
+        longitude: input.longitude !== undefined && input.longitude !== '' ? Number(input.longitude) : null,
+        businessDescription: input.business_description ?? input.businessDescription ?? null,
+        source: input.source ?? 'merchant_application',
         subscriptionTier: input.subscription_tier ?? input.subscriptionTier ?? 'basic',
         subscriptionPlan: input.subscription_plan ?? input.subscriptionPlan ?? 'weekly',
         subscriptionAmount: Number(
@@ -105,6 +128,44 @@ export class MerchantApplicationsService {
     return serializeApplication(a);
   }
 
+  async findCoordinatorLeads(user: { id: string; email?: string | null; role?: string }) {
+    const isAdmin = user.role === 'admin';
+    const coordinator = isAdmin ? null : await this.prisma.coordinatorApplication.findFirst({
+      where: { email: { equals: user.email ?? '', mode: 'insensitive' }, status: 'approved' },
+      include: { managementZone: { include: { coverages: true } } },
+      orderBy: { submittedAt: 'desc' },
+    });
+    if (!isAdmin && (!coordinator || !coordinator.managementZone)) throw new ForbiddenException('No coordinator zone is assigned to this account');
+    const coverageRules = coordinator?.managementZone?.coverages.map(item => {
+      const areas = Array.isArray(item.areas)
+        ? item.areas.flatMap(area => area && typeof area === 'object' && 'name' in area ? [String(area.name)] : [])
+        : [];
+      return {
+        cityMunicipality: { equals: item.cityMunicipalityName, mode: 'insensitive' as const },
+        ...(areas.length ? { barangay: { in: areas, mode: 'insensitive' as const } } : {}),
+      };
+    }) ?? [];
+    if (!isAdmin && coverageRules.length === 0) throw new ForbiddenException('Your coordinator zone has no city or municipality coverage');
+    const applications = await this.prisma.merchantApplication.findMany({
+      where: {
+        source: 'website_callback',
+        ...(coordinator ? { OR: coverageRules } : {}),
+        AND: [{ OR: [{ assignedCoordinatorId: null }, { assignedCoordinatorId: user.id }] }],
+      },
+      orderBy: { submittedAt: 'desc' },
+    });
+    return applications.map(serializeApplication);
+  }
+
+  async claimLead(id: number, user: { id: string; email?: string | null; role?: string }) {
+    const leads = await this.findCoordinatorLeads(user);
+    const lead = leads.find(item => item.id === id);
+    if (!lead) throw new ForbiddenException('This merchant is outside your approved coverage area');
+    if (lead.assigned_coordinator_id && lead.assigned_coordinator_id !== user.id) throw new BadRequestException('Merchant is already assigned');
+    const updated = await this.prisma.merchantApplication.update({ where: { id }, data: { assignedCoordinatorId: user.id, assignedAt: new Date() } });
+    return serializeApplication(updated);
+  }
+
   async updateStatus(
     id: number,
     status: string,
@@ -115,6 +176,9 @@ export class MerchantApplicationsService {
     });
     if (!application) throw new NotFoundException('Application not found');
 
+    const merchantCode = status === 'approved'
+      ? application.merchantCode ?? await this.generateMerchantCode()
+      : application.merchantCode;
     const updated = await this.prisma.merchantApplication.update({
       where: { id: Number(id) },
       data: {
@@ -122,12 +186,13 @@ export class MerchantApplicationsService {
         reviewedBy: opts.reviewerId ?? null,
         reviewedAt: new Date(),
         rejectionReason: status === 'rejected' ? opts.rejectionReason ?? null : null,
+        merchantCode,
       },
     });
 
     // On approval, create the live Merchant record + promote the owner.
     if (status === 'approved') {
-      await this.provisionMerchant(application);
+      await this.provisionMerchant({ ...application, merchantCode });
     }
 
     return serializeApplication(updated);
@@ -139,7 +204,14 @@ export class MerchantApplicationsService {
       const existing = await this.prisma.merchant.findFirst({
         where: { userId: application.userId },
       });
-      if (existing) return existing;
+      if (existing) {
+        return existing.merchantCode
+          ? existing
+          : this.prisma.merchant.update({
+              where: { id: existing.id },
+              data: { merchantCode: application.merchantCode },
+            });
+      }
     }
 
     let baseSlug = slugify(application.businessName) || `merchant-${application.id}`;
@@ -158,6 +230,7 @@ export class MerchantApplicationsService {
 
     const merchant = await this.prisma.merchant.create({
       data: {
+        merchantCode: application.merchantCode,
         userId: application.userId ?? null,
         name: application.businessName,
         slug,
@@ -207,5 +280,17 @@ export class MerchantApplicationsService {
     }
 
     return merchant;
+  }
+
+  private async generateMerchantCode(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const code = `WKM-${randomBytes(4).toString('hex').toUpperCase()}`;
+      const [merchant, application] = await Promise.all([
+        this.prisma.merchant.findUnique({ where: { merchantCode: code } }),
+        this.prisma.merchantApplication.findUnique({ where: { merchantCode: code } }),
+      ]);
+      if (!merchant && !application) return code;
+    }
+    throw new BadRequestException('Unable to generate a unique merchant code. Please try again.');
   }
 }

@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { useUserLocation } from '@/hooks/use-geolocation';
 import { distanceToMerchant, formatDistance, estimateEta } from '@/lib/geo';
 import Link from 'next/link';
-import Image from 'next/image';
 import { merchantsApi, Merchant } from '@/lib/api';
 import ServicesGrid from '@/components/ServicesGrid';
+import CustomerDesktopHome from '@/components/CustomerDesktopHome';
 
 const trustBadges = [
   {
@@ -44,7 +43,6 @@ const trustBadges = [
 ];
 
 export default function CustomerDashboardPage() {
-  const router = useRouter();
   const { user: authUser, loading } = useAuth();
   const { coords } = useUserLocation();
   const [featuredMerchants, setFeaturedMerchants] = useState<Merchant[]>([]);
@@ -98,7 +96,7 @@ export default function CustomerDashboardPage() {
   return (
     <>
       {/* ========== MOBILE DASHBOARD ========== */}
-      <div className="lg:hidden bg-white min-h-screen pb-20">
+      <div className="xl:hidden bg-white min-h-screen pb-20">
 
         {/* Tagline */}
         <div className="px-4 pt-2 pb-3">
@@ -427,7 +425,8 @@ export default function CustomerDashboardPage() {
       </div>
 
       {/* ========== DESKTOP DASHBOARD ========== */}
-      <div className="hidden lg:block space-y-6">
+      <CustomerDesktopHome />
+      <div className="hidden">
         {authUser ? (
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back, {authUser.firstName || 'User'}!</h1>

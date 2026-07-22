@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { merchantsApi, Merchant } from '@/lib/api';
+import type L from 'leaflet';
 
 import 'leaflet/dist/leaflet.css';
 
@@ -11,20 +12,55 @@ const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.Map
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
 const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
+const Circle = dynamic(() => import('react-leaflet').then((mod) => mod.Circle), { ssr: false });
+
+const SEARCH_RADIUS_KM = 5;
+const PARANAQUE_CENTER: [number, number] = [14.4793, 121.0198];
+const distanceInKm = (from: [number, number], to: [number, number]) => {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latDistance = radians(to[0] - from[0]);
+  const lngDistance = radians(to[1] - from[1]);
+  const a = Math.sin(latDistance / 2) ** 2
+    + Math.cos(radians(from[0])) * Math.cos(radians(to[0])) * Math.sin(lngDistance / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 export default function CustomerMapPage() {
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([14.5995, 120.9842]);
+  const [mapCenter, setMapCenter] = useState<[number, number]>(PARANAQUE_CENTER);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'locating' | 'found' | 'unavailable'>('locating');
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
-  const leafletRef = useRef<any>(null);
+  const leafletRef = useRef<typeof L | null>(null);
+
+  const locateUser = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocationStatus('unavailable');
+      return;
+    }
+    setLocationStatus('locating');
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        const location: [number, number] = [position.coords.latitude, position.coords.longitude];
+        setUserLocation(location);
+        setMapCenter(location);
+        setLocationStatus('found');
+      },
+      () => {
+        setUserLocation(null);
+        setMapCenter(PARANAQUE_CENTER);
+        setLocationStatus('unavailable');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       import('leaflet').then((L) => {
-        delete (L.default.Icon.Default.prototype as any)._getIconUrl;
+        delete (L.default.Icon.Default.prototype as L.Icon.Default & { _getIconUrl?: unknown })._getIconUrl;
         L.default.Icon.Default.mergeOptions({
           iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
           iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
@@ -79,9 +115,6 @@ export default function CustomerMapPage() {
           (m) => m.latitude && m.longitude && !isNaN(Number(m.latitude)) && !isNaN(Number(m.longitude))
         );
         setMerchants(merchantsWithLocation);
-        if (merchantsWithLocation.length > 0) {
-          setMapCenter([Number(merchantsWithLocation[0].latitude), Number(merchantsWithLocation[0].longitude)]);
-        }
       } catch (error) {
         console.error('Failed to fetch merchants:', error);
         setMerchants([]);
@@ -92,23 +125,23 @@ export default function CustomerMapPage() {
 
     fetchMerchants();
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setMapCenter([position.coords.latitude, position.coords.longitude]);
-        },
-        () => console.log('Using default location')
-      );
-    }
   }, []);
 
+  useEffect(() => {
+    const request = window.setTimeout(locateUser, 0);
+    return () => window.clearTimeout(request);
+  }, [locateUser]);
+
+  const nearbyMerchants = userLocation
+    ? merchants.filter(merchant => distanceInKm(userLocation, [Number(merchant.latitude), Number(merchant.longitude)]) <= SEARCH_RADIUS_KM)
+    : merchants;
   const filteredMerchants = searchQuery.trim()
-    ? merchants.filter((m) =>
+    ? nearbyMerchants.filter((m) =>
         m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.category?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.city?.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : merchants;
+    : nearbyMerchants;
 
   return (
     <div className="relative">
@@ -129,6 +162,9 @@ export default function CustomerMapPage() {
             />
           </div>
         </div>
+        <button type="button" onClick={locateUser} disabled={locationStatus === 'locating'} className="absolute right-3 top-16 z-[1000] flex min-h-10 items-center gap-2 rounded-full bg-white px-4 text-xs font-bold text-[#075cff] shadow-lg disabled:opacity-60">
+          <span aria-hidden="true">⌖</span>{locationStatus === 'locating' ? 'Finding you…' : 'Use my location'}
+        </button>
 
         {/* Map */}
         <div style={{ height: 'calc(100vh - 180px)' }}>
@@ -140,11 +176,12 @@ export default function CustomerMapPage() {
               </div>
             </div>
           ) : (
-            <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%', zIndex: 0 }} scrollWheelZoom={true}>
+            <MapContainer key={`mobile-${mapCenter.join('-')}`} center={mapCenter} zoom={userLocation ? 13 : 14} style={{ height: '100%', width: '100%', zIndex: 0 }} scrollWheelZoom={true}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
+              {userLocation && <><Circle center={userLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={userLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>Your location</b><br />Showing merchants within 5 km.</Popup></Marker></>}
               {filteredMerchants.map((merchant) => {
                 if (!merchant.latitude || !merchant.longitude) return null;
                 const lat = Number(merchant.latitude);
@@ -221,21 +258,25 @@ export default function CustomerMapPage() {
       <div className="hidden lg:block">
         <div className="mb-4">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Explore Map</h1>
-          <p className="text-gray-600">Find nearby merchants and services around you</p>
+          <p className="text-gray-600">{locationStatus === 'found' ? 'Showing merchants within 5 km of your current location' : locationStatus === 'locating' ? 'Finding your current location…' : 'Location access is unavailable. Showing Parañaque while you enable browser location.'}</p>
         </div>
 
         <div className="relative rounded-xl overflow-hidden shadow-md" style={{ height: '600px' }}>
+          <button type="button" onClick={locateUser} disabled={locationStatus === 'locating'} className="absolute right-4 top-4 z-[1000] flex min-h-11 items-center gap-2 rounded-full bg-white px-5 text-sm font-bold text-[#075cff] shadow-lg disabled:opacity-60">
+            <span aria-hidden="true">⌖</span>{locationStatus === 'locating' ? 'Finding your location…' : 'Use my location'}
+          </button>
           {loading || !leafletLoaded ? (
             <div className="flex items-center justify-center h-full bg-gray-100">
               <p className="text-gray-500">Loading map...</p>
             </div>
           ) : (
-            <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%', zIndex: 0 }} scrollWheelZoom={true}>
+            <MapContainer key={`desktop-${mapCenter.join('-')}`} center={mapCenter} zoom={14} style={{ height: '100%', width: '100%', zIndex: 0 }} scrollWheelZoom={true}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
-              {merchants.map((merchant) => {
+              {userLocation && <><Circle center={userLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={userLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>Your location</b><br />Showing merchants within 5 km.</Popup></Marker></>}
+              {filteredMerchants.map((merchant) => {
                 if (!merchant.latitude || !merchant.longitude) return null;
                 const lat = Number(merchant.latitude);
                 const lng = Number(merchant.longitude);

@@ -6,6 +6,7 @@ import { SmsService } from './sms.service';
 import { UserRole } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
@@ -15,6 +16,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly smsService: SmsService,
+    private readonly prisma: PrismaService,
   ) {
     // Connect to Redis for OTP storage (scalable, persistent across restarts)
     this.redis = new Redis({
@@ -178,7 +180,7 @@ export class AuthService {
   }
 
   /** Accepts an email or phone identifier + password. */
-  async loginWithPassword(identifier: string, password: string) {
+  async loginWithPassword(identifier: string, password: string, merchantCode?: string) {
     const id = identifier?.trim();
     if (!id || !password) {
       throw new UnauthorizedException('Invalid credentials');
@@ -201,6 +203,19 @@ export class AuthService {
       throw new UnauthorizedException(
         'Your account has been suspended. Please contact support.',
       );
+    }
+
+    if (user.role === UserRole.merchant) {
+      const code = merchantCode?.trim().toUpperCase();
+      if (!code) {
+        throw new UnauthorizedException('Merchant code is required');
+      }
+      const merchant = await this.prisma.merchant.findFirst({
+        where: { userId: user.id, merchantCode: code, isActive: true },
+      });
+      if (!merchant) {
+        throw new UnauthorizedException('Invalid merchant code');
+      }
     }
 
     const tokens = this.generateTokens(user.id, user.role);

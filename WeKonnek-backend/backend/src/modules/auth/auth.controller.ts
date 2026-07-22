@@ -56,10 +56,10 @@ export class AuthController {
   @Post('login')
   login(
     @Body()
-    body: { email?: string; phone?: string; identifier?: string; password: string },
+    body: { email?: string; phone?: string; identifier?: string; password: string; merchantCode?: string; merchant_code?: string },
   ) {
     const identifier = body.email ?? body.phone ?? body.identifier ?? '';
-    return this.authService.loginWithPassword(identifier, body.password);
+    return this.authService.loginWithPassword(identifier, body.password, body.merchantCode ?? body.merchant_code);
   }
 
   @Post('refresh')

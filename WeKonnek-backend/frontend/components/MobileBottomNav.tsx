@@ -25,8 +25,8 @@ export default function MobileBottomNav() {
     : `/auth/login?redirect=${encodeURIComponent('/customer/orders')}`;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 lg:hidden safe-area-bottom no-select">
-      <div className="flex items-center justify-around h-16 px-2 max-w-lg mx-auto">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 xl:hidden safe-area-bottom no-select shadow-[0_-8px_24px_rgba(15,23,42,0.08)]">
+      <div className="flex items-center justify-around h-16 px-2 max-w-3xl mx-auto">
         {/* Home */}
         <Link
           href="/customer/dashboard"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/hooks/use-auth';
 import AdminSidebar from '@/components/AdminSidebar';
 import AdminHeader from '@/components/AdminHeader';
@@ -11,7 +12,15 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, refreshAuth } = useRequireAuth(['admin', 'staff']);
+  const pathname = usePathname();
+
+  if (pathname === '/admin/login') return children;
+
+  return <ProtectedAdminLayout>{children}</ProtectedAdminLayout>;
+}
+
+function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading, refreshAuth } = useRequireAuth(['admin', 'staff'], '/admin/login');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {

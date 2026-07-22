@@ -13,7 +13,8 @@ const DEMO_USERS = [
   { email: 'admin@wekonnek.com', phone: '+639170000001', firstName: 'Admin', lastName: 'User', role: 'admin', password: 'admin123' },
   { email: 'merchant@wekonnek.com', phone: '+639170000002', firstName: 'Merchant', lastName: 'Demo', role: 'merchant', password: 'merchant123' },
   { email: 'customer@wekonnek.com', phone: '+639170000003', firstName: 'Juan', lastName: 'Dela Cruz', role: 'customer', password: 'customer123' },
-  { email: 'staff@wekonnek.com', phone: '+639170000004', firstName: 'Staff', lastName: 'Member', role: 'staff', password: 'staff123' },
+  { email: 'staff@wekonnek.com', phone: '+639170000006', firstName: 'Staff', lastName: 'Member', role: 'staff', password: 'staff123' },
+  { email: 'coordinator@wekonnek.com', phone: '+639170000005', firstName: 'Zone', lastName: 'Coordinator', role: 'staff', password: 'coordinator123' },
 ];
 
 async function main() {
@@ -27,7 +28,10 @@ async function main() {
 
     if (existing.rows.length > 0) {
       // Update password
-      await pool.query('UPDATE users SET password = $1, is_verified = true WHERE email = $2', [hash, u.email]);
+      await pool.query(
+        'UPDATE users SET password = $1, role = $2, is_verified = true, is_active = true WHERE email = $3',
+        [hash, u.role, u.email],
+      );
       console.log(`  Updated: ${u.email} (${u.role}) → password: ${u.password}`);
     } else {
       // Insert new user
@@ -45,6 +49,7 @@ async function main() {
   console.log('  Merchant: merchant@wekonnek.com / merchant123');
   console.log('  Customer: customer@wekonnek.com / customer123');
   console.log('  Staff:    staff@wekonnek.com    / staff123');
+  console.log('  Coordinator: coordinator@wekonnek.com / coordinator123');
 
   await pool.end();
 }

@@ -34,6 +34,18 @@ export class MerchantApplicationsController {
     return this.applicationsService.findAll(status);
   }
 
+  @Get('coordinator/leads')
+  @UseGuards(JwtAuthGuard)
+  coordinatorLeads(@Req() req: any) {
+    return this.applicationsService.findCoordinatorLeads(req.user);
+  }
+
+  @Patch(':id/claim')
+  @UseGuards(JwtAuthGuard)
+  claim(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.applicationsService.claimLead(id, req.user);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a single application' })
   findOne(@Param('id', ParseIntPipe) id: number) {

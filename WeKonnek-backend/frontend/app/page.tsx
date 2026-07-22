@@ -7,7 +7,6 @@ import {
 	HeartPulse,
 	Pill,
 	ShoppingBag,
-	Smartphone,
 	Store,
 	Truck,
 	UserRound,
@@ -91,35 +90,33 @@ export default function HomePage() {
 
 function Header() {
 	return (
-		<header className="relative z-30 flex h-20 w-full items-center justify-between px-4 sm:px-6 lg:h-24 lg:px-8 xl:h-28 2xl:px-12">
-			<Link href="/" className="flex items-center">
+		<header className="relative z-30 flex h-[100px] w-full items-center justify-between bg-white px-4 sm:px-6 lg:px-8">
+			<Link href="/" className="flex shrink-0 items-center" aria-label="WeKonnek home">
 				<Image
 					src="/images/weKonnekLogov1.png"
-					alt="WeKonnekLogo"
+					alt="WeKonnek"
 					width={1536}
 					height={1024}
 					priority
-					className="h-16 w-auto object-contain sm:h-20 lg:h-24 xl:h-28"
+					className="h-20 w-auto object-contain lg:h-24"
 				/>
 			</Link>
 
-			<nav className="hidden items-center gap-6 text-[15px] font-semibold text-[#06113F] xl:flex xl:gap-10 2xl:gap-[54px]">
+			<nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-[38px] whitespace-nowrap text-sm font-semibold text-[#06113F] xl:flex">
 				<Link
 					href="/"
-					className="relative font-black text-[#0056FF] after:absolute after:-bottom-3 after:left-1/2 after:h-[3px] after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-[#0056FF]">
+					className="relative font-black text-[#0056FF] after:absolute after:-bottom-[15px] after:left-1/2 after:h-[3px] after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-[#0056FF]">
 					Home
 				</Link>
-				<a href="#about">About WeKo</a>
-				<a href="#services">Services</a>
-				<Link href="/auth/login?redirect=/merchant/dashboard">For Merchants</Link>
-				<a href="#communities">For Communities</a>
-				<a href="#contact">Contact</a>
+				<Link href="/for-merchants">For Merchants</Link>
+				<Link href="/coordinators">For Coordinators</Link>
+				<Link href="/contact">Contact</Link>
 			</nav>
 
 			<Link
-				href="/auth/login"
-				className="inline-flex rounded-xl bg-[#0056FF] px-4 py-3 text-xs font-black text-white shadow-[0_12px_24px_rgba(0,86,255,0.24)] sm:px-6 sm:text-sm lg:px-7 lg:py-3.5 lg:text-[15px]">
-				Login
+				href="/customer/dashboard"
+				className="inline-flex h-[46px] items-center justify-center whitespace-nowrap rounded-xl bg-[#0056FF] px-6 text-sm font-black text-white shadow-[0_12px_24px_rgba(0,86,255,0.24)] sm:min-w-[201px]">
+				Open WeKonnek App
 			</Link>
 		</header>
 	);
@@ -155,31 +152,6 @@ function Hero() {
 							ecosystem.
 						</p>
 
-						<div className="mx-auto mt-6 grid w-full max-w-md grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:gap-4 xl:mx-0 xl:mt-8">
-							<Link
-								href="/customer/dashboard"
-								className="flex min-h-[64px] items-center justify-center gap-3 rounded-xl bg-blue-600 px-5 py-4 font-bold text-white shadow-lg hover:bg-blue-700">
-								<Smartphone size={20} />
-								<span>Open WeKonnek App</span>
-							</Link>
-
-							<Link
-								href="/auth/login?redirect=/merchant/dashboard"
-								className="flex min-h-[64px] items-center justify-center gap-3 rounded-xl bg-white px-5 py-4 font-bold text-blue-600 shadow-md hover:bg-blue-50">
-								<Store size={22} />
-								<span>Become a Merchant</span>
-							</Link>
-						</div>
-
-						<Link
-							href="/admin/dashboard"
-							className="mx-auto mt-3 flex min-h-[58px] w-full max-w-md items-center justify-between rounded-xl bg-white px-6 py-4 font-bold text-blue-600 shadow-md hover:bg-blue-50 md:mt-4 xl:mx-0">
-							<span className="flex items-center gap-3">
-								<Users size={24} />
-								Coordinator Portal
-							</span>
-							<ArrowRight size={22} />
-						</Link>
 					</div>
 
 					{/* Mascot + Phone */}
@@ -223,14 +195,16 @@ function Hero() {
 							</div>
 
 							<div className="mx-auto hidden w-full rounded-xl bg-white p-3 min-[430px]:block min-[430px]:max-w-[180px] sm:w-[150px] xl:mt-6 xl:w-auto xl:max-w-none xl:p-4">
-								<Image
-									src="/images/wekonnek-qr.png"
-									alt="WeKonnek QR Code"
-									width={250}
-									height={250}
-									sizes="(max-width: 640px) 180px, (max-width: 1280px) 150px, 250px"
-									className="mx-auto h-auto w-full"
-								/>
+								<Link href="/customer/dashboard" aria-label="Open the WeKonnek customer app">
+									<Image
+										src="/images/wekonnek-qr.png"
+										alt="QR code for the WeKonnek customer app"
+										width={250}
+										height={250}
+										sizes="(max-width: 640px) 180px, (max-width: 1280px) 150px, 250px"
+										className="mx-auto h-auto w-full"
+									/>
+								</Link>
 							</div>
 
 							<AddToHomeScreenButton className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/70 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 min-[430px]:hidden sm:hidden" />
