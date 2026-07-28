@@ -32,6 +32,14 @@ interface PlanDefinitionInput {
   is_active?: boolean;
 }
 
+interface AddOnPackageInput {
+  audience?: string;
+  name?: string;
+  amount?: number | string;
+  billing_unit?: string;
+  description?: string;
+}
+
 const ONLINE_GATEWAYS = new Set(['gcash', 'maya', 'card', 'xendit', 'paymongo', 'grab_pay']);
 
 function serializePayment(p: any) {
@@ -128,6 +136,32 @@ export class SubscriptionsService {
         productLimit: audience === 'merchant' ? productLimit : null,
         minimumOrders: audience === 'rider' ? minimumOrders : null,
         includesInHouseRiders: audience === 'coordinator' ? tier !== 'silver' : null,
+      },
+    });
+  }
+
+  async getAddOnPackages() {
+    return this.prisma.subscriptionAddOnPackage.findMany({
+      orderBy: [{ audience: 'asc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async createAddOnPackage(input: AddOnPackageInput) {
+    const audience = String(input.audience || '').trim().toLowerCase();
+    const name = String(input.name || '').trim();
+    const amount = Number(input.amount);
+    const billingUnit = String(input.billing_unit || '').trim().toLowerCase();
+    if (!['merchant', 'rider', 'coordinator'].includes(audience)) throw new BadRequestException('Invalid add-on audience');
+    if (!name) throw new BadRequestException('Add-on name is required');
+    if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('Enter a valid add-on amount');
+    if (!['day', 'week', 'month'].includes(billingUnit)) throw new BadRequestException('Billing period must be day, week, or month');
+    return this.prisma.subscriptionAddOnPackage.create({
+      data: {
+        audience,
+        name,
+        amount,
+        billingUnit,
+        description: String(input.description || '').trim() || null,
       },
     });
   }

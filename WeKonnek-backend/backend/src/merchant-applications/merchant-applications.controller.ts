@@ -49,6 +49,31 @@ export class MerchantApplicationsController {
     return this.applicationsService.findCoordinatorLeads(req.user);
   }
 
+  @Get('coordinator/leads/:id')
+  @UseGuards(JwtAuthGuard)
+  coordinatorLead(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.applicationsService.findAssignedCoordinatorLead(id, req.user);
+  }
+
+  @Patch('coordinator/leads/:id/review')
+  @UseGuards(JwtAuthGuard)
+  updateCoordinatorReview(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      coordinator_notes?: string | null;
+      payment_proof_url?: string | null;
+      business_permit_url?: string | null;
+      dti_permit_url?: string | null;
+      valid_id_url?: string | null;
+      establishment_photo_url?: string | null;
+      authorized_person_photo_url?: string | null;
+      business_documents_urls?: string[];
+    },
+  ) {
+    return this.applicationsService.updateCoordinatorReview(id, req.user, body);
+  }
+
   @Patch(':id/claim')
   @UseGuards(JwtAuthGuard)
   claim(@Req() req: any, @Param('id', ParseIntPipe) id: number) {

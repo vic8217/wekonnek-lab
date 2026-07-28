@@ -54,6 +54,7 @@ function serializeApplication(a: any) {
     status: a.status,
     reviewed_by: a.reviewedBy,
     reviewed_at: a.reviewedAt,
+    coordinator_notes: a.coordinatorNotes,
     rejection_reason: a.rejectionReason,
     submitted_at: a.submittedAt,
     submittedAt: a.submittedAt,
@@ -246,6 +247,60 @@ export class MerchantApplicationsService {
       });
     });
     return visible.map(serializeApplication);
+  }
+
+  async findAssignedCoordinatorLead(id: number, user: { id: string }) {
+    const application = await this.prisma.merchantApplication.findFirst({
+      where: {
+        id,
+        assignedCoordinatorId: user.id,
+        status: { in: ['pending', 'reviewing'] },
+      },
+    });
+    if (!application) throw new ForbiddenException('This application is not assigned to your coordinator account');
+    return serializeApplication(application);
+  }
+
+  async updateCoordinatorReview(
+    id: number,
+    user: { id: string },
+    input: {
+      coordinator_notes?: string | null;
+      payment_proof_url?: string | null;
+      business_permit_url?: string | null;
+      dti_permit_url?: string | null;
+      valid_id_url?: string | null;
+      establishment_photo_url?: string | null;
+      authorized_person_photo_url?: string | null;
+      business_documents_urls?: string[];
+    },
+  ) {
+    const application = await this.prisma.merchantApplication.findFirst({
+      where: { id, assignedCoordinatorId: user.id, status: { in: ['pending', 'reviewing'] } },
+    });
+    if (!application) throw new ForbiddenException('This application is not assigned to your coordinator account');
+
+    const missingDocumentUpdates = {
+      paymentProofUrl: application.paymentProofUrl ? undefined : input.payment_proof_url || undefined,
+      businessPermitUrl: application.businessPermitUrl ? undefined : input.business_permit_url || undefined,
+      dtiPermitUrl: application.dtiPermitUrl ? undefined : input.dti_permit_url || undefined,
+      validIdUrl: application.validIdUrl ? undefined : input.valid_id_url || undefined,
+      establishmentPhotoUrl: application.establishmentPhotoUrl ? undefined : input.establishment_photo_url || undefined,
+      authorizedPersonPhotoUrl: application.authorizedPersonPhotoUrl ? undefined : input.authorized_person_photo_url || undefined,
+    };
+    const additionalDocuments = (input.business_documents_urls || []).filter(Boolean);
+    const updated = await this.prisma.merchantApplication.update({
+      where: { id },
+      data: {
+        ...missingDocumentUpdates,
+        coordinatorNotes: input.coordinator_notes?.trim() || null,
+        businessDocumentsUrls: additionalDocuments.length
+          ? [...application.businessDocumentsUrls, ...additionalDocuments]
+          : undefined,
+        status: application.status === 'pending' ? 'reviewing' : application.status,
+      },
+    });
+    return serializeApplication(updated);
   }
 
   async eligibleCoordinators(id: number) {

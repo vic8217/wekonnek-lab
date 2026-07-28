@@ -53,6 +53,24 @@ export class SubscriptionsController {
     return this.subscriptionsService.updatePlanDefinition(id, body);
   }
 
+  @Get('add-ons')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: list subscription add-on packages' })
+  getAddOns(@Req() req: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.getAddOnPackages();
+  }
+
+  @Post('add-ons')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: create a subscription add-on package' })
+  createAddOn(@Req() req: any, @Body() body: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.createAddOnPackage(body);
+  }
+
   @Post('upgrade')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

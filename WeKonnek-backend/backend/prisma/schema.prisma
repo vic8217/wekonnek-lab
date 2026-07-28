@@ -159,6 +159,7 @@ model MerchantApplication {
   status                  String    @default("pending") @db.VarChar(50)
   reviewedBy              String?   @map("reviewed_by") @db.Uuid
   reviewedAt              DateTime? @map("reviewed_at") @db.Timestamptz
+  coordinatorNotes        String?   @map("coordinator_notes") @db.Text
   rejectionReason         String?   @map("rejection_reason") @db.Text
   submittedAt             DateTime  @default(now()) @map("submitted_at") @db.Timestamptz
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
@@ -256,6 +257,22 @@ model SubscriptionPlanDefinition {
   @@unique([audience, tier])
   @@index([audience, isActive])
   @@map("subscription_plan_definitions")
+}
+
+model SubscriptionAddOnPackage {
+  id          String   @id @default(uuid()) @db.Uuid
+  audience    String   @default("merchant") @db.VarChar(30)
+  name        String   @db.VarChar(100)
+  amount      Decimal  @db.Decimal(10, 2)
+  billingUnit String   @map("billing_unit") @db.VarChar(20)
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([audience, name])
+  @@index([audience, isActive])
+  @@map("subscription_add_on_packages")
 }
 
 model Product {

@@ -10,7 +10,9 @@ type Workspace = 'plans' | 'payments';
 
 async function readJsonResponse(response: Response) {
   const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('application/json') ? response.json() : null;
+  if (contentType.includes('application/json')) return response.json();
+  const text = await response.text();
+  return text ? { message: text } : null;
 }
 
 interface PlanDefinition {
@@ -22,6 +24,16 @@ interface PlanDefinition {
   productLimit?: number | null;
   minimumOrders?: number | null;
   includesInHouseRiders?: boolean | null;
+  isActive: boolean;
+}
+
+interface AddOnPackage {
+  id: string;
+  audience: Audience;
+  name: string;
+  amount: number | string;
+  billingUnit: 'day' | 'week' | 'month';
+  description?: string | null;
   isActive: boolean;
 }
 
@@ -57,6 +69,9 @@ export default function AdminSubscriptionsPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [editingPlan, setEditingPlan] = useState<PlanDefinition | null>(null);
   const [updatingPlan, setUpdatingPlan] = useState(false);
+  const [addOns, setAddOns] = useState<AddOnPackage[]>([]);
+  const [showAddOnForm, setShowAddOnForm] = useState(false);
+  const [creatingAddOn, setCreatingAddOn] = useState(false);
 
   const headers = () => ({ Authorization: `Bearer ${getToken()}` });
 
@@ -67,6 +82,10 @@ export default function AdminSubscriptionsPage() {
       const body = await readJsonResponse(response);
       if (!response.ok) throw new Error(body?.message || 'Subscription service is unavailable. Start or restart the backend server.');
       setPlans(Array.isArray(body) ? body : []);
+      const addOnResponse = await fetch(`${API}/add-ons`, { headers: headers() });
+      const addOnBody = await readJsonResponse(addOnResponse);
+      if (!addOnResponse.ok) throw new Error(addOnBody?.message || 'Unable to load add-on packages');
+      setAddOns(Array.isArray(addOnBody) ? addOnBody : []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to load subscription tiers');
     } finally {
@@ -160,7 +179,31 @@ export default function AdminSubscriptionsPage() {
     }
   };
 
+  const createAddOn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form).entries());
+    setCreatingAddOn(true);
+    try {
+      const response = await fetch(`${API}/add-ons`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...values, audience }),
+      });
+      const body = await readJsonResponse(response);
+      if (!response.ok) throw new Error(body?.message || `Unable to create add-on (HTTP ${response.status})`);
+      toast.success(`${String(values.name)} add-on created.`);
+      setShowAddOnForm(false);
+      await fetchPlans();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to create add-on');
+    } finally {
+      setCreatingAddOn(false);
+    }
+  };
+
   const visiblePlans = plans.filter(plan => plan.audience === audience);
+  const visibleAddOns = addOns.filter(addOn => addOn.audience === audience);
 
   return (
     <div className="space-y-6">
@@ -223,12 +266,15 @@ export default function AdminSubscriptionsPage() {
             </form>
 
             <div>
-              <h2 className="mb-3 text-lg font-bold text-gray-900">Configured {audienceLabels[audience]} Tiers</h2>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold text-gray-900">Configured {audienceLabels[audience]} Tiers</h2><button type="button" onClick={() => setShowAddOnForm(true)} className="rounded-xl bg-[#DB0002] px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700">+ Create add-on package</button></div>
               {plansLoading ? <div className="rounded-2xl border border-gray-200 bg-white p-12 text-center text-gray-500">Loading tiers…</div> : visiblePlans.length === 0 ? <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-12 text-center text-gray-500">No {audience} tiers configured yet.</div> : (
                 <div className="grid gap-4 md:grid-cols-2">
                   {visiblePlans.map(plan => <PlanCard key={plan.id} plan={plan} onEdit={() => setEditingPlan(plan)} />)}
                 </div>
               )}
+              <div className="mt-8"><div className="mb-3 flex items-center gap-2"><h2 className="text-lg font-bold text-gray-900">{audienceLabels[audience]} Add-on Packages</h2><span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-600">{visibleAddOns.length}</span></div>
+                {visibleAddOns.length === 0 ? <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">No add-on packages configured yet.</div> : <div className="grid gap-4 md:grid-cols-2">{visibleAddOns.map(addOn => <AddOnCard key={addOn.id} addOn={addOn} />)}</div>}
+              </div>
             </div>
           </div>
         </>
@@ -236,12 +282,35 @@ export default function AdminSubscriptionsPage() {
         <PaymentReviews payments={payments} loading={paymentsLoading} filter={paymentFilter} setFilter={setPaymentFilter} busyId={busyId} onReview={reviewPayment} />
       )}
       {editingPlan && <EditPlanModal plan={editingPlan} saving={updatingPlan} onClose={() => setEditingPlan(null)} onSubmit={updatePlan} />}
+      {showAddOnForm && <AddOnModal audience={audience} saving={creatingAddOn} onClose={() => setShowAddOnForm(false)} onSubmit={createAddOn} />}
     </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-bold text-gray-700">{label}</span>{children}</label>;
+}
+
+function AddOnCard({ addOn }: { addOn: AddOnPackage }) {
+  return <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between gap-3"><h3 className="text-lg font-black text-gray-900">{addOn.name}</h3><span className={`rounded-full px-2 py-1 text-xs font-bold ${addOn.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{addOn.isActive ? 'Active' : 'Inactive'}</span></div>
+    <p className="mt-4 text-3xl font-black text-[#DB0002]">₱{Number(addOn.amount).toLocaleString()}</p>
+    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Per {addOn.billingUnit}</p>
+    <p className="mt-4 border-t border-gray-100 pt-4 text-sm leading-6 text-gray-600">{addOn.description || 'No description provided.'}</p>
+  </article>;
+}
+
+function AddOnModal({ audience, saving, onClose, onSubmit }: { audience: Audience; saving: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="create-addon-title">
+    <form onSubmit={onSubmit} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl">
+      <div className="flex items-start justify-between gap-4"><div><h2 id="create-addon-title" className="text-xl font-black text-gray-900">Create add-on package</h2><p className="mt-1 text-sm text-gray-500">For {audienceLabels[audience].toLowerCase()} subscriptions</p></div><button type="button" onClick={onClose} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close">✕</button></div>
+      <Field label="Add-on name"><input name="name" required maxLength={100} placeholder="e.g. Featured placement boost" className="admin-plan-input" /></Field>
+      <Field label="Amount (₱)"><input name="amount" type="number" min="0" step="0.01" required placeholder="0.00" className="admin-plan-input" /></Field>
+      <Field label="Billing period"><select name="billing_unit" required defaultValue="" className="admin-plan-input"><option value="" disabled>Select billing period</option><option value="day">Per day</option><option value="week">Per week</option><option value="month">Per month</option></select></Field>
+      <Field label="Description"><textarea name="description" rows={4} maxLength={1000} required placeholder="Describe what is included in this add-on…" className="admin-plan-input resize-none" /></Field>
+      <div className="flex justify-end gap-3 border-t border-gray-200 pt-4"><button type="button" onClick={onClose} className="rounded-xl border border-gray-300 px-5 py-2.5 font-bold text-gray-700">Cancel</button><button disabled={saving} className="rounded-xl bg-[#DB0002] px-5 py-2.5 font-bold text-white disabled:opacity-60">{saving ? 'Creating…' : 'Create add-on'}</button></div>
+    </form>
+  </div>;
 }
 
 function PlanCard({ plan, onEdit }: { plan: PlanDefinition; onEdit: () => void }) {
