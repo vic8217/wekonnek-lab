@@ -6,7 +6,7 @@
  */
 
 // ─── Users ────────────────────────────────────────────────
-export type UserType = 'customer' | 'merchant' | 'admin' | 'staff';
+export type UserType = 'customer' | 'merchant' | 'coordinator' | 'admin' | 'staff';
 
 export interface UserRow {
   id: string; // UUID from auth.users

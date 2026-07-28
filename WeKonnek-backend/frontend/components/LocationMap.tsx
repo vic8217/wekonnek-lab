@@ -63,7 +63,15 @@ export default function LocationMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !selectedLocation) return;
+    if (!map) return;
+
+    if (!selectedLocation) {
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
+      return;
+    }
 
     if (!markerRef.current) {
       const marker = L.marker(selectedLocation, { draggable: true, icon: pinIcon }).addTo(map);

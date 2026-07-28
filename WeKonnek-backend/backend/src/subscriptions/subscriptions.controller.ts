@@ -26,6 +26,33 @@ export class SubscriptionsController {
     return this.subscriptionsService.getPlans();
   }
 
+  @Get('definitions')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: list configurable subscription tiers' })
+  getDefinitions(@Req() req: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.getPlanDefinitions();
+  }
+
+  @Post('definitions')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: create a subscription tier' })
+  createDefinition(@Req() req: any, @Body() body: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.createPlanDefinition(body);
+  }
+
+  @Patch('definitions/:id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: update a subscription tier' })
+  updateDefinition(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.updatePlanDefinition(id, body);
+  }
+
   @Post('upgrade')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

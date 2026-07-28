@@ -186,9 +186,19 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const user =
-      (await this.usersService.findByEmail(id.toLowerCase())) ??
-      (await this.usersService.findByPhone(id));
+    let user;
+    if (/^WKC-\d+$/i.test(id)) {
+      const coordinator = await this.prisma.coordinatorApplication.findUnique({
+        where: { coordinatorCode: id.toUpperCase() },
+        select: { userId: true },
+      });
+      user = coordinator?.userId ? await this.prisma.user.findUnique({ where: { id: coordinator.userId } }) : null;
+      if (user?.role !== UserRole.coordinator) user = null;
+    } else {
+      user =
+        (await this.usersService.findByEmail(id.toLowerCase())) ??
+        (await this.usersService.findByPhone(id));
+    }
 
     if (!user || !user.password) {
       throw new UnauthorizedException('Invalid credentials');
@@ -203,6 +213,13 @@ export class AuthService {
       throw new UnauthorizedException(
         'Your account has been suspended. Please contact support.',
       );
+    }
+
+    if (user.role === UserRole.coordinator) {
+      const coordinator = await this.prisma.coordinatorApplication.findUnique({ where: { userId: user.id } });
+      if (coordinator?.temporaryCredentialExpiresAt && coordinator.temporaryCredentialExpiresAt <= new Date()) {
+        throw new UnauthorizedException('Temporary coordinator credentials expired. Ask an administrator for a new reset key.');
+      }
     }
 
     if (user.role === UserRole.merchant) {

@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
+import { UserRole } from '@prisma/client';
 import { CoordinatorApplicationsService } from './coordinator-applications.service';
 
 @Controller('coordinator-applications')
@@ -18,6 +20,29 @@ export class CoordinatorApplicationsController {
   stats() { return this.service.stats(); }
 
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() body: { status: string; managementZoneId?: string | null }) { return this.service.updateStatus(id, body.status, body.managementZoneId); }
+
+  @Patch(':id/suspend')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  suspend(@Param('id', ParseIntPipe) id: number) { return this.service.suspend(id); }
+
+  @Post(':id/reset-key')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  resetKey(@Param('id', ParseIntPipe) id: number) { return this.service.generateResetKey(id); }
+
+  @Post('reset-password')
+  resetPassword(@Body() body: { resetKey?: string; newPassword?: string }) {
+    return this.service.resetPassword(body.resetKey ?? '', body.newPassword ?? '');
+  }
+
+  @Patch(':id/notes')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  updateNotes(@Param('id', ParseIntPipe) id: number, @Body() body: { adminNotes?: string }) {
+    return this.service.updateNotes(id, body.adminNotes ?? '');
+  }
 }

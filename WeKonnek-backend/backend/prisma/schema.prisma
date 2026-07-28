@@ -134,9 +134,14 @@ model MerchantApplication {
   categoryName            String?   @map("category_name") @db.VarChar(150)
   cityMunicipality        String?   @map("city_municipality") @db.VarChar(100)
   barangay                String?   @db.VarChar(150)
+  councilDistrict         String?   @map("council_district") @db.VarChar(100)
+  geographicArea          String?   @map("geographic_area") @db.VarChar(150)
   latitude                Decimal?  @db.Decimal(10, 7)
   longitude               Decimal?  @db.Decimal(10, 7)
   businessDescription     String?   @map("business_description") @db.Text
+  hasBranches             Boolean?  @map("has_branches")
+  branchCount             Int?      @map("branch_count")
+  productCount            Int?      @map("product_count")
   source                  String    @default("merchant_application") @db.VarChar(50)
   assignedCoordinatorId   String?   @map("assigned_coordinator_id") @db.Uuid
   assignedAt              DateTime? @map("assigned_at") @db.Timestamptz
@@ -168,8 +173,12 @@ model MerchantApplication {
 
 model CoordinatorApplication {
   id                    Int       @id @default(autoincrement())
+  coordinatorCode       String?   @unique @map("coordinator_code") @db.VarChar(30)
+  userId                String?   @unique @map("user_id") @db.Uuid
   fullName              String    @map("full_name") @db.VarChar(255)
   mobileNumber          String    @map("mobile_number") @db.VarChar(30)
+  viberAccount          String?   @map("viber_account") @db.VarChar(30)
+  whatsappNumber        String?   @map("whatsapp_number") @db.VarChar(30)
   email                 String    @db.VarChar(255)
   region                String    @db.VarChar(100)
   provinceDistrict      String    @map("province_district") @db.VarChar(100)
@@ -183,6 +192,14 @@ model CoordinatorApplication {
   motivation            String?   @db.Text
   monthlyCapacity       String?   @map("monthly_capacity") @db.VarChar(50)
   referred              String?   @db.VarChar(100)
+  governmentIdFrontUrl  String?   @map("government_id_front_url") @db.VarChar(500)
+  governmentIdBackUrl   String?   @map("government_id_back_url") @db.VarChar(500)
+  resumeUrl             String?   @map("resume_url") @db.VarChar(500)
+  supportingDocumentUrl String?   @map("supporting_document_url") @db.VarChar(500)
+  adminNotes            String?   @map("admin_notes") @db.Text
+  resetTokenHash        String?   @map("reset_token_hash") @db.VarChar(64)
+  resetTokenExpiresAt   DateTime? @map("reset_token_expires_at") @db.Timestamptz
+  temporaryCredentialExpiresAt DateTime? @map("temporary_credential_expires_at") @db.Timestamptz
   status                String    @default("pending") @db.VarChar(50)
   managementZoneId      String?   @map("management_zone_id") @db.Uuid
   submittedAt           DateTime  @default(now()) @map("submitted_at") @db.Timestamptz
@@ -221,6 +238,24 @@ model SubscriptionPayment {
   @@index([merchantId])
   @@index([status])
   @@map("subscription_payments")
+}
+
+model SubscriptionPlanDefinition {
+  id                    String   @id @default(uuid()) @db.Uuid
+  audience              String   @db.VarChar(30)
+  tier                  String   @db.VarChar(50)
+  fixedAmount           Decimal  @map("fixed_amount") @db.Decimal(10, 2)
+  variableOrderPercent  Decimal? @map("variable_order_percent") @db.Decimal(5, 2)
+  productLimit          Int?     @map("product_limit")
+  minimumOrders         Int?     @map("minimum_orders")
+  includesInHouseRiders Boolean? @map("includes_in_house_riders")
+  isActive              Boolean  @default(true) @map("is_active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([audience, tier])
+  @@index([audience, isActive])
+  @@map("subscription_plan_definitions")
 }
 
 model Product {
@@ -446,6 +481,7 @@ enum UserRole {
   rider
   driver
   merchant
+  coordinator
   staff
   admin
 }

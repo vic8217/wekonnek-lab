@@ -13,6 +13,8 @@ import {
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { MerchantApplicationsService } from './merchant-applications.service';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
+import { UserRole } from '@prisma/client';
 
 @ApiTags('merchant-applications')
 @Controller('merchant-applications')
@@ -28,10 +30,17 @@ export class MerchantApplicationsController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
   @ApiOperation({ summary: 'List merchant applications (optionally by status)' })
   @ApiQuery({ name: 'status', required: false })
   findAll(@Query('status') status?: string) {
     return this.applicationsService.findAll(status);
+  }
+
+  @Get('coverage-options')
+  coverageOptions() {
+    return this.applicationsService.coverageOptions();
   }
 
   @Get('coordinator/leads')
@@ -46,6 +55,23 @@ export class MerchantApplicationsController {
     return this.applicationsService.claimLead(id, req.user);
   }
 
+  @Get(':id/eligible-coordinators')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  eligibleCoordinators(@Param('id', ParseIntPipe) id: number) {
+    return this.applicationsService.eligibleCoordinators(id);
+  }
+
+  @Patch(':id/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  assignCoordinator(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { coordinator_user_id?: string },
+  ) {
+    return this.applicationsService.assignCoordinator(id, body.coordinator_user_id ?? '');
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a single application' })
   findOne(@Param('id', ParseIntPipe) id: number) {
@@ -53,7 +79,8 @@ export class MerchantApplicationsController {
   }
 
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Approve / reject / review an application' })
   updateStatus(

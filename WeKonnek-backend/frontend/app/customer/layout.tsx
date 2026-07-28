@@ -59,6 +59,7 @@ export default function CustomerLayout({
   const isGuest = !user && !getToken();
   const onPublicRoute = isPublicRoute(pathname);
   const isDashboard = pathname === '/customer/dashboard';
+  const isMap = pathname === '/customer/map';
   const isMarketplaceCategory = pathname.startsWith('/customer/explore/');
   const usesStandaloneDesktop = isDashboard || isMarketplaceCategory;
 
@@ -82,7 +83,7 @@ export default function CustomerLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className={usesStandaloneDesktop ? 'xl:hidden' : ''}><CustomerHeader /></div>
+      <div className={usesStandaloneDesktop ? 'xl:hidden' : ''}><CustomerHeader hideMobileSearch={isMap} /></div>
 
       {/* Desktop layout: sidebar + main */}
       <div className={usesStandaloneDesktop ? 'hidden' : 'hidden xl:flex'}>

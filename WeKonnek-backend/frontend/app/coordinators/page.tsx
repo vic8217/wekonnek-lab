@@ -6,10 +6,11 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import type L from 'leaflet';
 import toast from 'react-hot-toast';
+import { uploadApi } from '@/lib/api';
 import {
 	BadgeDollarSign, BriefcaseBusiness, CalendarDays, Check, CheckCircle2, ClipboardCheck,
 	Crosshair, GraduationCap, Handshake, MapPin, Megaphone, Network, Phone, Send,
-	Store, Upload, UserRound,
+	Store, Upload, UserRound, X,
 } from 'lucide-react';
 
 const steps = [
@@ -103,6 +104,7 @@ function CoordinatorForm() {
 	const [locating, setLocating] = useState(false);
 	const [locationMessage, setLocationMessage] = useState('');
 	const [submitting, setSubmitting] = useState(false);
+	const [openPolicy, setOpenPolicy] = useState<'terms' | 'privacy' | null>(null);
 	const locationEnabled = region === 'NCR';
 	const setCoordinates = (latitude: number, longitude: number) => setSelectedLocation([latitude, longitude]);
 	const locateUser = useCallback(() => {
@@ -138,8 +140,21 @@ function CoordinatorForm() {
 		const form = event.currentTarget;
 		setSubmitting(true);
 		try {
-			const values = Object.fromEntries(new FormData(form).entries());
-			const response = await fetch('/api/backend/coordinator-applications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+			const formData = new FormData(form);
+			const values = Object.fromEntries(formData.entries());
+			const uploadDocument = async (name: string) => {
+				const file = formData.get(name);
+				return file instanceof File && file.size > 0 ? uploadApi.uploadFile(file, 'document') : null;
+			};
+			const [governmentIdFrontUrl, governmentIdBackUrl, resumeUrl, supportingDocumentUrl] = await Promise.all([
+				uploadDocument('governmentIdFront'), uploadDocument('governmentIdBack'),
+				uploadDocument('resume'), uploadDocument('supportingDocument'),
+			]);
+			const response = await fetch('/api/backend/coordinator-applications', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ...values, governmentIdFrontUrl, governmentIdBackUrl, resumeUrl, supportingDocumentUrl }),
+			});
 			const contentType = response.headers.get('content-type') || '';
 			const result = contentType.includes('application/json') ? await response.json() : { message: 'Application service is unavailable. Please try again.' };
 			if (!response.ok) throw new Error(result.message || 'Unable to submit application');
@@ -153,7 +168,7 @@ function CoordinatorForm() {
 	return <section className="h-fit rounded-2xl border border-[#ccd8e9] bg-white p-6 shadow-[0_15px_35px_rgba(42,73,120,.12)]">
 		<h2 className="text-center text-2xl font-black">BECOME A <span className="text-[#075cff]">ZONE COORDINATOR</span></h2><p className="mx-auto mt-2 max-w-lg text-center text-xs text-slate-500">Submit your details and our coordinator team will contact you for verification, orientation, and area assignment.</p>
 		<form onSubmit={submitApplication} className="mt-6 space-y-4">
-			<FormGroup icon={UserRound} title="PERSONAL INFORMATION"><div className="grid gap-3 sm:grid-cols-3"><Field name="fullName" label="Full Name" placeholder="Enter your full name" required /><Field name="mobileNumber" label="Mobile Number" placeholder="09XXXXXXXXX" required /><Field name="email" type="email" label="Email Address" placeholder="you@example.com" required /></div></FormGroup>
+			<FormGroup icon={UserRound} title="PERSONAL INFORMATION"><div className="grid gap-3 sm:grid-cols-3"><Field name="fullName" label="Full Name" placeholder="Enter your full name" required /><Field name="mobileNumber" type="tel" label="Mobile Number" placeholder="09XXXXXXXXX" required /><Field name="email" type="email" label="Email Address" placeholder="you@example.com" required /><Field name="viberAccount" type="tel" label="Viber Account / Number" placeholder="Viber mobile number" /><Field name="whatsappNumber" type="tel" label="WhatsApp Number" placeholder="WhatsApp mobile number" /></div></FormGroup>
 			<FormGroup icon={MapPin} title="LOCATION COVERAGE"><div className="grid gap-3 sm:grid-cols-3">
 				<SelectField label="Region" text="Select region" name="region" value={region} options={[{ value: 'NCR', label: 'National Capital Region (NCR)' }]} onChange={value => { setRegion(value); setProvince(''); setCity(''); setSelectedLocation(null); }} />
 				<SelectField label="Province / District" text="Select province / district" name="provinceDistrict" value={province} disabled={!locationEnabled} options={locationEnabled ? [{ value: 'Metro Manila', label: 'Metro Manila' }] : []} onChange={value => { setProvince(value); setCity(''); setSelectedLocation(null); }} />
@@ -171,14 +186,44 @@ function CoordinatorForm() {
 			<FormGroup icon={BriefcaseBusiness} title="EXPERIENCE"><div className="grid gap-3 sm:grid-cols-2"><SelectField name="background" label="What best describes your background?" text="Select your background" options={['Sales','Community work','Business owner','Marketing','Other'].map(value => ({ value, label: value }))} /><Field name="occupation" label="Current occupation or organization (optional)" placeholder="Enter occupation or organization" /></div></FormGroup>
 			<FormGroup icon={CheckCircle2} title="COORDINATOR QUESTIONS"><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold">Why do you want to become a Zone Coordinator?<textarea name="motivation" className="coord-input mt-2 min-h-28 resize-y" placeholder="Share your goals and how you plan to support local merchants." /></label><SelectField name="monthlyCapacity" label="How many merchants can you help onboard monthly?" text="Select range" options={['1–5','6–10','11–20','21 or more'].map(value => ({ value, label: value }))} /></div></FormGroup>
 			<FormGroup icon={Handshake} title="REFERRAL INFORMATION"><SelectField name="referred" label="Were you referred?" text="Select an answer" options={[{ value: 'No', label: 'No' },{ value: 'Yes', label: 'Yes' }]} /></FormGroup>
-			<FormGroup icon={Upload} title="UPLOADS (OPTIONAL)"><p className="mb-3 text-xs text-slate-500">Your information is used only to evaluate your application and meet verification requirements. JPG, PNG, or PDF; maximum 5 MB each.</p><div className="grid gap-3 sm:grid-cols-2">{['Government ID — front','Government ID — back','Resume / Profile','Supporting Document'].map(label => <label key={label} className="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[#ccd8e9] p-4"><Upload className="text-[#075cff]" /><span><strong className="block text-sm">{label}</strong><small className="text-slate-500">Choose a file</small></span><input type="file" className="hidden" /></label>)}</div></FormGroup>
-			<FormGroup icon={ShieldIcon} title="AGREEMENT">{['I confirm that the information provided is complete and accurate.','I agree to the Zone Coordinator Application Terms and Privacy Policy.','I agree to receive application updates and coordinator announcements.'].map(text => <label key={text} className="mt-2 flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5 size-4" />{text}</label>)}</FormGroup>
+			<FormGroup icon={Upload} title="UPLOADS (OPTIONAL)"><p className="mb-3 text-xs text-slate-500">Your information is used only to evaluate your application and meet verification requirements. JPG, PNG, or PDF; maximum 5 MB each.</p><div className="grid gap-3 sm:grid-cols-2">{[{ label: 'Government ID — front', name: 'governmentIdFront' },{ label: 'Government ID — back', name: 'governmentIdBack' },{ label: 'Resume / Profile', name: 'resume' },{ label: 'Supporting Document', name: 'supportingDocument' }].map(item => <label key={item.name} className="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[#ccd8e9] p-4"><Upload className="text-[#075cff]" /><span><strong className="block text-sm">{item.label}</strong><small className="text-slate-500">Choose a file</small></span><input name={item.name} type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden" /></label>)}</div></FormGroup>
+			<FormGroup icon={ShieldIcon} title="AGREEMENT">
+				<label className="mt-2 flex items-start gap-2 text-xs"><input name="informationConfirmed" type="checkbox" required className="mt-0.5 size-4" /><span>I confirm that the information provided is complete and accurate.</span></label>
+				<label className="mt-3 flex items-start gap-2 text-xs"><input name="policyAccepted" type="checkbox" required className="mt-0.5 size-4" /><span>I have read and agree to the <button type="button" onClick={() => setOpenPolicy('terms')} className="font-black text-[#075cff] underline hover:text-blue-800">Zone Coordinator Application Terms</button> and <button type="button" onClick={() => setOpenPolicy('privacy')} className="font-black text-[#075cff] underline hover:text-blue-800">Privacy Policy</button>.</span></label>
+				<label className="mt-3 flex items-start gap-2 text-xs"><input name="updatesAccepted" type="checkbox" className="mt-0.5 size-4" /><span>I agree to receive application updates and coordinator announcements.</span></label>
+			</FormGroup>
 			<button disabled={submitting} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#075cff] font-black text-white disabled:opacity-60">{submitting ? 'SUBMITTING…' : 'APPLY AS ZONE COORDINATOR'} <Send size={17} /></button>
 		</form>
+		{openPolicy && <PolicyModal type={openPolicy} onClose={() => setOpenPolicy(null)} />}
 	</section>;
 }
 
 const ShieldIcon = CheckCircle2;
+function PolicyModal({ type, onClose }: { type: 'terms' | 'privacy'; onClose: () => void }) {
+	const isTerms = type === 'terms';
+	return <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="policy-title" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+		<div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+			<div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><p className="text-xs font-black uppercase tracking-wide text-[#075cff]">WeKonnek Zone Coordinator</p><h3 id="policy-title" className="text-xl font-black">{isTerms ? 'Application Terms and Conditions' : 'Privacy Policy'}</h3></div><button type="button" onClick={onClose} aria-label="Close policy" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={22} /></button></div>
+			<div className="max-h-[65vh] space-y-5 overflow-y-auto px-5 py-5 text-sm leading-6 text-slate-700">
+				{isTerms ? <>
+					<PolicySection title="1. Application and verification">You confirm that the information and documents you submit are accurate and may be verified by WeKonnek. Submission does not guarantee approval or assignment to a requested area.</PolicySection>
+					<PolicySection title="2. Coordinator responsibilities">Approved coordinators must represent WeKonnek professionally, follow onboarding procedures, protect merchant and customer information, and avoid misleading promises or unauthorized collection of payments.</PolicySection>
+					<PolicySection title="3. Coverage and performance">Coverage areas are assigned by WeKonnek and may change based on availability, operational requirements, compliance, or performance. Commission eligibility follows the current approved coordinator program.</PolicySection>
+					<PolicySection title="4. Account and conduct">Coordinator access is personal and must not be shared. Fraud, harassment, misuse of platform data, policy violations, or inactivity may lead to reassignment, suspension, or termination.</PolicySection>
+					<PolicySection title="5. Updates and acceptance">WeKonnek may update program procedures and terms. Material changes will be communicated through available contact details or the coordinator portal.</PolicySection>
+				</> : <>
+					<PolicySection title="Information we collect">We collect application details, contact numbers including Viber and WhatsApp, location and coverage preferences, experience, submitted documents, and application activity.</PolicySection>
+					<PolicySection title="How information is used">Information is used to evaluate and verify your application, communicate updates, assign coverage, provide training and support, prevent fraud, and operate the coordinator program.</PolicySection>
+					<PolicySection title="Sharing and protection">Access is limited to authorized WeKonnek personnel and service providers that support verification and platform operations. Information is not sold. Reasonable organizational and technical safeguards are used to protect it.</PolicySection>
+					<PolicySection title="Retention">Application records are retained only as long as necessary for evaluation, legal obligations, dispute handling, fraud prevention, and legitimate operational needs.</PolicySection>
+					<PolicySection title="Your choices">You may request access, correction, or deletion of eligible personal information and may withdraw optional announcement consent by contacting WeKonnek. Required records may be retained where legally or operationally necessary.</PolicySection>
+				</>}
+			</div>
+			<div className="border-t border-slate-200 p-4"><button type="button" onClick={onClose} className="h-11 w-full rounded-xl bg-[#075cff] font-black text-white">I understand</button></div>
+		</div>
+	</div>;
+}
+function PolicySection({ title, children }: { title: string; children: React.ReactNode }) { return <section><h4 className="font-black text-[#071333]">{title}</h4><p className="mt-1">{children}</p></section>; }
 function FormGroup({ icon: Icon, title, children }: { icon: typeof UserRound; title: string; children: React.ReactNode }) { return <fieldset className="rounded-xl border border-[#ccd8e9] p-3"><legend className="px-1 text-xs font-black text-[#075cff]"><span className="inline-flex items-center gap-2"><Icon size={16} />{title}</span></legend>{children}</fieldset>; }
 function Field({ label, placeholder, name, type = 'text', required = false }: { label: string; placeholder: string; name?: string; type?: string; required?: boolean }) { return <label className="block text-xs font-bold">{label}<input name={name} type={type} required={required} className="coord-input mt-2" placeholder={placeholder} /></label>; }
 function SelectField({ label, text, name, value, options = [], disabled = false, onChange }: { label: string; text: string; name?: string; value?: string; options?: { value: string; label: string }[]; disabled?: boolean; onChange?: (value: string) => void }) { return <label className="block text-xs font-bold">{label}<select name={name} value={value} disabled={disabled} onChange={event => onChange?.(event.target.value)} className="coord-input mt-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"><option value="">{text}</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>; }

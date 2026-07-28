@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import type L from 'leaflet';
 import {
 	BookOpen,
 	BriefcaseBusiness,
 	CalendarDays,
 	ChevronDown,
+	LocateFixed,
 	Mail,
 	MapPin,
 	Phone,
@@ -21,8 +24,20 @@ import {
 	UserRound,
 	UsersRound,
 	Wrench,
+	X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const LocationMap = dynamic(() => import('@/components/LocationMap'), {
+	ssr: false,
+	loading: () => <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500">Loading interactive map…</div>,
+});
+
+const DEFAULT_MAP_CENTER: [number, number] = [14.5995, 120.9842];
+type CoverageArea = { code: string; name: string };
+type CoverageDistrict = { name: string; areas: CoverageArea[] };
+type CoverageOption = { code: string; name: string; districts: CoverageDistrict[] };
+type BusinessCategory = { id: number; name: string; isActive: boolean; displayOrder: number };
 
 const benefits = [
 	{
@@ -105,6 +120,112 @@ export default function ForMerchantsPage() {
 	const [location, setLocation] = useState<[number, number] | null>(null);
 	const [locating, setLocating] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
+	const [mapExpanded, setMapExpanded] = useState(false);
+	const [mapDialogOpen, setMapDialogOpen] = useState(false);
+	const [categoryName, setCategoryName] = useState('');
+	const [businessCategories, setBusinessCategories] = useState<BusinessCategory[]>([]);
+	const [categoriesLoading, setCategoriesLoading] = useState(true);
+	const [businessAddress, setBusinessAddress] = useState('');
+	const [hasBranches, setHasBranches] = useState('');
+	const [geocodingAddress, setGeocodingAddress] = useState(false);
+	const [coverageOptions, setCoverageOptions] = useState<CoverageOption[]>([]);
+	const [coverageLoading, setCoverageLoading] = useState(true);
+	const [coverageError, setCoverageError] = useState('');
+	const [selectedCity, setSelectedCity] = useState('');
+	const [selectedDistrict, setSelectedDistrict] = useState('');
+	const [selectedArea, setSelectedArea] = useState('');
+	const selectedDistrictOption = coverageOptions
+		.find(city => city.name === selectedCity)
+		?.districts.find(district => district.name === selectedDistrict);
+	const normalizedCategory = categoryName.trim().toLowerCase();
+	const isFoodBusiness = /(food|restaurant|cafe|bakery|catering|beverage)/.test(normalizedCategory);
+	const isTradingBusiness = /(trad|retail|shop|store|merchandise|wholesale)/.test(normalizedCategory);
+	const loadCoverageOptions = useCallback(() => {
+		setCoverageLoading(true);
+		setCoverageError('');
+		fetch('/api/backend/merchant-applications/coverage-options')
+			.then(response => response.ok ? response.json() : Promise.reject(new Error('Unable to load coordinator coverage')))
+			.then(body => {
+				const options = Array.isArray(body) ? body : [];
+				setCoverageOptions(options);
+				if (!options.length) setCoverageError('No active coordinator coverage areas are configured.');
+			})
+			.catch(() => {
+				setCoverageOptions([]);
+				setCoverageError('City list is temporarily unavailable.');
+			})
+			.finally(() => setCoverageLoading(false));
+	}, []);
+	useEffect(() => {
+		loadCoverageOptions();
+		const retry = window.setTimeout(() => {
+			if (!coverageOptions.length) loadCoverageOptions();
+		}, 3000);
+		return () => window.clearTimeout(retry);
+		// Retry once after initial load; subsequent retries are user initiated.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	useEffect(() => {
+		fetch('/api/categories')
+			.then(response => response.ok ? response.json() : Promise.reject(new Error('Unable to load business categories')))
+			.then(body => {
+				const categories = Array.isArray(body) ? body : [];
+				setBusinessCategories(categories
+					.filter((category): category is BusinessCategory => Boolean(category?.id && category?.name && category?.isActive !== false))
+					.sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0)));
+			})
+			.catch(() => setBusinessCategories([]))
+			.finally(() => setCategoriesLoading(false));
+	}, []);
+	useEffect(() => {
+		if (!selectedCity) return;
+
+		const controller = new AbortController();
+		const timer = window.setTimeout(async () => {
+			const query = [businessAddress.trim(), selectedArea, selectedCity, 'Philippines'].filter(Boolean).join(', ');
+			setGeocodingAddress(true);
+			try {
+				const findLocation = async (url: string) => {
+					const response = await fetch(url, { signal: controller.signal });
+					if (!response.ok) return null;
+					const body = await response.json();
+					return body.status === 'ok' ? body.results?.[0] ?? null : null;
+				};
+				const encodedQuery = encodeURIComponent(query);
+				const result = await findLocation(`/api/routing/geocode?q=${encodedQuery}&limit=1`)
+					?? await findLocation(`/api/geocode?q=${encodedQuery}`);
+				const latitude = Number(result?.location?.lat);
+				const longitude = Number(result?.location?.lng);
+				if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+					setLocation([latitude, longitude]);
+				}
+			} catch (error) {
+				if (error instanceof Error && error.name === 'AbortError') return;
+			} finally {
+				if (!controller.signal.aborted) setGeocodingAddress(false);
+			}
+		}, businessAddress.trim() ? 600 : 150);
+
+		return () => {
+			window.clearTimeout(timer);
+			controller.abort();
+		};
+	}, [businessAddress, selectedArea, selectedCity]);
+	useEffect(() => {
+		if (!mapDialogOpen) return;
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setMapDialogOpen(false);
+		};
+		document.addEventListener('keydown', closeOnEscape);
+		return () => document.removeEventListener('keydown', closeOnEscape);
+	}, [mapDialogOpen]);
+	const selectMapLocation = useCallback((latitude: number, longitude: number) => {
+		setLocation([latitude, longitude]);
+	}, []);
+	const moveMapPin = useCallback((event: L.DragEndEvent) => {
+		const point = event.target.getLatLng();
+		setLocation([point.lat, point.lng]);
+	}, []);
 	const locateStore = () => {
 		if (!navigator.geolocation) return toast.error('Location is not supported by this browser.');
 		setLocating(true);
@@ -118,27 +239,37 @@ export default function ForMerchantsPage() {
 			const contentType = response.headers.get('content-type') || '';
 			const result = contentType.includes('application/json') ? await response.json() : { message: 'Merchant application service is unavailable.' };
 			if (!response.ok) throw new Error(result.message || 'Unable to submit merchant application');
-			toast.success('Your merchant application was submitted as unassigned.'); form.reset(); setLocation(null);
+			toast.success('Your merchant application was submitted as unassigned.'); form.reset(); setLocation(null); setCategoryName(''); setBusinessAddress(''); setHasBranches(''); setSelectedCity(''); setSelectedDistrict(''); setSelectedArea('');
 		} catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to submit merchant application'); }
 		finally { setSubmitting(false); }
 	};
 	return (
-		<main className="min-h-screen bg-[#f5faff] text-[#071333]">
+		<main className="min-h-screen overflow-x-hidden bg-[#f5faff] text-[#071333]">
 			<MerchantHeader />
 
-			<section className="grid gap-5 px-4 py-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(420px,1fr)] lg:px-9">
-				<div className="relative min-h-[520px] overflow-hidden rounded-[38px] bg-white lg:min-h-[810px]">
+			<section className="grid min-w-0 items-stretch gap-5 px-4 py-6 md:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)] lg:grid-cols-[minmax(0,1.7fr)_minmax(400px,1fr)] lg:px-9">
+				<div className="relative order-2 h-[360px] min-w-0 max-w-full overflow-hidden rounded-[28px] bg-white sm:h-[460px] md:order-1 md:h-auto md:min-h-[810px] md:self-stretch md:rounded-[38px]">
+					<Image
+						src="/images/weKonnekCityBackground.png"
+						alt=""
+						fill
+						aria-hidden="true"
+						sizes="(min-width: 1024px) 62vw, 100vw"
+						className="object-cover object-bottom opacity-80"
+					/>
+					<div className="relative z-10 aspect-[1024/837] w-full overflow-hidden bg-white shadow-[0_18px_32px_rgba(37,99,235,0.08)]">
 					<Image
 						src="/images/merchantHeroLeft.png"
 						alt="Merchant using WeKonnek to grow his business"
 						fill
 						priority
 						sizes="(min-width: 1024px) 62vw, 100vw"
-						className="object-cover"
+						className="object-contain object-top"
 					/>
+					</div>
 				</div>
 
-				<div id="callback" className="rounded-2xl border border-[#ccd8e9] bg-white p-5 shadow-[0_16px_40px_rgba(49,91,150,0.12)] lg:p-7">
+				<div id="callback" className="order-1 min-w-0 max-w-full overflow-hidden rounded-2xl border border-[#ccd8e9] bg-white p-5 shadow-[0_16px_40px_rgba(49,91,150,0.12)] md:order-2 lg:p-7">
 					<div className="flex items-start gap-4">
 						<UsersRound className="mt-1 shrink-0 text-[#075cff]" size={45} strokeWidth={2.2} />
 						<div>
@@ -152,23 +283,120 @@ export default function ForMerchantsPage() {
 						</div>
 					</div>
 
-					<form onSubmit={submitLead} className="mt-5 space-y-3">
+					<form onSubmit={submitLead} className="mt-5 min-w-0 space-y-3">
 						<FormField name="contact_name" icon={UserRound} placeholder="Full Name" required />
 						<FormField name="business_name" icon={Store} placeholder="Business / Store Name" required />
 						<FormField name="phone" icon={Phone} placeholder="Mobile Number" type="tel" required />
 						<FormField name="email" icon={Mail} placeholder="Email Address" type="email" required />
-						<FormField name="category_name" icon={BriefcaseBusiness} placeholder="Business Category" required />
-						<FormField name="address" icon={MapPin} placeholder="Store / Business Address" required />
-						<div className="grid gap-3 sm:grid-cols-2">
-							<input name="city_municipality" required className="merchant-input" placeholder="City / Municipality" />
-							<input name="barangay" required className="merchant-input" placeholder="Barangay" />
+						<label className="merchant-input flex items-center gap-3">
+							<BriefcaseBusiness size={19} className="shrink-0 text-[#7187a8]" />
+							<select name="category_name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} required disabled={categoriesLoading} className="min-w-0 flex-1 bg-transparent outline-none disabled:cursor-wait disabled:text-slate-400">
+								<option value="">{categoriesLoading ? 'Loading business categories…' : 'Business Category'}</option>
+								{businessCategories.map(category => <option key={category.id} value={category.name}>{category.name}</option>)}
+							</select>
+						</label>
+						<label className="merchant-input flex items-center gap-3">
+							<MapPin size={19} className="shrink-0 text-slate-500" />
+							<input name="address" value={businessAddress} onChange={event => setBusinessAddress(event.target.value)} placeholder="Store / Business Address" required className="min-w-0 flex-1 bg-transparent outline-none" />
+						</label>
+						<div className="grid min-w-0 gap-3 sm:grid-cols-2">
+							<select name="city_municipality" value={selectedCity} onChange={event => { setSelectedCity(event.target.value); setSelectedDistrict(''); setSelectedArea(''); }} required className="merchant-input bg-white">
+								<option value="">{coverageLoading ? 'Loading cities…' : coverageError ? 'Cities unavailable' : 'City / Municipality'}</option>
+								{coverageOptions.map(city => <option key={city.code} value={city.name}>{city.name.replace(/^City of /, '').replace(/ \(City\)$/, '')}</option>)}
+							</select>
+							<select name="council_district" value={selectedDistrict} onChange={event => { setSelectedDistrict(event.target.value); setSelectedArea(''); }} required disabled={!selectedCity} className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+								<option value="">City Council District</option>
+								{coverageOptions.find(city => city.name === selectedCity)?.districts.map(district => <option key={district.name} value={district.name}>{district.name}</option>)}
+							</select>
 						</div>
-						<button type="button" onClick={locateStore} className="merchant-input flex w-full items-center gap-3 text-left">
+						{coverageError && <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800"><span>{coverageError}</span><button type="button" onClick={loadCoverageOptions} disabled={coverageLoading} className="font-bold underline disabled:opacity-60">{coverageLoading ? 'Loading…' : 'Retry'}</button></div>}
+						<select name="geographic_area" value={selectedArea} onChange={event => setSelectedArea(event.target.value)} required={Boolean(selectedDistrictOption?.areas.length)} disabled={!selectedDistrict || !selectedDistrictOption?.areas.length} className="merchant-input w-full bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+							<option value="">{selectedDistrictOption && !selectedDistrictOption.areas.length ? 'Whole district — no named areas configured' : 'Area within the council district'}</option>
+							{selectedDistrictOption?.areas.map(area => <option key={area.code} value={area.name}>{area.name}</option>)}
+						</select>
+						<div className={`grid min-w-0 gap-3 ${hasBranches === 'yes' ? 'sm:grid-cols-2' : ''}`}>
+							<select name="has_branches" value={hasBranches} onChange={(event) => setHasBranches(event.target.value)} required className="merchant-input bg-white text-slate-600">
+								<option value="" disabled>Does the business have branches?</option>
+								<option value="no">No branches</option>
+								<option value="yes">Yes, with branches</option>
+							</select>
+							{hasBranches === 'yes' ? (
+								<input name="branch_count" type="number" min="1" step="1" required className="merchant-input" placeholder="How many branches?" />
+							) : null}
+						</div>
+						{(isFoodBusiness || isTradingBusiness) && (
+							<input
+								name="product_count"
+								type="number"
+								min="1"
+								step="1"
+								required
+								className="merchant-input w-full"
+								placeholder={isFoodBusiness ? 'How many products or items are on the menu?' : 'How many products do you sell?'}
+							/>
+						)}
+						<div className="min-w-0 overflow-hidden rounded-xl border border-[#ccd8e9] bg-white">
+							<div className="flex items-center gap-3 border-b border-[#dbe4f0] px-4 py-3">
 							<MapPin size={19} className="text-[#075cff]" />
-							<span className="flex-1">{locating ? 'Finding store location…' : location ? `${location[0].toFixed(6)}, ${location[1].toFixed(6)}` : 'Pin store location using GPS'}</span>
-							<ChevronDown size={16} />
-						</button>
-						<textarea name="business_description" className="merchant-input min-h-24 resize-y" placeholder="Tell us about your business" />
+							<button type="button" onClick={() => setMapExpanded(current => !current)} className="min-w-0 flex-1 text-left">
+								<p className="text-sm font-bold text-[#17223b]">Pin your store location</p>
+								<p className="truncate text-xs text-slate-500">{geocodingAddress ? 'Finding the selected address…' : location ? `${location[0].toFixed(6)}, ${location[1].toFixed(6)}` : 'Use GPS or open the map to drop a pin.'}</p>
+							</button>
+							<button type="button" onClick={locateStore} disabled={locating} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#eaf1ff] px-3 py-2 text-xs font-bold text-[#075cff] transition hover:bg-[#dbe8ff] disabled:opacity-60">
+								<LocateFixed size={16} /> {locating ? 'Locating…' : 'Use GPS'}
+							</button>
+							<button type="button" onClick={() => setMapExpanded(current => !current)} aria-label={mapExpanded ? 'Hide map' : 'Open map'} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100">
+								<ChevronDown size={18} className={`transition-transform ${mapExpanded ? 'rotate-180' : ''}`} />
+							</button>
+							</div>
+							{mapExpanded && <div className="relative h-64 w-full">
+								<LocationMap selectedLocation={location} defaultCenter={location ?? DEFAULT_MAP_CENTER} onMapClick={selectMapLocation} onMarkerDrag={moveMapPin} selectedZoom={17} />
+								<button
+									type="button"
+									onClick={() => setMapDialogOpen(true)}
+									className="absolute inset-0 z-[500] flex items-end justify-center bg-transparent p-3 focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[#075cff]"
+									aria-label="Open larger map to choose exact store location"
+								>
+									<span className="rounded-full bg-white/95 px-4 py-2 text-xs font-bold text-[#075cff] shadow-lg">
+										Click to choose the exact location
+									</span>
+								</button>
+							</div>}
+						</div>
+						{mapDialogOpen && (
+							<div
+								className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6"
+								role="dialog"
+								aria-modal="true"
+								aria-labelledby="store-location-map-title"
+								onMouseDown={event => {
+									if (event.target === event.currentTarget) setMapDialogOpen(false);
+								}}
+							>
+								<div className="flex h-[min(88vh,850px)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+									<div className="flex items-center gap-4 border-b border-slate-200 px-4 py-3 sm:px-6">
+										<div className="min-w-0 flex-1">
+											<h2 id="store-location-map-title" className="font-black text-[#17223b]">Choose the exact store location</h2>
+											<p className="text-xs text-slate-500">Click the street or drag the red pin to the store entrance.</p>
+										</div>
+										{location && <p className="hidden text-xs font-semibold text-slate-500 sm:block">{location[0].toFixed(6)}, {location[1].toFixed(6)}</p>}
+										<button type="button" onClick={() => setMapDialogOpen(false)} className="rounded-full p-2 text-slate-600 hover:bg-slate-100" aria-label="Close larger map">
+											<X size={22} />
+										</button>
+									</div>
+									<div className="min-h-0 flex-1">
+										<LocationMap selectedLocation={location} defaultCenter={location ?? DEFAULT_MAP_CENTER} onMapClick={selectMapLocation} onMarkerDrag={moveMapPin} selectedZoom={18} />
+									</div>
+									<div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 sm:px-6">
+										<p className="text-xs text-slate-500">Street names are visible at this zoom level.</p>
+										<button type="button" onClick={() => setMapDialogOpen(false)} className="rounded-xl bg-[#075cff] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0049d8]">
+											Use this location
+										</button>
+									</div>
+								</div>
+							</div>
+						)}
+						<textarea name="business_description" rows={5} className="merchant-input block min-h-32 w-full resize-y" placeholder="Tell us about your business" />
 						<label className="flex items-start gap-2 text-xs">
 							<input type="checkbox" required className="mt-0.5 size-4" />
 							<span>

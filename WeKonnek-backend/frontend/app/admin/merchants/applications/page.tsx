@@ -4,7 +4,12 @@ import { useState, useEffect } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const APPLICATIONS_API = '/api/backend/merchant-applications';
+
+async function readJsonResponse(response: Response) {
+  const contentType = response.headers.get('content-type') || '';
+  return contentType.includes('application/json') ? response.json() : null;
+}
 
 interface MerchantApplication {
   id: number;
@@ -24,8 +29,36 @@ interface MerchantApplication {
   merchant_code?: string;
   assignment_status?: 'assigned' | 'unassigned';
   assigned_coordinator_id?: string;
+  contact_name?: string;
+  category_name?: string;
+  address?: string;
   city_municipality?: string;
   barangay?: string;
+  council_district?: string;
+  geographic_area?: string;
+  latitude?: string | number;
+  longitude?: string | number;
+  business_description?: string;
+  has_branches?: boolean | null;
+  branch_count?: number | null;
+  product_count?: number | null;
+  source?: string;
+  payment_proof_url?: string;
+  business_permit_url?: string;
+  dti_permit_url?: string;
+  valid_id_url?: string;
+  establishment_photo_url?: string;
+  authorized_person_photo_url?: string;
+  business_documents_urls?: string[];
+}
+
+interface EligibleCoordinator {
+  id: number;
+  user_id: string;
+  full_name: string;
+  email: string;
+  coordinator_code?: string;
+  zone_name?: string;
 }
 
 export default function MerchantApplicationsPage() {
@@ -35,73 +68,85 @@ export default function MerchantApplicationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApplication, setSelectedApplication] = useState<MerchantApplication | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [assignmentApplication, setAssignmentApplication] = useState<MerchantApplication | null>(null);
+  const [eligibleCoordinators, setEligibleCoordinators] = useState<EligibleCoordinator[]>([]);
+  const [coordinatorsLoading, setCoordinatorsLoading] = useState(false);
+  const [assigningCoordinatorId, setAssigningCoordinatorId] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     fetchApplications();
-    // The selected filter is the trigger; fetchApplications is intentionally not memoized.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFilter]);
 
   const fetchApplications = async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const token = getToken();
-      const params = selectedFilter !== 'all' ? `?status=${selectedFilter}` : '';
-      const res = await fetch(`${API}/api/merchant-applications${params}`, {
+      const res = await fetch(APPLICATIONS_API, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error('Failed to fetch applications');
-      const data = await res.json();
-      setApplications(Array.isArray(data) ? data : data.data || []);
+      const data = await readJsonResponse(res);
+      if (!res.ok) throw new Error(data?.message || 'Merchant application service is unavailable. Please try again.');
+      setApplications(Array.isArray(data) ? data : data?.data || []);
     } catch (error) {
-      console.error('Error fetching applications:', error);
+      setLoadError(error instanceof Error ? error.message : 'Unable to load merchant applications.');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusCounts = async () => {
-    const token = getToken();
-    const res = await fetch(`${API}/api/merchant-applications`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = res.ok ? await res.json() : [];
-    const allApps = Array.isArray(data) ? data : data.data || [];
-
-    const counts = {
-      pending: 0,
-      reviewing: 0,
-      approved: 0,
-      total: allApps.length,
-    };
-
-    allApps.forEach((app: MerchantApplication) => {
-      if (app.status === 'pending') counts.pending++;
-      if (app.status === 'reviewing') counts.reviewing++;
-      if (app.status === 'approved') counts.approved++;
-    });
-
+  const statusCounts = applications.reduce((counts, app) => {
+    if (app.status === 'pending' && app.assignment_status !== 'assigned') counts.pending++;
+    if (app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned') counts.reviewing++;
+    if (app.status === 'approved') counts.approved++;
+    counts.total++;
     return counts;
-  };
-
-  const [statusCounts, setStatusCounts] = useState({
-    pending: 0,
-    reviewing: 0,
-    approved: 0,
-    total: 0,
-  });
-
-  useEffect(() => {
-    const loadCounts = async () => {
-      const counts = await getStatusCounts();
-      setStatusCounts(counts);
-    };
-    loadCounts();
-  }, []);
+  }, { pending: 0, reviewing: 0, approved: 0, total: 0 });
 
   const handleView = (application: MerchantApplication) => {
     setSelectedApplication(application);
     setShowViewModal(true);
+  };
+
+  const openAssignment = async (application: MerchantApplication) => {
+    setAssignmentApplication(application);
+    setEligibleCoordinators([]);
+    setCoordinatorsLoading(true);
+    try {
+      const res = await fetch(`${APPLICATIONS_API}/${application.id}/eligible-coordinators`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const body = await readJsonResponse(res);
+      if (!res.ok) throw new Error(body?.message || 'Unable to find coordinators for this area');
+      setEligibleCoordinators(Array.isArray(body) ? body : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to find coordinators for this area');
+    } finally {
+      setCoordinatorsLoading(false);
+    }
+  };
+
+  const assignCoordinator = async (coordinator: EligibleCoordinator) => {
+    if (!assignmentApplication) return;
+    setAssigningCoordinatorId(coordinator.user_id);
+    try {
+      const res = await fetch(`${APPLICATIONS_API}/${assignmentApplication.id}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ coordinator_user_id: coordinator.user_id }),
+      });
+      const body = await readJsonResponse(res);
+      if (!res.ok) throw new Error(body?.message || 'Unable to assign coordinator');
+      toast.success(`${assignmentApplication.business_name} assigned to ${coordinator.full_name}.`);
+      setAssignmentApplication(null);
+      setSelectedFilter('reviewing');
+      await fetchApplications();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to assign coordinator');
+    } finally {
+      setAssigningCoordinatorId('');
+    }
   };
 
   const handleStatusChange = async (id: number, newStatus: string, reason?: string) => {
@@ -109,23 +154,20 @@ export default function MerchantApplicationsPage() {
       const token = getToken();
       const body: Record<string, string> = { status: newStatus };
       if (reason) body.reason = reason;
-      const res = await fetch(`${API}/api/merchant-applications/${id}/status`, {
+      const res = await fetch(`${APPLICATIONS_API}/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      const updated = await res.json();
-      if (!res.ok) throw new Error(updated.message || 'Failed to update application status');
+      const updated = await readJsonResponse(res);
+      if (!res.ok) throw new Error(updated?.message || 'Failed to update application status');
 
-      toast.success(newStatus === 'approved' && updated.merchant_code
+      toast.success(newStatus === 'approved' && updated?.merchant_code
         ? `Approved. Merchant code: ${updated.merchant_code}`
         : `Application ${newStatus} successfully!`, { duration: 8000 });
       fetchApplications();
-      const counts = await getStatusCounts();
-      setStatusCounts(counts);
       setShowViewModal(false);
     } catch (error: unknown) {
-      console.error('Error updating status:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to update application status');
     }
   };
@@ -174,6 +216,14 @@ export default function MerchantApplicationsPage() {
   };
 
   const filteredApplications = applications.filter((app) => {
+    const belongsToTab = selectedFilter === 'pending'
+      ? app.status === 'pending' && app.assignment_status !== 'assigned'
+      : selectedFilter === 'reviewing'
+        ? app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned'
+        : selectedFilter === 'approved'
+          ? app.status === 'approved'
+          : true;
+    if (!belongsToTab) return false;
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       return (
@@ -192,6 +242,12 @@ export default function MerchantApplicationsPage() {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Verification Portal</h1>
         <p className="text-gray-600">Review and approve merchant subscriptions</p>
       </div>
+      {loadError && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{loadError}</span>
+          <button type="button" onClick={fetchApplications} className="shrink-0 rounded-lg bg-white px-3 py-1.5 font-bold text-red-700 shadow-sm">Retry</button>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -261,7 +317,7 @@ export default function MerchantApplicationsPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Pending
+            Pending <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{statusCounts.pending}</span>
           </button>
           <button
             onClick={() => setSelectedFilter('reviewing')}
@@ -271,7 +327,7 @@ export default function MerchantApplicationsPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Reviewing
+            Review <span className="ml-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{statusCounts.reviewing}</span>
           </button>
           <button
             onClick={() => setSelectedFilter('approved')}
@@ -281,7 +337,7 @@ export default function MerchantApplicationsPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Approved
+            Approved <span className="ml-1 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{statusCounts.approved}</span>
           </button>
           <button
             onClick={() => setSelectedFilter('all')}
@@ -382,16 +438,16 @@ export default function MerchantApplicationsPage() {
                       </td>
                       <td className="px-6 py-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${app.assignment_status === 'assigned' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{app.assignment_status === 'assigned' ? 'Assigned' : 'Unassigned'}</span></td>
                       <td className="px-6 py-4">
-                        <button
-                          onClick={() => handleView(app)}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-[#165BB8] text-white rounded-lg hover:bg-[#124A94] transition-colors text-sm font-medium"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                          View
-                        </button>
+                        {app.status === 'pending' && app.assignment_status !== 'assigned' ? (
+                          <button onClick={() => openAssignment(app)} className="inline-flex items-center rounded-lg bg-[#165BB8] px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-[#124A94]">Assign</button>
+                        ) : app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned' ? (
+                          <button onClick={() => handleStatusChange(app.id, 'approved')} className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-700">Approve</button>
+                        ) : (
+                          <button onClick={() => handleView(app)} className="inline-flex items-center gap-2 rounded-lg bg-[#165BB8] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#124A94]">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            View
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -401,6 +457,43 @@ export default function MerchantApplicationsPage() {
           </div>
         </div>
       </div>
+
+      {assignmentApplication && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="assign-coordinator-title">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-start justify-between border-b border-gray-200 p-6">
+              <div>
+                <h3 id="assign-coordinator-title" className="text-xl font-bold text-gray-900">Assign merchant coordinator</h3>
+                <p className="mt-1 text-sm text-gray-500">{assignmentApplication.business_name} · {[assignmentApplication.geographic_area || assignmentApplication.barangay, assignmentApplication.city_municipality].filter(Boolean).join(', ')}</p>
+              </div>
+              <button type="button" onClick={() => setAssignmentApplication(null)} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close assignment modal">✕</button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-6">
+              {coordinatorsLoading ? (
+                <p className="py-10 text-center text-sm text-gray-500">Finding coordinators assigned to this area…</p>
+              ) : eligibleCoordinators.length === 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">No approved coordinator is assigned to this merchant&apos;s city, district, and area.</div>
+              ) : (
+                <div className="space-y-3">
+                  {eligibleCoordinators.map(coordinator => (
+                    <div key={coordinator.user_id} className="flex items-center gap-4 rounded-xl border border-gray-200 p-4">
+                      <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">{getInitials(coordinator.full_name)}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-gray-900">{coordinator.full_name}</p>
+                        <p className="truncate text-sm text-gray-500">{coordinator.email}</p>
+                        <p className="mt-1 text-xs font-medium text-blue-700">{coordinator.zone_name || 'Assigned coverage zone'}{coordinator.coordinator_code ? ` · ${coordinator.coordinator_code}` : ''}</p>
+                      </div>
+                      <button type="button" disabled={Boolean(assigningCoordinatorId)} onClick={() => assignCoordinator(coordinator)} className="rounded-lg bg-[#165BB8] px-4 py-2 text-sm font-bold text-white hover:bg-[#124A94] disabled:opacity-60">
+                        {assigningCoordinatorId === coordinator.user_id ? 'Assigning…' : 'Assign'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View Application Modal */}
       {showViewModal && selectedApplication && (
@@ -420,37 +513,43 @@ export default function MerchantApplicationsPage() {
               </div>
 
               <div className="space-y-6">
-                {/* Application Details */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <p className="text-gray-900">{selectedApplication.email}</p>
+                <section>
+                  <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-blue-700">Business evaluation</h4>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <ApplicationDetail label="Business name" value={selectedApplication.business_name} />
+                    <ApplicationDetail label="Contact person" value={selectedApplication.contact_name} />
+                    <ApplicationDetail label="Business category" value={selectedApplication.category_name} />
+                    <ApplicationDetail label="Email" value={selectedApplication.email} />
+                    <ApplicationDetail label="Phone" value={selectedApplication.phone} />
+                    <ApplicationDetail label="Application source" value={selectedApplication.source?.replaceAll('_', ' ')} capitalize />
+                    <ApplicationDetail label="Store address" value={selectedApplication.address} wide />
+                    <ApplicationDetail label="City / Municipality" value={selectedApplication.city_municipality} />
+                    <ApplicationDetail label="City council district" value={selectedApplication.council_district} />
+                    <ApplicationDetail label="Geographic area" value={selectedApplication.geographic_area} />
+                    {selectedApplication.barangay && <ApplicationDetail label="Legacy barangay" value={selectedApplication.barangay} />}
+                    <ApplicationDetail label="Has branches" value={selectedApplication.has_branches === true ? 'Yes' : selectedApplication.has_branches === false ? 'No' : undefined} />
+                    <ApplicationDetail label="Number of branches" value={selectedApplication.branch_count} />
+                    <ApplicationDetail label={/food|restaurant|cafe|bakery/i.test(selectedApplication.category_name || '') ? 'Menu products / items' : 'Number of products'} value={selectedApplication.product_count} />
+                    <ApplicationDetail label="Latitude" value={selectedApplication.latitude} />
+                    <ApplicationDetail label="Longitude" value={selectedApplication.longitude} />
+                    {selectedApplication.latitude && selectedApplication.longitude && <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Map location</p><a href={`https://www.openstreetmap.org/?mlat=${selectedApplication.latitude}&mlon=${selectedApplication.longitude}#map=18/${selectedApplication.latitude}/${selectedApplication.longitude}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-bold text-blue-700 underline">Open submitted location</a></div>}
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                    <p className="text-gray-900">{selectedApplication.phone || 'N/A'}</p>
+                  <div className="mt-3 rounded-xl bg-gray-50 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">About the business</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-800">{selectedApplication.business_description || 'No business description submitted.'}</p></div>
+                </section>
+
+                <section>
+                  <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-blue-700">Subscription and payment</h4>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <ApplicationDetail label="Subscription tier" value={selectedApplication.subscription_tier} capitalize />
+                    <ApplicationDetail label="Subscription plan" value={selectedApplication.subscription_plan} capitalize />
+                    <ApplicationDetail label="Payment amount" value={`₱${selectedApplication.subscription_amount.toLocaleString()}`} />
+                    <ApplicationDetail label="Payment method" value={selectedApplication.payment_method} />
+                    <ApplicationDetail label="Assignment" value={selectedApplication.assignment_status} capitalize />
+                    {selectedApplication.merchant_code && <ApplicationDetail label="Merchant code" value={selectedApplication.merchant_code} />}
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier</label>
-                    <p className="text-gray-900 capitalize">{selectedApplication.subscription_tier}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Plan</label>
-                    <p className="text-gray-900 capitalize">{selectedApplication.subscription_plan}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Payment Amount</label>
-                    <p className="text-gray-900">₱{selectedApplication.subscription_amount.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                    <p className="text-gray-900">{selectedApplication.payment_method || 'N/A'}</p>
-                  </div>
-                  {selectedApplication.merchant_code && <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Merchant Code</label>
-                    <p className="font-mono font-bold tracking-wider text-blue-700">{selectedApplication.merchant_code}</p>
-                  </div>}
-                </div>
+                </section>
+
+                <ApplicationDocuments application={selectedApplication} />
 
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-4 border-t border-gray-200">
@@ -499,4 +598,28 @@ export default function MerchantApplicationsPage() {
       )}
     </div>
   );
+}
+
+function ApplicationDetail({ label, value, wide = false, capitalize = false }: { label: string; value?: string | number | null; wide?: boolean; capitalize?: boolean }) {
+  return <div className={`rounded-xl bg-gray-50 p-3 ${wide ? 'sm:col-span-2' : ''}`}>
+    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
+    <p className={`mt-1 break-words text-sm font-medium text-gray-900 ${capitalize ? 'capitalize' : ''}`}>{value === undefined || value === null || value === '' ? 'N/A' : value}</p>
+  </div>;
+}
+
+function ApplicationDocuments({ application }: { application: MerchantApplication }) {
+  const documents = [
+    ['Payment proof', application.payment_proof_url],
+    ['Business permit', application.business_permit_url],
+    ['DTI permit', application.dti_permit_url],
+    ['Valid ID', application.valid_id_url],
+    ['Establishment photo', application.establishment_photo_url],
+    ['Authorized person photo', application.authorized_person_photo_url],
+    ...(application.business_documents_urls || []).map((url, index) => [`Business document ${index + 1}`, url]),
+  ] as [string, string | undefined][];
+  const submitted = documents.filter((item): item is [string, string] => Boolean(item[1]));
+  return <section>
+    <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-blue-700">Submitted documents</h4>
+    {submitted.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{submitted.map(([label, url]) => <a key={`${label}-${url}`} href={url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-blue-700 hover:border-blue-300 hover:bg-blue-50"><span>{label}</span><span aria-hidden="true">↗</span></a>)}</div> : <div className="rounded-xl border border-dashed border-gray-300 p-5 text-center text-sm text-gray-500">No documents were submitted with this application.</div>}
+  </section>;
 }

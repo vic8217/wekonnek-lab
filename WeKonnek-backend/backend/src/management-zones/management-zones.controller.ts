@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { ManagementZonesService } from './management-zones.service';
 
@@ -11,6 +11,8 @@ export class ManagementZonesController {
   @Get('philippine-locations') locations() { return this.service.philippineLocations(); }
   @Get('philippine-locations/:localityCode/barangays')
   barangays(@Param('localityCode') localityCode: string) { return this.service.barangays(localityCode); }
+  @Get('geographic-boundaries')
+  boundaries(@Query('areas') areas: string, @Query('city') city: string) { return this.service.geographicBoundaries(areas, city); }
   @Post() create(@Body() body: Record<string, unknown>) { return this.service.create(body); }
   @Patch(':id') update(@Param('id') id: string, @Body() body: Record<string, unknown>) { return this.service.update(id, body); }
   @Delete(':id') remove(@Param('id') id: string) { return this.service.remove(id); }

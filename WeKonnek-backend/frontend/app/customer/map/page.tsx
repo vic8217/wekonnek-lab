@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { type FormEvent, useCallback, useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { merchantsApi, Merchant } from '@/lib/api';
@@ -16,6 +16,84 @@ const Circle = dynamic(() => import('react-leaflet').then((mod) => mod.Circle), 
 
 const SEARCH_RADIUS_KM = 5;
 const PARANAQUE_CENTER: [number, number] = [14.4793, 121.0198];
+type MapMerchant = Merchant & { isSample?: boolean };
+const SAMPLE_NAMES: Record<string, string[]> = {
+  food: ['Kusina ni Juan', 'Brew & Beans', 'Burger Barn', 'Green Bites'],
+  restaurants: ['Casa Manila', 'Sakura Garden', 'Harbor Table', 'Sunday Cafe'],
+  groceries: ['Daily Fresh', 'City Grocer', 'Fresh Basket', 'Local Harvest'],
+  pharmacy: ['Care Pharmacy', 'Health Plus', 'MediCorner', 'Family Health'],
+  services: ['QuickFix Home', 'Clean Crew', 'Fresh Laundry', 'Tech Assist'],
+  wellness: ['Wellness Spa', 'Flow Studio', 'Glow Room', 'Fit Local'],
+  deals: ['Deal Central', 'Local Steals', 'Value Hub', 'Daily Deals'],
+  events: ['City Live', 'Community Hub', 'Weekend Market', 'Arts Corner'],
+  bazaar: ['Maker Market', 'Craft Corner', 'Local Finds', 'The Bazaar'],
+};
+const sampleMerchants = (
+  category: string,
+  center: [number, number],
+): MapMerchant[] => {
+  const names = SAMPLE_NAMES[category] || [
+    `${categoryLabel(category)} Merchant 1`,
+    `${categoryLabel(category)} Merchant 2`,
+    `${categoryLabel(category)} Merchant 3`,
+    `${categoryLabel(category)} Merchant 4`,
+  ];
+  const offsets: [number, number][] = [
+    [0.008, -0.006],
+    [-0.007, 0.009],
+    [0.012, 0.011],
+    [-0.013, -0.008],
+  ];
+
+  return names.map((name, index) => ({
+    id: -(index + 1),
+    name,
+    slug: `sample-${category}-${index + 1}`,
+    description: `Sample ${categoryLabel(category).toLowerCase()} merchant`,
+    businessType: 'storefront',
+    latitude: center[0] + offsets[index][0],
+    longitude: center[1] + offsets[index][1],
+    address: 'Sample location for map preview',
+    city: 'Parañaque',
+    country: 'Philippines',
+    isActive: true,
+    isVerified: true,
+    rating: 4.5 + index / 10,
+    totalReviews: 10 + index,
+    category: {
+      id: -(index + 1),
+      name: categoryLabel(category),
+      slug: category,
+      isActive: true,
+      displayOrder: index,
+      createdAt: '',
+      updatedAt: '',
+    },
+    createdAt: '',
+    updatedAt: '',
+    isSample: true,
+  }));
+};
+const categoryLabel = (slug: string) =>
+  slug
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+const categoryMatches = (merchant: Merchant, selectedCategory: string) => {
+  const requested = selectedCategory.trim().toLowerCase();
+  if (!requested) return true;
+
+  const candidates = [merchant.category?.slug, merchant.category?.name]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+
+  return candidates.some(
+    (candidate) =>
+      candidate === requested ||
+      candidate.startsWith(`${requested}-`) ||
+      requested.startsWith(`${candidate}-`),
+  );
+};
 const distanceInKm = (from: [number, number], to: [number, number]) => {
   const radians = (degrees: number) => degrees * Math.PI / 180;
   const latDistance = radians(to[0] - from[0]);
@@ -26,6 +104,8 @@ const distanceInKm = (from: [number, number], to: [number, number]) => {
 };
 
 export default function CustomerMapPage() {
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const selectedCategoryLabel = selectedCategory ? categoryLabel(selectedCategory) : '';
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [loading, setLoading] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>(PARANAQUE_CENTER);
@@ -33,7 +113,18 @@ export default function CustomerMapPage() {
   const [locationStatus, setLocationStatus] = useState<'locating' | 'found' | 'unavailable'>('locating');
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressSearchStatus, setAddressSearchStatus] = useState<'idle' | 'searching' | 'not-found' | 'error'>('idle');
+  const [searchedLocation, setSearchedLocation] = useState<{ coordinates: [number, number]; label: string } | null>(null);
   const leafletRef = useRef<typeof L | null>(null);
+
+  useEffect(() => {
+    const category = new URLSearchParams(window.location.search)
+      .get('category')
+      ?.trim()
+      .toLowerCase();
+    setSelectedCategory(category || '');
+  }, []);
 
   const locateUser = useCallback(() => {
     if (!navigator.geolocation) {
@@ -45,6 +136,7 @@ export default function CustomerMapPage() {
       position => {
         const location: [number, number] = [position.coords.latitude, position.coords.longitude];
         setUserLocation(location);
+        setSearchedLocation(null);
         setMapCenter(location);
         setLocationStatus('found');
       },
@@ -132,9 +224,77 @@ export default function CustomerMapPage() {
     return () => window.clearTimeout(request);
   }, [locateUser]);
 
-  const nearbyMerchants = userLocation
-    ? merchants.filter(merchant => distanceInKm(userLocation, [Number(merchant.latitude), Number(merchant.longitude)]) <= SEARCH_RADIUS_KM)
+  const searchAddress = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = addressQuery.trim();
+    if (query.length < 2) return;
+
+    const normalizedQuery = query.toLowerCase();
+    const isCategorySearch =
+      selectedCategory.includes(normalizedQuery) ||
+      selectedCategoryLabel.toLowerCase().includes(normalizedQuery);
+    const isMerchantSearch =
+      isCategorySearch ||
+      merchants.some(
+        (merchant) =>
+          merchant.name.toLowerCase().includes(normalizedQuery) ||
+          merchant.category?.name?.toLowerCase().includes(normalizedQuery) ||
+          merchant.category?.slug?.toLowerCase().includes(normalizedQuery),
+      ) ||
+      (SAMPLE_NAMES[selectedCategory] || []).some((name) =>
+        name.toLowerCase().includes(normalizedQuery),
+      );
+
+    if (isMerchantSearch) {
+      setSearchQuery(query);
+      setAddressSearchStatus('idle');
+      return;
+    }
+
+    setSearchQuery('');
+    setAddressSearchStatus('searching');
+    try {
+      const response = await fetch(`/api/routing/geocode?q=${encodeURIComponent(query)}&limit=1`);
+      const data = await response.json();
+      const result = data.status === 'ok' ? data.results?.[0] : null;
+      const lat = Number(result?.location?.lat);
+      const lng = Number(result?.location?.lng);
+
+      if (!result || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        setAddressSearchStatus('not-found');
+        return;
+      }
+
+      const coordinates: [number, number] = [lat, lng];
+      setSearchedLocation({ coordinates, label: result.display_name || query });
+      setMapCenter(coordinates);
+      setAddressSearchStatus('idle');
+    } catch {
+      setAddressSearchStatus('error');
+    }
+  };
+
+  const focusLocation = searchedLocation?.coordinates ?? userLocation;
+  const liveCategoryMerchants: MapMerchant[] = selectedCategory
+    ? merchants.filter((merchant) => categoryMatches(merchant, selectedCategory))
     : merchants;
+  const merchantHref = (merchant: MapMerchant) =>
+    merchant.isSample
+      ? `/customer/explore/${encodeURIComponent(selectedCategory)}`
+      : `/merchants/${merchant.slug}`;
+  const liveNearbyMerchants = focusLocation
+    ? liveCategoryMerchants.filter(
+        (merchant) =>
+          distanceInKm(focusLocation, [
+            Number(merchant.latitude),
+            Number(merchant.longitude),
+          ]) <= SEARCH_RADIUS_KM,
+      )
+    : liveCategoryMerchants;
+  const nearbyMerchants =
+    selectedCategory && liveNearbyMerchants.length === 0
+      ? sampleMerchants(selectedCategory, focusLocation ?? PARANAQUE_CENTER)
+      : liveNearbyMerchants;
   const filteredMerchants = searchQuery.trim()
     ? nearbyMerchants.filter((m) =>
         m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -146,28 +306,41 @@ export default function CustomerMapPage() {
   return (
     <div className="relative">
       {/* Mobile Map View */}
-      <div className="lg:hidden">
+      <div className="px-0 md:px-6 xl:hidden">
         {/* Search overlay */}
-        <div className="absolute top-2 left-3 right-3 z-[1000]">
-          <div className="relative">
+        <div className="absolute left-3 right-3 top-2 z-[1000] md:left-9 md:right-9">
+          <form onSubmit={searchAddress} className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
-              placeholder="Search nearby merchants..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 bg-white rounded-full text-sm shadow-lg border border-gray-200 outline-none focus:ring-2 focus:ring-[#DB0002]/30"
+              aria-label="Search street, city, food, or merchant"
+              placeholder="Search street, city, food, or merchant"
+              value={addressQuery}
+              onChange={(e) => {
+                setAddressQuery(e.target.value);
+                if (!e.target.value.trim()) setSearchQuery('');
+                if (addressSearchStatus !== 'searching') setAddressSearchStatus('idle');
+              }}
+              className="w-full pl-9 pr-20 py-2.5 bg-white rounded-full text-sm shadow-lg border border-gray-200 outline-none focus:ring-2 focus:ring-[#DB0002]/30"
             />
-          </div>
+            <button type="submit" disabled={addressSearchStatus === 'searching' || addressQuery.trim().length < 2} className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-[#075cff] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60">
+              {addressSearchStatus === 'searching' ? 'Finding…' : 'Search'}
+            </button>
+          </form>
+          {(addressSearchStatus === 'not-found' || addressSearchStatus === 'error') && (
+            <p role="alert" className="mx-4 rounded-b-lg bg-white px-3 py-1 text-xs font-medium text-red-600 shadow">
+              {addressSearchStatus === 'not-found' ? 'No matching place or merchant found. Try adding more detail.' : 'Could not search right now. Please try again.'}
+            </p>
+          )}
         </div>
-        <button type="button" onClick={locateUser} disabled={locationStatus === 'locating'} className="absolute right-3 top-16 z-[1000] flex min-h-10 items-center gap-2 rounded-full bg-white px-4 text-xs font-bold text-[#075cff] shadow-lg disabled:opacity-60">
+        <button type="button" onClick={locateUser} disabled={locationStatus === 'locating'} className="absolute right-3 top-16 z-[1000] flex min-h-10 items-center gap-2 rounded-full bg-white px-4 text-xs font-bold text-[#075cff] shadow-lg disabled:opacity-60 md:right-9">
           <span aria-hidden="true">⌖</span>{locationStatus === 'locating' ? 'Finding you…' : 'Use my location'}
         </button>
 
         {/* Map */}
-        <div style={{ height: 'calc(100vh - 180px)' }}>
+        <div className="h-[calc(100dvh-132px)] min-h-[32rem] overflow-hidden md:rounded-2xl">
           {loading || !leafletLoaded ? (
             <div className="flex items-center justify-center h-full bg-gray-100">
               <div className="text-center">
@@ -181,7 +354,7 @@ export default function CustomerMapPage() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
-              {userLocation && <><Circle center={userLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={userLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>Your location</b><br />Showing merchants within 5 km.</Popup></Marker></>}
+              {focusLocation && <><Circle center={focusLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={focusLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>{searchedLocation?.label || 'Your location'}</b><br />Showing merchants within 5 km.</Popup></Marker></>}
               {filteredMerchants.map((merchant) => {
                 if (!merchant.latitude || !merchant.longitude) return null;
                 const lat = Number(merchant.latitude);
@@ -193,9 +366,10 @@ export default function CustomerMapPage() {
                   <Marker key={merchant.id} position={[lat, lng]} icon={icon}>
                     <Popup>
                       <div className="p-1 min-w-[180px]">
-                        <Link href={`/merchants/${merchant.slug}`}>
+                        <Link href={merchantHref(merchant)}>
                           <h3 className="font-bold text-gray-900 text-sm hover:text-[#DB0002]">{merchant.name}</h3>
                         </Link>
+                        {merchant.isSample && <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">SAMPLE</span>}
                         {merchant.coverImageUrl && (
                           <img src={merchant.coverImageUrl} alt={merchant.name} className="w-full h-20 object-cover rounded mt-1 mb-1" />
                         )}
@@ -206,8 +380,8 @@ export default function CustomerMapPage() {
                           {merchant.category && <span className="text-[10px] text-gray-500">{merchant.category.name}</span>}
                         </div>
                         {merchant.address && <p className="text-[10px] text-gray-500 mt-0.5">📍 {merchant.address}</p>}
-                        <Link href={`/merchants/${merchant.slug}`} className="text-xs text-[#165BB8] hover:underline mt-1 block">
-                          View Details →
+                        <Link href={merchantHref(merchant)} className="text-xs text-[#165BB8] hover:underline mt-1 block">
+                          {merchant.isSample ? 'Back to category →' : 'View Details →'}
                         </Link>
                       </div>
                     </Popup>
@@ -220,12 +394,12 @@ export default function CustomerMapPage() {
 
         {/* Bottom merchant info cards (scrollable) */}
         {!loading && filteredMerchants.length > 0 && (
-          <div className="absolute bottom-2 left-0 right-0 z-[1000]">
+          <div className="absolute bottom-2 left-0 right-0 z-[1000] md:left-6 md:right-6">
             <div className="flex gap-2 overflow-x-auto px-3 no-scrollbar">
               {filteredMerchants.slice(0, 8).map((merchant) => (
                 <Link
                   key={merchant.id}
-                  href={`/merchants/${merchant.slug}`}
+                  href={merchantHref(merchant)}
                   className="flex-shrink-0 w-52 bg-white rounded-xl shadow-lg p-2.5 border border-gray-100"
                 >
                   <div className="flex gap-2">
@@ -238,6 +412,7 @@ export default function CustomerMapPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-xs font-bold text-gray-900 truncate">{merchant.name}</h4>
+                      {merchant.isSample && <span className="text-[8px] font-bold text-amber-600">SAMPLE</span>}
                       <div className="flex items-center gap-0.5 mt-0.5">
                         <svg className="w-3 h-3 text-yellow-400 fill-current" viewBox="0 0 20 20">
                           <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
@@ -255,13 +430,37 @@ export default function CustomerMapPage() {
       </div>
 
       {/* Desktop Map View */}
-      <div className="hidden lg:block">
+      <div className="hidden xl:block">
         <div className="mb-4">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Explore Map</h1>
-          <p className="text-gray-600">{locationStatus === 'found' ? 'Showing merchants within 5 km of your current location' : locationStatus === 'locating' ? 'Finding your current location…' : 'Location access is unavailable. Showing Parañaque while you enable browser location.'}</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            {selectedCategory ? `${selectedCategoryLabel} Merchants` : 'Explore Map'}
+          </h1>
+          <p className="text-gray-600">{searchedLocation ? `Showing merchants within 5 km of ${searchedLocation.label}` : locationStatus === 'found' ? 'Showing merchants within 5 km of your current location' : locationStatus === 'locating' ? 'Finding your current location…' : 'Location access is unavailable. Showing Parañaque while you enable browser location.'}</p>
         </div>
 
         <div className="relative rounded-xl overflow-hidden shadow-md" style={{ height: '600px' }}>
+          <form onSubmit={searchAddress} className="absolute left-4 top-4 z-[1000] flex w-[min(28rem,calc(100%-15rem))] gap-2 rounded-2xl bg-white p-2 shadow-lg">
+            <input
+              type="text"
+              aria-label="Search street, city, food, or merchant"
+              placeholder="Search street, city, food, or merchant"
+              value={addressQuery}
+              onChange={(e) => {
+                setAddressQuery(e.target.value);
+                if (!e.target.value.trim()) setSearchQuery('');
+                if (addressSearchStatus !== 'searching') setAddressSearchStatus('idle');
+              }}
+              className="min-w-0 flex-1 rounded-xl px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-[#075cff]/30"
+            />
+            <button type="submit" disabled={addressSearchStatus === 'searching' || addressQuery.trim().length < 2} className="rounded-xl bg-[#075cff] px-5 text-sm font-bold text-white disabled:opacity-60">
+              {addressSearchStatus === 'searching' ? 'Finding…' : 'Search'}
+            </button>
+            {(addressSearchStatus === 'not-found' || addressSearchStatus === 'error') && (
+              <p role="alert" className="absolute left-2 top-full mt-1 rounded-lg bg-white px-3 py-2 text-xs font-medium text-red-600 shadow">
+                {addressSearchStatus === 'not-found' ? 'No matching place or merchant found. Try adding more detail.' : 'Could not search right now. Please try again.'}
+              </p>
+            )}
+          </form>
           <button type="button" onClick={locateUser} disabled={locationStatus === 'locating'} className="absolute right-4 top-4 z-[1000] flex min-h-11 items-center gap-2 rounded-full bg-white px-5 text-sm font-bold text-[#075cff] shadow-lg disabled:opacity-60">
             <span aria-hidden="true">⌖</span>{locationStatus === 'locating' ? 'Finding your location…' : 'Use my location'}
           </button>
@@ -275,7 +474,7 @@ export default function CustomerMapPage() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
-              {userLocation && <><Circle center={userLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={userLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>Your location</b><br />Showing merchants within 5 km.</Popup></Marker></>}
+              {focusLocation && <><Circle center={focusLocation} radius={SEARCH_RADIUS_KM * 1000} pathOptions={{ color: '#075cff', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }} /><Marker position={focusLocation} icon={createMerchantIcon('#075cff')!}><Popup><b>{searchedLocation?.label || 'Your location'}</b><br />Showing merchants within 5 km.</Popup></Marker></>}
               {filteredMerchants.map((merchant) => {
                 if (!merchant.latitude || !merchant.longitude) return null;
                 const lat = Number(merchant.latitude);
@@ -287,9 +486,10 @@ export default function CustomerMapPage() {
                   <Marker key={merchant.id} position={[lat, lng]} icon={icon}>
                     <Popup>
                       <div className="p-2 min-w-[200px]">
-                        <Link href={`/merchants/${merchant.slug}`}>
+                        <Link href={merchantHref(merchant)}>
                           <h3 className="font-bold text-gray-900 mb-2 hover:text-[#DB0002]">{merchant.name}</h3>
                         </Link>
+                        {merchant.isSample && <span className="mb-2 inline-block rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">SAMPLE</span>}
                         {merchant.coverImageUrl && (
                           <img src={merchant.coverImageUrl} alt={merchant.name} className="w-full h-24 object-cover rounded mb-2" />
                         )}
@@ -301,7 +501,7 @@ export default function CustomerMapPage() {
                           {merchant.category && <span className="text-xs text-gray-500">{merchant.category.name}</span>}
                         </div>
                         {merchant.address && <p className="text-xs text-gray-500 mb-2">📍 {merchant.address}</p>}
-                        <Link href={`/merchants/${merchant.slug}`} className="text-sm text-[#165BB8] hover:underline">View Details →</Link>
+                        <Link href={merchantHref(merchant)} className="text-sm text-[#165BB8] hover:underline">{merchant.isSample ? 'Back to category →' : 'View Details →'}</Link>
                       </div>
                     </Popup>
                   </Marker>

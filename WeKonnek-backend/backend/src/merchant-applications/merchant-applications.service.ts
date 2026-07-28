@@ -25,9 +25,14 @@ function serializeApplication(a: any) {
     category_name: a.categoryName,
     city_municipality: a.cityMunicipality,
     barangay: a.barangay,
+    council_district: a.councilDistrict,
+    geographic_area: a.geographicArea,
     latitude: a.latitude,
     longitude: a.longitude,
     business_description: a.businessDescription,
+    has_branches: a.hasBranches,
+    branch_count: a.branchCount,
+    product_count: a.productCount,
     source: a.source,
     assigned_coordinator_id: a.assignedCoordinatorId,
     assignment_status: a.assignedCoordinatorId ? 'assigned' : 'unassigned',
@@ -67,6 +72,35 @@ function slugify(name: string): string {
     .slice(0, 60);
 }
 
+function normalizePlace(value: string | null | undefined) {
+  return String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/\(city\)/g, '').replace(/^city of\s+/, '').replace(/\bcity$/, '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+function normalizeDistrict(value: string | null | undefined) {
+  const normalized = normalizePlace(value)
+    .replace(/\b(congressional|council)\b/g, '')
+    .replace(/\bdistrict\b/g, '')
+    .replace(/\b(\d+)(st|nd|rd|th)\b/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+  return normalized.match(/\d+/)?.[0] || normalized;
+}
+
+function coverageMatchesApplication(
+  coverage: { cityMunicipalityName: string; congressionalDistrict: string; areas: unknown },
+  application: { cityMunicipality: string | null; councilDistrict: string | null; geographicArea: string | null; barangay: string | null },
+) {
+  const areas = Array.isArray(coverage.areas)
+    ? coverage.areas.flatMap(area => area && typeof area === 'object' && 'name' in area ? [normalizePlace(String(area.name))] : [])
+    : [];
+  const applicationArea = normalizePlace(application.geographicArea || application.barangay);
+  return normalizePlace(coverage.cityMunicipalityName) === normalizePlace(application.cityMunicipality)
+    && (!application.councilDistrict || normalizeDistrict(coverage.congressionalDistrict) === normalizeDistrict(application.councilDistrict))
+    && (!areas.length || Boolean(applicationArea && areas.includes(applicationArea)));
+}
+
 @Injectable()
 export class MerchantApplicationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -86,9 +120,22 @@ export class MerchantApplicationsService {
         categoryName: input.category_name ?? input.categoryName ?? null,
         cityMunicipality: input.city_municipality ?? input.cityMunicipality ?? null,
         barangay: input.barangay ?? null,
+        councilDistrict: input.council_district ?? input.councilDistrict ?? null,
+        geographicArea: input.geographic_area ?? input.geographicArea ?? null,
         latitude: input.latitude !== undefined && input.latitude !== '' ? Number(input.latitude) : null,
         longitude: input.longitude !== undefined && input.longitude !== '' ? Number(input.longitude) : null,
         businessDescription: input.business_description ?? input.businessDescription ?? null,
+        hasBranches: input.has_branches === 'yes' || input.has_branches === true
+          ? true
+          : input.has_branches === 'no' || input.has_branches === false
+            ? false
+            : null,
+        branchCount: input.branch_count !== undefined && input.branch_count !== ''
+          ? Number(input.branch_count)
+          : null,
+        productCount: input.product_count !== undefined && input.product_count !== ''
+          ? Number(input.product_count)
+          : null,
         source: input.source ?? 'merchant_application',
         subscriptionTier: input.subscription_tier ?? input.subscriptionTier ?? 'basic',
         subscriptionPlan: input.subscription_plan ?? input.subscriptionPlan ?? 'weekly',
@@ -120,6 +167,34 @@ export class MerchantApplicationsService {
     return apps.map(serializeApplication);
   }
 
+  async coverageOptions() {
+    const coverages = await this.prisma.managementZoneCoverage.findMany({
+      where: { zone: { isActive: true } },
+      select: { cityMunicipalityCode: true, cityMunicipalityName: true, congressionalDistrict: true, areas: true },
+      orderBy: [{ cityMunicipalityName: 'asc' }, { congressionalDistrict: 'asc' }],
+    });
+    type Area = { code: string; name: string };
+    type District = { name: string; areas: Area[] };
+    const cities = new Map<string, { code: string; name: string; districts: District[] }>();
+    coverages.forEach(item => {
+      const city = cities.get(item.cityMunicipalityCode) || { code: item.cityMunicipalityCode, name: item.cityMunicipalityName, districts: [] };
+      let district = city.districts.find(entry => entry.name === item.congressionalDistrict);
+      if (!district) {
+        district = { name: item.congressionalDistrict, areas: [] };
+        city.districts.push(district);
+      }
+      if (Array.isArray(item.areas)) {
+        item.areas.forEach(value => {
+          if (!value || typeof value !== 'object' || !('code' in value) || !('name' in value)) return;
+          const area = { code: String(value.code), name: String(value.name) };
+          if (!district!.areas.some(entry => entry.code === area.code)) district!.areas.push(area);
+        });
+      }
+      cities.set(item.cityMunicipalityCode, city);
+    });
+    return Array.from(cities.values());
+  }
+
   async findById(id: number) {
     const a = await this.prisma.merchantApplication.findUnique({
       where: { id: Number(id) },
@@ -131,7 +206,10 @@ export class MerchantApplicationsService {
   async findCoordinatorLeads(user: { id: string; email?: string | null; role?: string }) {
     const isAdmin = user.role === 'admin';
     const coordinator = isAdmin ? null : await this.prisma.coordinatorApplication.findFirst({
-      where: { email: { equals: user.email ?? '', mode: 'insensitive' }, status: 'approved' },
+      where: {
+        OR: [{ userId: user.id }, { email: { equals: user.email ?? '', mode: 'insensitive' } }],
+        status: 'approved',
+      },
       include: { managementZone: { include: { coverages: true } } },
       orderBy: { submittedAt: 'desc' },
     });
@@ -141,20 +219,74 @@ export class MerchantApplicationsService {
         ? item.areas.flatMap(area => area && typeof area === 'object' && 'name' in area ? [String(area.name)] : [])
         : [];
       return {
-        cityMunicipality: { equals: item.cityMunicipalityName, mode: 'insensitive' as const },
-        ...(areas.length ? { barangay: { in: areas, mode: 'insensitive' as const } } : {}),
+        city: normalizePlace(item.cityMunicipalityName),
+        district: normalizeDistrict(item.congressionalDistrict),
+        areas: areas.map(normalizePlace),
       };
     }) ?? [];
     if (!isAdmin && coverageRules.length === 0) throw new ForbiddenException('Your coordinator zone has no city or municipality coverage');
     const applications = await this.prisma.merchantApplication.findMany({
       where: {
         source: 'website_callback',
-        ...(coordinator ? { OR: coverageRules } : {}),
+        status: { in: ['pending', 'reviewing'] },
         AND: [{ OR: [{ assignedCoordinatorId: null }, { assignedCoordinatorId: user.id }] }],
       },
       orderBy: { submittedAt: 'desc' },
     });
-    return applications.map(serializeApplication);
+    const visible = isAdmin ? applications : applications.filter(application => {
+      if (application.assignedCoordinatorId === user.id) return true;
+      const applicationCity = normalizePlace(application.cityMunicipality);
+      const applicationDistrict = normalizeDistrict(application.councilDistrict);
+      const applicationArea = normalizePlace(application.geographicArea || application.barangay);
+      return coverageRules.some(rule => {
+        const cityMatches = rule.city === applicationCity;
+        const districtMatches = !applicationDistrict || !rule.district || rule.district === applicationDistrict;
+        const areaMatches = !rule.areas.length || Boolean(applicationArea && rule.areas.includes(applicationArea));
+        return cityMatches && districtMatches && areaMatches;
+      });
+    });
+    return visible.map(serializeApplication);
+  }
+
+  async eligibleCoordinators(id: number) {
+    const application = await this.prisma.merchantApplication.findUnique({ where: { id } });
+    if (!application) throw new NotFoundException('Application not found');
+    const coordinators = await this.prisma.coordinatorApplication.findMany({
+      where: { status: 'approved', userId: { not: null }, managementZoneId: { not: null } },
+      include: { managementZone: { include: { coverages: true } } },
+      orderBy: { fullName: 'asc' },
+    });
+    return coordinators
+      .filter(coordinator => coordinator.managementZone?.coverages.some(coverage => coverageMatchesApplication(coverage, application)))
+      .map(coordinator => ({
+        id: coordinator.id,
+        user_id: coordinator.userId,
+        full_name: coordinator.fullName,
+        email: coordinator.email,
+        coordinator_code: coordinator.coordinatorCode,
+        zone_name: coordinator.managementZone?.name,
+      }));
+  }
+
+  async assignCoordinator(id: number, coordinatorUserId: string) {
+    const application = await this.prisma.merchantApplication.findUnique({ where: { id } });
+    if (!application) throw new NotFoundException('Application not found');
+    if (application.status === 'approved' || application.status === 'rejected') {
+      throw new BadRequestException('This application can no longer be assigned');
+    }
+    const eligible = await this.eligibleCoordinators(id);
+    if (!eligible.some(coordinator => coordinator.user_id === coordinatorUserId)) {
+      throw new BadRequestException('The selected coordinator is not assigned to the merchant area');
+    }
+    const updated = await this.prisma.merchantApplication.update({
+      where: { id },
+      data: {
+        assignedCoordinatorId: coordinatorUserId,
+        assignedAt: new Date(),
+        status: 'reviewing',
+      },
+    });
+    return serializeApplication(updated);
   }
 
   async claimLead(id: number, user: { id: string; email?: string | null; role?: string }) {
@@ -175,6 +307,9 @@ export class MerchantApplicationsService {
       where: { id: Number(id) },
     });
     if (!application) throw new NotFoundException('Application not found');
+    if (status === 'approved' && !application.assignedCoordinatorId) {
+      throw new BadRequestException('Assign a coordinator before approving this application');
+    }
 
     const merchantCode = status === 'approved'
       ? application.merchantCode ?? await this.generateMerchantCode()

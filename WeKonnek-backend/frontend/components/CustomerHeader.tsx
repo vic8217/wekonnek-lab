@@ -9,7 +9,11 @@ import ChangePasswordModal from './ChangePasswordModal';
 import VoiceSearchButton from './VoiceSearchButton';
 import { getTotalCartCount, getActiveCartMerchantIds, onCartChange } from '@/lib/cart';
 
-export default function CustomerHeader() {
+export default function CustomerHeader({
+  hideMobileSearch = false,
+}: {
+  hideMobileSearch?: boolean;
+}) {
   const router = useRouter();
   const { user: authUser, signOut } = useAuth();
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
@@ -73,11 +77,13 @@ export default function CustomerHeader() {
               </span>
             </Link>
             <div className="flex items-center">
-              <button className="p-2" title="Search" onClick={() => setShowMobileSearch(!showMobileSearch)}>
-                <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </button>
+              {!hideMobileSearch && (
+                <button className="p-2" title="Search" onClick={() => setShowMobileSearch(!showMobileSearch)}>
+                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </button>
+              )}
               <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
                 <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
@@ -93,7 +99,7 @@ export default function CustomerHeader() {
         </div>
 
         {/* Search / Location Bar */}
-        <div className="px-4 pb-2">
+        {!hideMobileSearch && <div className="px-4 pb-2">
           <form onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim()) router.push(`/customer/search?q=${searchQuery}`); }} className="relative">
             <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -129,10 +135,10 @@ export default function CustomerHeader() {
               </button>
             </div>
           </form>
-        </div>
+        </div>}
 
         {/* Expandable Mobile Search */}
-        {showMobileSearch && (
+        {!hideMobileSearch && showMobileSearch && (
           <div className="px-4 pb-3">
             <form onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim()) { router.push(`/customer/search?q=${searchQuery}`); setShowMobileSearch(false); } }} className="relative">
               <input

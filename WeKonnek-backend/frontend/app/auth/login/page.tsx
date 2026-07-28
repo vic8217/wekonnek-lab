@@ -78,14 +78,26 @@ function LoginForm() {
       };
 
       setAuth(access_token, authUser);
-      await refreshAuth();
 
       const userType = authUser.role;
+      const portalDestination =
+        userType === 'coordinator'
+          ? '/coordinator/dashboard'
+          : userType === 'admin' || userType === 'staff'
+            ? '/admin/dashboard'
+            : null;
+
+      // Privileged sessions use portal-specific storage. A full navigation
+      // initializes AuthProvider against the destination portal's namespace.
+      if (portalDestination) {
+        window.location.assign(redirectTo || portalDestination);
+        return;
+      }
+
+      await refreshAuth();
 
       if (redirectTo) {
         router.replace(redirectTo);
-      } else if (userType === 'admin' || userType === 'staff') {
-        router.replace('/admin/dashboard');
       } else if (userType === 'merchant') {
         router.replace('/merchant/dashboard');
       } else {

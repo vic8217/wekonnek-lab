@@ -39,31 +39,91 @@ interface AuthState {
 
 const TOKEN_KEY = 'wk_token';
 const USER_KEY = 'wk_user';
+const ADMIN_TOKEN_KEY = 'wk_admin_token';
+const ADMIN_USER_KEY = 'wk_admin_user';
+const COORDINATOR_TOKEN_KEY = 'wk_coordinator_token';
+const COORDINATOR_USER_KEY = 'wk_coordinator_user';
 
-// ─── Standalone helpers (usable outside React components) ──
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(TOKEN_KEY);
+type SessionScope = 'default' | 'admin' | 'coordinator';
+
+function scopeForPath(): SessionScope {
+  if (typeof window === 'undefined') return 'default';
+  if (window.location.pathname.startsWith('/admin')) return 'admin';
+  if (window.location.pathname.startsWith('/coordinator')) return 'coordinator';
+  return 'default';
 }
 
-export function getUser(): AuthUser | null {
-  if (typeof window === 'undefined') return null;
+function scopeForUser(user: AuthUser): SessionScope {
+  if (user.userType === 'admin' || user.userType === 'staff') return 'admin';
+  if (user.userType === 'coordinator') return 'coordinator';
+  return 'default';
+}
+
+function keysForScope(scope: SessionScope) {
+  if (scope === 'admin') return { token: ADMIN_TOKEN_KEY, user: ADMIN_USER_KEY };
+  if (scope === 'coordinator') {
+    return { token: COORDINATOR_TOKEN_KEY, user: COORDINATOR_USER_KEY };
+  }
+  return { token: TOKEN_KEY, user: USER_KEY };
+}
+
+function userBelongsToScope(user: AuthUser, scope: SessionScope) {
+  if (scope === 'admin') return user.userType === 'admin' || user.userType === 'staff';
+  if (scope === 'coordinator') return user.userType === 'coordinator';
+  return user.userType !== 'admin' && user.userType !== 'staff' && user.userType !== 'coordinator';
+}
+
+function readStoredUser(key: string): AuthUser | null {
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
-export function setAuth(token: string, user: AuthUser) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+/**
+ * Move a compatible legacy session into its portal-specific namespace.
+ * This keeps users signed in after the storage separation is deployed.
+ */
+function migrateLegacySession(scope: SessionScope) {
+  if (scope === 'default') return;
+  const keys = keysForScope(scope);
+  if (localStorage.getItem(keys.token) && localStorage.getItem(keys.user)) return;
+
+  const legacyToken = localStorage.getItem(TOKEN_KEY);
+  const legacyUser = readStoredUser(USER_KEY);
+  if (!legacyToken || !legacyUser || !userBelongsToScope(legacyUser, scope)) return;
+
+  localStorage.setItem(keys.token, legacyToken);
+  localStorage.setItem(keys.user, JSON.stringify(legacyUser));
+}
+
+// ─── Standalone helpers (usable outside React components) ──
+export function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const scope = scopeForPath();
+  migrateLegacySession(scope);
+  return localStorage.getItem(keysForScope(scope).token);
+}
+
+export function getUser(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+  const scope = scopeForPath();
+  migrateLegacySession(scope);
+  return readStoredUser(keysForScope(scope).user);
+}
+
+export function setAuth(token: string, user: AuthUser, scope: SessionScope = scopeForUser(user)) {
+  const keys = keysForScope(scope);
+  localStorage.setItem(keys.token, token);
+  localStorage.setItem(keys.user, JSON.stringify(user));
 }
 
 export function clearAuth() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  const keys = keysForScope(scopeForPath());
+  localStorage.removeItem(keys.token);
+  localStorage.removeItem(keys.user);
 }
 
 // ─── React context ────────────────────────────────────────
@@ -126,7 +186,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         avatarUrl: profile.avatarUrl ?? profile.avatar_url ?? null,
       };
 
-      localStorage.setItem(USER_KEY, JSON.stringify(authUser));
+      // Refresh the same portal session from which this token was read.
+      // This matters when an admin is intentionally using the Coordinator portal.
+      const keys = keysForScope(scopeForPath());
+      localStorage.setItem(keys.user, JSON.stringify(authUser));
       setUser(authUser);
     } catch {
       // Keep the last verified local session during transient network errors.
@@ -161,7 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === TOKEN_KEY || e.key === USER_KEY) refreshAuth();
+      const keys = keysForScope(scopeForPath());
+      if (e.key === keys.token || e.key === keys.user) refreshAuth();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
@@ -225,10 +289,13 @@ export function useRequireAuth(allowedTypes: UserType[], loginPath: string = ROU
     }
 
     if (!allowedTypes.includes(auth.user.userType)) {
-      // Keep portal entry points independent. A session for one portal should
-      // not hijack another portal's URL (for example, a merchant visiting
-      // /admin still needs to be able to reach the admin sign-in screen).
-      router.replace(loginPath);
+      if (auth.user.userType === 'coordinator') {
+        router.replace('/coordinator/dashboard');
+      } else if (auth.user.userType === 'merchant') {
+        router.replace('/merchant/dashboard');
+      } else {
+        router.replace(loginPath);
+      }
     }
   }, [auth.loading, auth.user, allowedTypes, loginPath, router]);
 
