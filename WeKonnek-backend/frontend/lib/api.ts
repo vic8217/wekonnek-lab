@@ -15,7 +15,9 @@ const apiClient = axios.create({
 // Attach the JWT (when present) so authenticated proxy routes can forward it.
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('wk_token');
+    const token = window.location.pathname.startsWith('/merchant')
+      ? sessionStorage.getItem('wk_merchant_token')
+      : localStorage.getItem('wk_token');
     if (token) {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;

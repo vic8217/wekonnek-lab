@@ -228,10 +228,18 @@ export class AuthService {
         throw new UnauthorizedException('Merchant code is required');
       }
       const merchant = await this.prisma.merchant.findFirst({
-        where: { userId: user.id, merchantCode: code, isActive: true },
+        // `isActive` controls marketplace visibility and is set to false when a
+        // daily-plan wallet cannot cover the subscription fee. Owners must
+        // still be able to enter the portal to fund and manage their account.
+        where: { userId: user.id, merchantCode: code },
       });
       if (!merchant) {
         throw new UnauthorizedException('Invalid merchant code');
+      }
+      if (merchant.status === 'suspended' || merchant.status === 'deactivated') {
+        throw new UnauthorizedException(
+          'This merchant account has been suspended or deactivated. Please contact support.',
+        );
       }
     }
 

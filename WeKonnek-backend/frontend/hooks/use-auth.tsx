@@ -25,6 +25,7 @@ export interface AuthUser {
   firstName: string | null;
   lastName: string | null;
   avatarUrl?: string | null;
+  mustChangePassword?: boolean;
 }
 
 interface AuthState {
@@ -43,19 +44,23 @@ const ADMIN_TOKEN_KEY = 'wk_admin_token';
 const ADMIN_USER_KEY = 'wk_admin_user';
 const COORDINATOR_TOKEN_KEY = 'wk_coordinator_token';
 const COORDINATOR_USER_KEY = 'wk_coordinator_user';
+const MERCHANT_TOKEN_KEY = 'wk_merchant_token';
+const MERCHANT_USER_KEY = 'wk_merchant_user';
 
-type SessionScope = 'default' | 'admin' | 'coordinator';
+type SessionScope = 'default' | 'merchant' | 'admin' | 'coordinator';
 
 function scopeForPath(): SessionScope {
   if (typeof window === 'undefined') return 'default';
   if (window.location.pathname.startsWith('/admin')) return 'admin';
   if (window.location.pathname.startsWith('/coordinator')) return 'coordinator';
+  if (window.location.pathname.startsWith('/merchant')) return 'merchant';
   return 'default';
 }
 
 function scopeForUser(user: AuthUser): SessionScope {
   if (user.userType === 'admin' || user.userType === 'staff') return 'admin';
   if (user.userType === 'coordinator') return 'coordinator';
+  if (user.userType === 'merchant') return 'merchant';
   return 'default';
 }
 
@@ -64,18 +69,26 @@ function keysForScope(scope: SessionScope) {
   if (scope === 'coordinator') {
     return { token: COORDINATOR_TOKEN_KEY, user: COORDINATOR_USER_KEY };
   }
+  if (scope === 'merchant') return { token: MERCHANT_TOKEN_KEY, user: MERCHANT_USER_KEY };
   return { token: TOKEN_KEY, user: USER_KEY };
+}
+
+function storageForScope(scope: SessionScope): Storage {
+  // Merchant credentials are tab-scoped so two onboarded merchants can be
+  // opened in separate tabs without one login replacing the other.
+  return scope === 'merchant' ? sessionStorage : localStorage;
 }
 
 function userBelongsToScope(user: AuthUser, scope: SessionScope) {
   if (scope === 'admin') return user.userType === 'admin' || user.userType === 'staff';
   if (scope === 'coordinator') return user.userType === 'coordinator';
+  if (scope === 'merchant') return user.userType === 'merchant';
   return user.userType !== 'admin' && user.userType !== 'staff' && user.userType !== 'coordinator';
 }
 
-function readStoredUser(key: string): AuthUser | null {
+function readStoredUser(key: string, storage: Storage = localStorage): AuthUser | null {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = storage.getItem(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -89,14 +102,15 @@ function readStoredUser(key: string): AuthUser | null {
 function migrateLegacySession(scope: SessionScope) {
   if (scope === 'default') return;
   const keys = keysForScope(scope);
-  if (localStorage.getItem(keys.token) && localStorage.getItem(keys.user)) return;
+  const storage = storageForScope(scope);
+  if (storage.getItem(keys.token) && storage.getItem(keys.user)) return;
 
   const legacyToken = localStorage.getItem(TOKEN_KEY);
   const legacyUser = readStoredUser(USER_KEY);
   if (!legacyToken || !legacyUser || !userBelongsToScope(legacyUser, scope)) return;
 
-  localStorage.setItem(keys.token, legacyToken);
-  localStorage.setItem(keys.user, JSON.stringify(legacyUser));
+  storage.setItem(keys.token, legacyToken);
+  storage.setItem(keys.user, JSON.stringify(legacyUser));
 }
 
 // ─── Standalone helpers (usable outside React components) ──
@@ -104,26 +118,28 @@ export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   const scope = scopeForPath();
   migrateLegacySession(scope);
-  return localStorage.getItem(keysForScope(scope).token);
+  return storageForScope(scope).getItem(keysForScope(scope).token);
 }
 
 export function getUser(): AuthUser | null {
   if (typeof window === 'undefined') return null;
   const scope = scopeForPath();
   migrateLegacySession(scope);
-  return readStoredUser(keysForScope(scope).user);
+  return readStoredUser(keysForScope(scope).user, storageForScope(scope));
 }
 
 export function setAuth(token: string, user: AuthUser, scope: SessionScope = scopeForUser(user)) {
   const keys = keysForScope(scope);
-  localStorage.setItem(keys.token, token);
-  localStorage.setItem(keys.user, JSON.stringify(user));
+  const storage = storageForScope(scope);
+  storage.setItem(keys.token, token);
+  storage.setItem(keys.user, JSON.stringify(user));
 }
 
 export function clearAuth() {
   const keys = keysForScope(scopeForPath());
-  localStorage.removeItem(keys.token);
-  localStorage.removeItem(keys.user);
+  const storage = storageForScope(scopeForPath());
+  storage.removeItem(keys.token);
+  storage.removeItem(keys.user);
 }
 
 // ─── React context ────────────────────────────────────────
@@ -184,12 +200,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         firstName: profile.firstName ?? profile.first_name ?? null,
         lastName: profile.lastName ?? profile.last_name ?? null,
         avatarUrl: profile.avatarUrl ?? profile.avatar_url ?? null,
+        mustChangePassword: Boolean(profile.mustChangePassword ?? profile.must_change_password),
       };
 
       // Refresh the same portal session from which this token was read.
       // This matters when an admin is intentionally using the Coordinator portal.
       const keys = keysForScope(scopeForPath());
-      localStorage.setItem(keys.user, JSON.stringify(authUser));
+      storageForScope(scopeForPath()).setItem(keys.user, JSON.stringify(authUser));
       setUser(authUser);
     } catch {
       // Keep the last verified local session during transient network errors.

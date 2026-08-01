@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsEmail,
   IsUrl,
+  IsIn,
   Min,
   Max,
 } from 'class-validator';
@@ -120,4 +121,31 @@ export class CreateMerchantDto {
   @IsBoolean()
   @IsOptional()
   isVerified?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'non_vat_percentage_tax',
+    description: 'Business tax classification used for invoicing',
+  })
+  @IsString()
+  @IsIn([
+    '',
+    'vat_registered',
+    'non_vat_percentage_tax',
+    'vat_exempt',
+    'zero_rated_vat',
+    'government_entity',
+    'boi_peza_registered',
+  ])
+  @IsOptional()
+  taxClassification?: string;
+
+  @ApiPropertyOptional({ description: 'Tax Identification Number' })
+  @IsString()
+  @IsOptional()
+  tin?: string;
+
+  @ApiPropertyOptional({ description: 'BIR-registered business name' })
+  @IsString()
+  @IsOptional()
+  registeredBusinessName?: string;
 }

@@ -4,6 +4,13 @@ import { CreateMerchantDto } from './dto/create-merchant.dto';
 import { UpdateMerchantDto } from './dto/update-merchant.dto';
 import { SearchMerchantsDto } from './dto/search-merchants.dto';
 import { Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
+
+function addOnQuantity(quantities: unknown, id: string) {
+  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
+  const value = Number((quantities as Record<string, unknown>)[id]);
+  return Number.isInteger(value) && value > 0 ? value : 1;
+}
 
 /**
  * The merchant/admin portals read snake_case fields while the customer
@@ -14,6 +21,7 @@ function serializeMerchant<T extends Record<string, any> | null>(merchant: T): T
   if (!merchant) return merchant;
   return {
     ...merchant,
+    merchant_code: merchant.merchantCode,
     is_active: merchant.isActive,
     is_verified: merchant.isVerified,
     category_id: merchant.categoryId,
@@ -29,6 +37,8 @@ function serializeMerchant<T extends Record<string, any> | null>(merchant: T): T
     subscription_expires_at: merchant.subscriptionExpiresAt,
     auto_renew: merchant.autoRenew,
     payment_method: merchant.paymentMethod,
+    tax_classification: merchant.taxClassification,
+    registered_business_name: merchant.registeredBusinessName,
     suspension_reason: merchant.suspensionReason,
     suspension_duration: merchant.suspensionDuration,
     suspended_until: merchant.suspendedUntil,
@@ -53,6 +63,8 @@ function normalizeMerchantInput(input: Record<string, any>): Record<string, any>
     subscription_plan: 'subscriptionPlan',
     subscription_amount: 'subscriptionAmount',
     payment_method: 'paymentMethod',
+    tax_classification: 'taxClassification',
+    registered_business_name: 'registeredBusinessName',
     suspension_reason: 'suspensionReason',
     suspension_duration: 'suspensionDuration',
     suspended_until: 'suspendedUntil',
@@ -98,7 +110,75 @@ export class MerchantsService {
     if (!merchant) {
       throw new NotFoundException('No merchant profile found for this account');
     }
-    return serializeMerchant(merchant);
+    const coverage = await this.getSubscriptionCoverage(userId);
+    return {
+      ...serializeMerchant(merchant),
+      ...coverage,
+    };
+  }
+
+  async getSubscriptionCoverage(userId: string) {
+    const merchant = await this.prisma.merchant.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!merchant) {
+      throw new NotFoundException('No merchant profile found for this account');
+    }
+
+    const [wallet, application] = await Promise.all([
+      this.prisma.wallet.findUnique({ where: { userId } }),
+      merchant.merchantCode
+        ? this.prisma.merchantApplication.findUnique({
+            where: { merchantCode: merchant.merchantCode },
+          })
+        : null,
+    ]);
+    const addOns = application?.selectedAddOnIds.length
+      ? await this.prisma.subscriptionAddOnPackage.findMany({
+          where: { id: { in: application.selectedAddOnIds } },
+          select: { id: true, amount: true },
+        })
+      : [];
+    const planFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount);
+    const addOnFee = addOns.reduce(
+      (sum, addOn) =>
+        sum + Number(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+      0,
+    );
+    const dailySubscriptionFee = planFee + addOnFee;
+    const walletBalance = Number(wallet?.balance || 0);
+    const fundedDays = dailySubscriptionFee > 0
+      ? Math.floor(walletBalance / dailySubscriptionFee)
+      : 0;
+    const activeThrough = fundedDays > 0
+      ? new Date(Date.now() + fundedDays * 24 * 60 * 60 * 1000)
+      : null;
+    const isDailyPlan = merchant.subscriptionPlan.toLowerCase() === 'daily';
+    const accountActive = !isDailyPlan || walletBalance >= dailySubscriptionFee;
+    if (isDailyPlan) {
+      const nextStatus = accountActive
+        ? merchant.status === 'inactive' ? 'active' : merchant.status
+        : merchant.status === 'active' ? 'inactive' : merchant.status;
+      await this.prisma.merchant.update({
+        where: { id: merchant.id },
+        data: {
+          isActive: accountActive && nextStatus === 'active',
+          status: nextStatus,
+          subscriptionStatus: accountActive ? 'active' : 'inactive',
+        },
+      });
+    }
+
+    return {
+      wallet_balance: walletBalance,
+      plan_fee: planFee,
+      add_on_fee: addOnFee,
+      daily_subscription_fee: dailySubscriptionFee,
+      funded_days: fundedDays,
+      active_through: activeThrough,
+      account_active: accountActive,
+    };
   }
 
   async findAll(status?: string) {
@@ -115,6 +195,150 @@ export class MerchantsService {
       orderBy: { name: 'asc' },
     });
     return merchants.map(serializeMerchant);
+  }
+
+  async findAllForAdmin(status?: string) {
+    const where: Prisma.MerchantWhereInput = status && status !== 'all' ? { status } : {};
+    const merchants = await this.prisma.merchant.findMany({
+      where,
+      include: { category: true, subCategory: true },
+      orderBy: { name: 'asc' },
+    });
+    const codes = merchants.flatMap(merchant => merchant.merchantCode ? [merchant.merchantCode] : []);
+    const applications = codes.length ? await this.prisma.merchantApplication.findMany({
+      where: { merchantCode: { in: codes }, status: 'approved' },
+      select: { merchantCode: true, temporaryPassword: true, recoveryKey: true, subscriptionAmount: true, selectedAddOnIds: true, selectedAddOnQuantities: true },
+    }) : [];
+    const addOnIds = [...new Set(applications.flatMap(application => application.selectedAddOnIds))];
+    const addOns = addOnIds.length ? await this.prisma.subscriptionAddOnPackage.findMany({
+      where: { id: { in: addOnIds } },
+      select: { id: true, amount: true },
+    }) : [];
+    const merchantIds = merchants.map(merchant => merchant.id);
+    const paidPayments = merchantIds.length ? await this.prisma.subscriptionPayment.groupBy({
+      by: ['merchantId'],
+      where: { merchantId: { in: merchantIds }, status: 'paid' },
+      _sum: { amount: true },
+    }) : [];
+    const addOnAmounts = new Map(addOns.map(addOn => [addOn.id, Number(addOn.amount)]));
+    const paidByMerchant = new Map(paidPayments.map(payment => [payment.merchantId, Number(payment._sum.amount || 0)]));
+    const credentials = new Map(applications.map(application => [application.merchantCode, application]));
+    return merchants.map(merchant => {
+      const application = merchant.merchantCode ? credentials.get(merchant.merchantCode) : undefined;
+      const totalSubscriptionFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount)
+        + (application?.selectedAddOnIds || []).reduce(
+          (sum, addOnId) =>
+            sum +
+            (addOnAmounts.get(addOnId) || 0) *
+              addOnQuantity(application?.selectedAddOnQuantities, addOnId),
+          0,
+        );
+      const paid = paidByMerchant.get(merchant.id) || 0;
+      return {
+        ...serializeMerchant(merchant),
+        temporary_password: application?.temporaryPassword ?? null,
+        recovery_key: application?.recoveryKey ?? null,
+        total_subscription_fee: totalSubscriptionFee,
+        total_fee: totalSubscriptionFee,
+        wallet_balance: Math.max(totalSubscriptionFee - paid, 0),
+      };
+    });
+  }
+
+  async getAdminDetails(id: number) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+    const application = merchant.merchantCode
+      ? await this.prisma.merchantApplication.findUnique({ where: { merchantCode: merchant.merchantCode } })
+      : null;
+    const addOns = application?.selectedAddOnIds.length
+      ? await this.prisma.subscriptionAddOnPackage.findMany({
+          where: { id: { in: application.selectedAddOnIds } },
+          orderBy: { name: 'asc' },
+        })
+      : [];
+    const planFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount);
+    const addOnFee = addOns.reduce(
+      (sum, addOn) =>
+        sum + Number(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+      0,
+    );
+    return {
+      ...serializeMerchant(merchant),
+      temporary_password: application?.temporaryPassword ?? null,
+      recovery_key: application?.recoveryKey ?? null,
+      fee_breakdown: {
+        plan: {
+          name: application?.subscriptionTier ?? merchant.subscriptionTier,
+          amount: planFee,
+          billing_unit: application?.subscriptionPlan ?? merchant.subscriptionPlan,
+        },
+        add_ons: addOns.map(addOn => ({
+          id: addOn.id,
+          name: addOn.name,
+          amount: Number(addOn.amount),
+          quantity: addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+          subtotal:
+            Number(addOn.amount) *
+            addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+          billing_unit: addOn.billingUnit,
+          amount_basis: addOn.amountBasis,
+        })),
+        add_on_fee: addOnFee,
+        total_fee: planFee + addOnFee,
+      },
+    };
+  }
+
+  async getSubscriptionLedger(id: number) {
+    const details = await this.getAdminDetails(id);
+    const payments = await this.prisma.subscriptionPayment.findMany({
+      where: { merchantId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const totalBilled = details.fee_breakdown.total_fee;
+    const totalPaid = payments
+      .filter(payment => payment.status === 'paid')
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    return {
+      merchant: { id: details.id, name: details.name, merchant_code: details.merchantCode },
+      fee_breakdown: details.fee_breakdown,
+      balance: {
+        total_billed: totalBilled,
+        total_paid: totalPaid,
+        unpaid: Math.max(totalBilled - totalPaid, 0),
+      },
+      payments: payments.map(payment => ({
+        id: payment.id,
+        tier: payment.tier,
+        plan: payment.plan,
+        amount: Number(payment.amount),
+        payment_method: payment.paymentMethod,
+        gateway: payment.gateway,
+        status: payment.status,
+        payment_ref: payment.paymentRef,
+        period_start: payment.periodStart,
+        period_end: payment.periodEnd,
+        created_at: payment.createdAt,
+      })),
+    };
+  }
+
+  async generateRecoveryKey(id: number) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id } });
+    if (!merchant?.merchantCode) throw new NotFoundException('Approved merchant account not found');
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { merchantCode: merchant.merchantCode },
+    });
+    if (!application?.userId || application.status !== 'approved') {
+      throw new NotFoundException('Approved merchant application not found');
+    }
+    const recoveryKey = `WKR-${randomBytes(18).toString('base64url')}`;
+    await this.prisma.merchantApplication.update({
+      where: { id: application.id },
+      data: { recoveryKey },
+    });
+    return { recovery_key: recoveryKey, merchant_code: merchant.merchantCode };
   }
 
   async search(searchDto: SearchMerchantsDto) {
@@ -322,6 +546,16 @@ export class MerchantsService {
       where: { id },
       data: data as any,
       include: { category: true, subCategory: true },
+    });
+    await this.prisma.branch.updateMany({
+      where: { merchantId: id, isDefault: true },
+      data: {
+        name: merchant.name,
+        phone: merchant.phone,
+        tin: merchant.tin,
+        registeredBusinessName: merchant.registeredBusinessName || merchant.name,
+        taxClassification: merchant.taxClassification,
+      },
     });
     return serializeMerchant(merchant);
   }

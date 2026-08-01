@@ -149,7 +149,10 @@ export class UsersService {
     }
 
     const hashed = await bcrypt.hash(newPassword, 10);
-    await this.prisma.user.update({ where: { id }, data: { password: hashed } });
+    await this.prisma.user.update({
+      where: { id },
+      data: { password: hashed, mustChangePassword: false },
+    });
     return { success: true };
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getToken } from '@/hooks/use-auth';
+import { getToken, useAuth } from '@/hooks/use-auth';
 import Image from 'next/image';
 import Link from 'next/link';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
@@ -11,6 +11,7 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 type Step = 'idle' | 'loading' | 'qr' | 'confirm-disable';
 
 export default function SecuritySettingsPage() {
+  const { user, refreshAuth } = useAuth();
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
   const [step, setStep] = useState<Step>('idle');
@@ -20,6 +21,7 @@ export default function SecuritySettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const passwordChangeRequired = Boolean(user?.mustChangePassword);
 
   const headers = () => ({
     'Content-Type': 'application/json',
@@ -325,8 +327,10 @@ export default function SecuritySettingsPage() {
       </div>
 
       <ChangePasswordModal
-        isOpen={showPasswordModal}
+        isOpen={showPasswordModal || passwordChangeRequired}
         onClose={() => setShowPasswordModal(false)}
+        required={passwordChangeRequired}
+        onChanged={refreshAuth}
       />
     </div>
   );

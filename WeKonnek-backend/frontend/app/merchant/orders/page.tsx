@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, getToken } from '@/hooks/use-auth';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import toast from 'react-hot-toast';
 
@@ -18,6 +19,7 @@ interface MerchantData {
   category_id: number | null;
   is_active: boolean;
   status: string;
+  subscription_tier?: string;
 }
 
 interface Order {
@@ -61,12 +63,19 @@ type BusinessViewMode = 'restaurant' | 'retail';
 type OrderTabFilter = 'in_store' | 'pickup' | 'delivery' | 'reservations';
 
 export default function MerchantOrdersPage() {
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab') as OrderTabFilter | null;
+  const requestedStatus = searchParams.get('status');
   const [merchant, setMerchant] = useState<MerchantData | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<BusinessViewMode>('restaurant');
-  const [activeTab, setActiveTab] = useState<OrderTabFilter>('in_store');
+  const [activeTab, setActiveTab] = useState<OrderTabFilter>(
+    requestedTab && ['in_store', 'pickup', 'delivery', 'reservations'].includes(requestedTab)
+      ? requestedTab
+      : 'in_store',
+  );
   const [storeOpen, setStoreOpen] = useState(true);
   const [totalTables] = useState(18);
   const [editingLayout, setEditingLayout] = useState(false);
@@ -172,6 +181,12 @@ export default function MerchantOrdersPage() {
 
       if (merchantData) {
         setMerchant(merchantData);
+        setActiveTab((currentTab) =>
+          merchantData.subscription_tier?.toLowerCase() !== 'platinum' &&
+          currentTab === 'in_store'
+            ? 'delivery'
+            : currentTab,
+        );
         setStoreOpen(merchantData.is_active);
         if (merchantData.category_id === 1) {
           setViewMode('restaurant');
@@ -469,6 +484,7 @@ export default function MerchantOrdersPage() {
   const pickupOrders = orders.filter((o) => o.order_type === 'pickup' && !['completed', 'cancelled'].includes(o.status));
   const deliveryOrders = orders.filter((o) => o.order_type === 'delivery' && !['completed', 'cancelled'].includes(o.status));
   const activeReservations = reservations.filter((r) => ['pending', 'confirmed'].includes(r.status));
+  const completedOrders = orders.filter((o) => o.status.toLowerCase() === 'completed');
 
   const tableData = generateTableData();
   const closedTables = tableData.filter((t) => t.status !== 'open').length;
@@ -548,8 +564,34 @@ export default function MerchantOrdersPage() {
         </button>
       </div>
 
+      {requestedStatus === 'completed' && (
+        <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Completed Orders</h2>
+              <p className="text-sm text-gray-600">{completedOrders.length} completed orders</p>
+            </div>
+            <Link href="/merchant/orders?tab=delivery" className="text-sm font-semibold text-red-600 hover:underline">
+              Back to active orders
+            </Link>
+          </div>
+          {completedOrders.length === 0 ? (
+            <EmptyState icon="✓" message="No completed orders" subtext="Completed orders will appear here." />
+          ) : (
+            completedOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                onViewInvoice={handleViewInvoice}
+                onStatusChange={handleOrderStatusChange}
+              />
+            ))
+          )}
+        </section>
+      )}
+
       {/* ============ RESTAURANT VIEW ============ */}
-      {viewMode === 'restaurant' && (
+      {requestedStatus !== 'completed' && viewMode === 'restaurant' && (
         <div className="space-y-3 lg:space-y-4">
           {/* Gateway Header */}
           <div className="bg-gradient-to-r from-[#DB0002] to-[#CC0000] rounded-xl p-3 lg:p-4 text-white shadow-lg">
@@ -630,10 +672,19 @@ export default function MerchantOrdersPage() {
               { key: 'pickup' as OrderTabFilter, label: 'Pick-up Orders', count: pickupOrders.length, color: 'bg-green-500' },
               { key: 'delivery' as OrderTabFilter, label: 'Deliveries', count: deliveryOrders.length, color: 'bg-green-500' },
               { key: 'reservations' as OrderTabFilter, label: 'Reservations', count: activeReservations.length, color: 'bg-green-500' },
-            ].map((tab) => (
+            ].map((tab) => {
+              const locked = tab.key === 'in_store' && merchant?.subscription_tier?.toLowerCase() !== 'platinum';
+              return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => {
+                  if (locked) {
+                    window.location.assign('/merchant/subscription/upgrade?required=platinum');
+                    return;
+                  }
+                  setActiveTab(tab.key);
+                }}
+                title={locked ? 'Available on the Platinum plan' : undefined}
                 className={`relative rounded-lg px-2 py-2.5 text-white font-bold text-[10px] lg:text-xs text-center transition-all ${
                   activeTab === tab.key
                     ? `${tab.color} shadow-lg scale-[1.02]`
@@ -645,9 +696,9 @@ export default function MerchantOrdersPage() {
                     {tab.count}
                   </span>
                 )}
-                {tab.label}
+                {tab.label}{locked ? ' · Platinum' : ''}
               </button>
-            ))}
+            )})}
           </div>
 
           {/* ============ IN-STORE FLOOR PLAN (Restaurant) ============ */}
@@ -795,7 +846,7 @@ export default function MerchantOrdersPage() {
       )}
 
       {/* ============ RETAIL STORE VIEW ============ */}
-      {viewMode === 'retail' && (
+      {requestedStatus !== 'completed' && viewMode === 'retail' && (
         <div className="space-y-4">
           {/* Header */}
           <div className="bg-gradient-to-r from-[#165BB8] to-[#1048A0] rounded-xl p-3 lg:p-4 text-white shadow-lg">

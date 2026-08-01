@@ -60,6 +60,9 @@ export function getSubscriptionAmount(
 export function computeExpiry(plan: string, from: Date = new Date()): Date {
   const d = new Date(from);
   switch (plan) {
+    case 'daily':
+      d.setDate(d.getDate() + 1);
+      break;
     case 'weekly':
       d.setDate(d.getDate() + 7);
       break;

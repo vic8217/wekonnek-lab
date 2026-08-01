@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -24,6 +25,14 @@ export class SubscriptionsController {
   @ApiOperation({ summary: 'Public subscription plan matrix (tiers, prices, features)' })
   getPlans() {
     return this.subscriptionsService.getPlans();
+  }
+
+  @Get('merchant-options')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Active merchant tiers and add-ons for onboarding' })
+  getMerchantOptions() {
+    return this.subscriptionsService.getMerchantOptions();
   }
 
   @Get('definitions')
@@ -53,6 +62,15 @@ export class SubscriptionsController {
     return this.subscriptionsService.updatePlanDefinition(id, body);
   }
 
+  @Delete('definitions/:id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: delete a merchant subscription tier' })
+  deleteDefinition(@Req() req: any, @Param('id') id: string) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.deletePlanDefinition(id);
+  }
+
   @Get('add-ons')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
@@ -69,6 +87,24 @@ export class SubscriptionsController {
   createAddOn(@Req() req: any, @Body() body: any) {
     this.assertAdmin(req);
     return this.subscriptionsService.createAddOnPackage(body);
+  }
+
+  @Patch('add-ons/:id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: update a subscription add-on package' })
+  updateAddOn(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.updateAddOnPackage(id, body);
+  }
+
+  @Delete('add-ons/:id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Admin: delete a subscription add-on package' })
+  deleteAddOn(@Req() req: any, @Param('id') id: string) {
+    this.assertAdmin(req);
+    return this.subscriptionsService.deleteAddOnPackage(id);
   }
 
   @Post('upgrade')

@@ -7,12 +7,14 @@ import { getToken } from '@/hooks/use-auth';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-export default function MerchantMobileBottomNav() {
+export default function MerchantMobileBottomNav({ subscriptionTier }: { subscriptionTier: string }) {
   const pathname = usePathname();
+  const hasPlatinum = subscriptionTier === 'platinum';
   const [orderCount, setOrderCount] = useState(0);
   const [reservationCount, setReservationCount] = useState(0);
 
   const fetchCounts = useCallback(async () => {
+    if (!hasPlatinum) return;
     try {
       const token = getToken();
       if (!token) return;
@@ -44,12 +46,15 @@ export default function MerchantMobileBottomNav() {
     } catch (error) {
       console.error('Error fetching nav counts:', error);
     }
-  }, []);
+  }, [hasPlatinum]);
 
   useEffect(() => {
-    fetchCounts();
+    const initialFetch = setTimeout(fetchCounts, 0);
     const interval = setInterval(fetchCounts, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, [fetchCounts]);
 
   const isActive = (path: string) => {
@@ -82,7 +87,7 @@ export default function MerchantMobileBottomNav() {
 
         {/* Orders */}
         <Link
-          href="/merchant/orders"
+          href={hasPlatinum ? '/merchant/orders' : '/merchant/orders?tab=delivery'}
           className={`flex flex-col items-center justify-center flex-1 py-1 relative mobile-press transition-all duration-200 ${isActive('/merchant/orders') ? 'scale-105' : ''}`}
         >
           <div className={`p-1 rounded-xl transition-colors duration-200 relative ${isActive('/merchant/orders') ? 'bg-red-50' : ''}`}>
@@ -108,7 +113,7 @@ export default function MerchantMobileBottomNav() {
         {/* Reservations - Center Fab */}
         <div className="flex flex-col items-center justify-center flex-1 py-1 relative">
           <Link
-            href="/merchant/reservations"
+            href={hasPlatinum ? '/merchant/reservations' : '/merchant/subscription/upgrade?required=platinum'}
             className={`w-14 h-14 rounded-2xl flex items-center justify-center -mt-7 shadow-lg relative mobile-press transition-all duration-200 ${
               isActive('/merchant/reservations')
                 ? 'bg-[#B80002] shadow-red-400/40 scale-110'

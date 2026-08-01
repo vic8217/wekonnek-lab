@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import Image from 'next/image';
 
-export default function MerchantSidebar() {
+export default function MerchantSidebar({ subscriptionTier }: { subscriptionTier: string }) {
   const pathname = usePathname();
+  const hasPlatinum = subscriptionTier === 'platinum';
 
   const isActive = (item: { href: string; matches?: string[] }) => {
     const paths = [item.href, ...(item.matches ?? [])];
@@ -15,12 +15,12 @@ export default function MerchantSidebar() {
   const menuItems = [
     { href: '/merchant/dashboard', label: 'Dashboard', icon: 'grid' },
     { href: '/merchant/analytics', label: 'Analytics', icon: 'graph' },
-    { href: '/merchant/orders', label: 'In-Store Orders', icon: 'orders' },
-    { href: '/merchant/qr-codes', label: 'Table QR Codes', icon: 'qr' },
+    { href: '/merchant/orders', label: 'In-Store Orders', icon: 'orders', platinumOnly: true },
+    { href: '/merchant/qr-codes', label: 'Table QR Codes', icon: 'qr', platinumOnly: true },
     { href: '/merchant/bookings', label: 'Bookings', icon: 'calendar' },
-    { href: '/merchant/reservations', label: 'Reservations', icon: 'calendar' },
+    { href: '/merchant/reservations', label: 'Reservations', icon: 'calendar', platinumOnly: true },
     { href: '/merchant/shop', label: 'My Shop', icon: 'cart' },
-    { href: '/merchant/branches', label: 'Branches', icon: 'building' },
+    { href: '/merchant/branches', label: 'Shops', icon: 'building' },
     { href: '/merchant/staff', label: 'Staff', icon: 'users' },
     { href: '/merchant/inventory', label: 'Products', icon: 'box', matches: ['/merchant/products'] },
     { href: '/merchant/promotions', label: 'Promotions', icon: 'megaphone' },
@@ -143,10 +143,12 @@ export default function MerchantSidebar() {
       <nav className="px-4 py-6 space-y-1">
         {menuItems.map((item) => {
           const active = isActive(item);
+          const locked = item.platinumOnly && !hasPlatinum;
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={locked ? '/merchant/subscription/upgrade?required=platinum' : item.href}
+              title={locked ? `${item.label} is available on the Platinum plan` : undefined}
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 active
                   ? 'bg-red-600 text-white'
@@ -154,7 +156,12 @@ export default function MerchantSidebar() {
               }`}
             >
               {getIcon(item.icon)}
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium flex-1">{item.label}</span>
+              {locked && (
+                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-purple-700">
+                  Platinum
+                </span>
+              )}
             </Link>
           );
         })}

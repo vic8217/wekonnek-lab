@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
 import { WalletPaymentGateway } from '@prisma/client';
 import {
-  getSubscriptionAmount,
   computeExpiry,
   getPlansResponse,
 } from './subscription-plans';
@@ -28,6 +27,7 @@ interface PlanDefinitionInput {
   fixed_amount?: number | string;
   variable_order_percent?: number | string;
   product_limit?: number | string;
+  features?: string[] | string;
   minimum_orders?: number | string;
   is_active?: boolean;
 }
@@ -37,10 +37,24 @@ interface AddOnPackageInput {
   name?: string;
   amount?: number | string;
   billing_unit?: string;
+  amount_basis?: string;
   description?: string;
+  is_active?: boolean;
 }
 
 const ONLINE_GATEWAYS = new Set(['gcash', 'maya', 'card', 'xendit', 'paymongo', 'grab_pay']);
+
+function normalizeFeatures(value: string[] | string | undefined): string[] {
+  const entries = Array.isArray(value) ? value : String(value || '').split(/[\n,]/);
+  const features = [...new Set(entries.map(item => item.trim()).filter(Boolean))];
+  if (features.length > 20) {
+    throw new BadRequestException('A tier can have up to 20 features');
+  }
+  if (features.some(feature => feature.length > 200)) {
+    throw new BadRequestException('Each feature must be 200 characters or fewer');
+  }
+  return features;
+}
 
 function serializePayment(p: any) {
   if (!p) return p;
@@ -88,6 +102,20 @@ export class SubscriptionsService {
     return getPlansResponse();
   }
 
+  async getMerchantOptions() {
+    const [plans, addOns] = await Promise.all([
+      this.prisma.subscriptionPlanDefinition.findMany({
+        where: { audience: 'merchant', isActive: true },
+        orderBy: { fixedAmount: 'asc' },
+      }),
+      this.prisma.subscriptionAddOnPackage.findMany({
+        where: { audience: 'merchant', isActive: true },
+        orderBy: { amount: 'asc' },
+      }),
+    ]);
+    return { plans, addOns };
+  }
+
   async getPlanDefinitions() {
     return this.prisma.subscriptionPlanDefinition.findMany({
       orderBy: [{ audience: 'asc' }, { fixedAmount: 'desc' }],
@@ -101,8 +129,8 @@ export class SubscriptionsService {
       throw new BadRequestException('Audience must be merchant, rider, or coordinator');
     }
     if (!tier) throw new BadRequestException('Tier name is required');
-    if ((audience === 'merchant' || audience === 'coordinator') && !['silver', 'gold', 'platinum'].includes(tier)) {
-      throw new BadRequestException(`${audience} tiers must be Silver, Gold, or Platinum`);
+    if (audience === 'coordinator' && !['silver', 'gold', 'platinum'].includes(tier)) {
+      throw new BadRequestException('Coordinator tiers must be Silver, Gold, or Platinum');
     }
     const fixedAmount = Number(input.fixed_amount);
     if (!Number.isFinite(fixedAmount) || fixedAmount < 0) {
@@ -114,11 +142,12 @@ export class SubscriptionsService {
       ? null : Number(input.product_limit);
     const minimumOrders = input.minimum_orders === undefined || input.minimum_orders === ''
       ? null : Number(input.minimum_orders);
-    if (audience === 'merchant' && (!Number.isFinite(variablePercent) || variablePercent! < 0 || variablePercent! > 100)) {
-      throw new BadRequestException('Merchant variable percentage must be between 0 and 100');
+    const features = audience === 'merchant' ? normalizeFeatures(input.features) : [];
+    if (audience === 'merchant' && variablePercent !== null && (!Number.isFinite(variablePercent) || variablePercent < 0 || variablePercent > 100)) {
+      throw new BadRequestException('Merchant variable percentage must be N/A or between 0 and 100');
     }
-    if (audience === 'merchant' && ![10, 20, 21].includes(productLimit!)) {
-      throw new BadRequestException('Merchant product range must be 1–10, 1–20, or more than 20');
+    if (audience === 'merchant' && (!Number.isInteger(productLimit) || productLimit! < 0)) {
+      throw new BadRequestException('Merchant product limit must be a whole number of zero or greater');
     }
     if (audience === 'rider' && (!Number.isInteger(minimumOrders) || minimumOrders! < 0)) {
       throw new BadRequestException('Rider minimum orders must be zero or greater');
@@ -134,6 +163,7 @@ export class SubscriptionsService {
         fixedAmount,
         variableOrderPercent: audience === 'merchant' ? variablePercent : null,
         productLimit: audience === 'merchant' ? productLimit : null,
+        features,
         minimumOrders: audience === 'rider' ? minimumOrders : null,
         includesInHouseRiders: audience === 'coordinator' ? tier !== 'silver' : null,
       },
@@ -151,19 +181,53 @@ export class SubscriptionsService {
     const name = String(input.name || '').trim();
     const amount = Number(input.amount);
     const billingUnit = String(input.billing_unit || '').trim().toLowerCase();
+    const amountBasis = String(input.amount_basis || '').trim().toLowerCase();
     if (!['merchant', 'rider', 'coordinator'].includes(audience)) throw new BadRequestException('Invalid add-on audience');
     if (!name) throw new BadRequestException('Add-on name is required');
     if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('Enter a valid add-on amount');
     if (!['day', 'week', 'month'].includes(billingUnit)) throw new BadRequestException('Billing period must be day, week, or month');
+    if (amountBasis && !['keyword', 'inventory'].includes(amountBasis)) throw new BadRequestException('Amount basis must be per keyword, per inventory item, or blank');
     return this.prisma.subscriptionAddOnPackage.create({
       data: {
         audience,
         name,
         amount,
         billingUnit,
+        amountBasis: amountBasis || null,
         description: String(input.description || '').trim() || null,
       },
     });
+  }
+
+  async updateAddOnPackage(id: string, input: AddOnPackageInput) {
+    const existing = await this.prisma.subscriptionAddOnPackage.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Add-on package not found');
+    const name = String(input.name || '').trim();
+    const amount = Number(input.amount);
+    const billingUnit = String(input.billing_unit || '').trim().toLowerCase();
+    const amountBasis = String(input.amount_basis || '').trim().toLowerCase();
+    if (!name) throw new BadRequestException('Add-on name is required');
+    if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('Enter a valid add-on amount');
+    if (!['day', 'week', 'month'].includes(billingUnit)) throw new BadRequestException('Billing period must be day, week, or month');
+    if (amountBasis && !['keyword', 'inventory'].includes(amountBasis)) throw new BadRequestException('Amount basis must be per keyword, per inventory item, or blank');
+    return this.prisma.subscriptionAddOnPackage.update({
+      where: { id },
+      data: {
+        name,
+        amount,
+        billingUnit,
+        amountBasis: amountBasis || null,
+        description: String(input.description || '').trim() || null,
+        isActive: input.is_active ?? existing.isActive,
+      },
+    });
+  }
+
+  async deleteAddOnPackage(id: string) {
+    const existing = await this.prisma.subscriptionAddOnPackage.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Add-on package not found');
+    await this.prisma.subscriptionAddOnPackage.delete({ where: { id } });
+    return { deleted: true, id };
   }
 
   async updatePlanDefinition(id: string, input: PlanDefinitionInput) {
@@ -179,11 +243,14 @@ export class SubscriptionsService {
       ? null : Number(input.product_limit);
     const minimumOrders = input.minimum_orders === undefined || input.minimum_orders === ''
       ? null : Number(input.minimum_orders);
-    if (existing.audience === 'merchant' && (!Number.isFinite(variablePercent) || variablePercent! < 0 || variablePercent! > 100)) {
-      throw new BadRequestException('Merchant variable percentage must be between 0 and 100');
+    const features = existing.audience === 'merchant'
+      ? normalizeFeatures(input.features)
+      : existing.features;
+    if (existing.audience === 'merchant' && variablePercent !== null && (!Number.isFinite(variablePercent) || variablePercent < 0 || variablePercent > 100)) {
+      throw new BadRequestException('Merchant variable percentage must be N/A or between 0 and 100');
     }
-    if (existing.audience === 'merchant' && ![10, 20, 21].includes(productLimit!)) {
-      throw new BadRequestException('Merchant product range must be 1–10, 1–20, or more than 20');
+    if (existing.audience === 'merchant' && (!Number.isInteger(productLimit) || productLimit! < 0)) {
+      throw new BadRequestException('Merchant product limit must be a whole number of zero or greater');
     }
     if (existing.audience === 'rider' && (!Number.isInteger(minimumOrders) || minimumOrders! < 0)) {
       throw new BadRequestException('Rider minimum orders must be zero or greater');
@@ -194,10 +261,21 @@ export class SubscriptionsService {
         fixedAmount,
         variableOrderPercent: existing.audience === 'merchant' ? variablePercent : null,
         productLimit: existing.audience === 'merchant' ? productLimit : null,
+        features,
         minimumOrders: existing.audience === 'rider' ? minimumOrders : null,
         isActive: input.is_active ?? existing.isActive,
       },
     });
+  }
+
+  async deletePlanDefinition(id: string) {
+    const existing = await this.prisma.subscriptionPlanDefinition.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Subscription tier not found');
+    if (existing.audience !== 'merchant') {
+      throw new BadRequestException('Only merchant tiers can be deleted');
+    }
+    await this.prisma.subscriptionPlanDefinition.delete({ where: { id } });
+    return { deleted: true, id };
   }
 
   private async resolveMerchantForUser(userId: string) {
@@ -214,11 +292,14 @@ export class SubscriptionsService {
   /** Create an upgrade/renewal request. Online → gateway URL; manual → pending admin review. */
   async upgrade(userId: string, input: UpgradeInput) {
     const tier = (input.tier || '').toLowerCase();
-    const plan = (input.plan || '').toLowerCase();
-    const amount = getSubscriptionAmount(tier, plan);
-    if (!amount) {
-      throw new BadRequestException('Invalid subscription tier or plan');
+    const planDefinition = await this.prisma.subscriptionPlanDefinition.findUnique({
+      where: { audience_tier: { audience: 'merchant', tier } },
+    });
+    if (!planDefinition?.isActive) {
+      throw new BadRequestException('This merchant subscription tier is not available');
     }
+    const plan = 'daily';
+    const amount = Number(planDefinition.fixedAmount);
 
     const merchant = await this.resolveMerchantForUser(userId);
     const method = (input.payment_method || 'online').toLowerCase();

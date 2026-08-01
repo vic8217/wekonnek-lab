@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, KeyRound, LockKeyhole } from 'lucide-react';
 
-export default function CoordinatorResetPasswordPage() {
+function CoordinatorResetPasswordForm() {
   const searchParams = useSearchParams();
   const [resetKey, setResetKey] = useState(searchParams.get('key') || '');
   const [newPassword, setNewPassword] = useState('');
@@ -45,4 +45,12 @@ export default function CoordinatorResetPasswordPage() {
       <Link href="/coordinator/login" className="block text-center text-xs font-bold text-blue-600">Back to login</Link>
     </form>}
   </div></main>;
+}
+
+export default function CoordinatorResetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <CoordinatorResetPasswordForm />
+    </Suspense>
+  );
 }

@@ -29,6 +29,15 @@ export class MerchantApplicationsController {
     return this.applicationsService.create(body);
   }
 
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset an approved merchant password with a recovery key' })
+  resetPassword(@Body() body: { recoveryKey?: string; recovery_key?: string; newPassword?: string; new_password?: string }) {
+    return this.applicationsService.resetMerchantPassword(
+      body.recoveryKey || body.recovery_key || '',
+      body.newPassword || body.new_password || '',
+    );
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.admin, UserRole.staff)
@@ -55,6 +64,15 @@ export class MerchantApplicationsController {
     return this.applicationsService.findAssignedCoordinatorLead(id, req.user);
   }
 
+  @Post('coordinator/leads/:id/recovery-key')
+  @UseGuards(JwtAuthGuard)
+  generateCoordinatorMerchantRecoveryKey(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.applicationsService.generateCoordinatorMerchantRecoveryKey(id, req.user);
+  }
+
   @Patch('coordinator/leads/:id/review')
   @UseGuards(JwtAuthGuard)
   updateCoordinatorReview(
@@ -69,6 +87,9 @@ export class MerchantApplicationsController {
       establishment_photo_url?: string | null;
       authorized_person_photo_url?: string | null;
       business_documents_urls?: string[];
+      subscription_tier?: string;
+      selected_add_on_ids?: string[];
+      selected_add_on_quantities?: Record<string, number>;
     },
   ) {
     return this.applicationsService.updateCoordinatorReview(id, req.user, body);

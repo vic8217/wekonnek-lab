@@ -3,14 +3,14 @@
 import { useState } from 'react';
 import { getToken } from '@/hooks/use-auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-
 interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
+  required?: boolean;
+  onChanged?: () => void | Promise<void>;
 }
 
-export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordModalProps) {
+export default function ChangePasswordModal({ isOpen, onClose, required = false, onChanged }: ChangePasswordModalProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,8 +28,8 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
       return;
     }
 
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters long');
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters long');
       return;
     }
 
@@ -52,8 +52,8 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/auth/change-password`, {
-        method: 'POST',
+      const res = await fetch('/api/backend/users/me/password', {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -67,6 +67,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
       }
 
       setSuccess(true);
+      await onChanged?.();
       setTimeout(() => {
         onClose();
         setCurrentPassword('');
@@ -89,14 +90,14 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-900">Change Password</h2>
-            <button
+            {!required && <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </button>}
           </div>
 
           {success && (
@@ -137,7 +138,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#DB0002] focus:border-[#DB0002] outline-none"
-                placeholder="Enter new password (min. 6 characters)"
+                placeholder="Enter new password (min. 8 characters)"
                 disabled={loading || success}
               />
             </div>
@@ -158,14 +159,14 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
             </div>
 
             <div className="flex gap-3 pt-4">
-              <button
+              {!required && <button
                 type="button"
                 onClick={onClose}
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
                 disabled={loading}
               >
                 Cancel
-              </button>
+              </button>}
               <button
                 type="submit"
                 className="flex-1 px-4 py-2 bg-[#DB0002] text-white rounded-lg hover:bg-[#B80002] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"

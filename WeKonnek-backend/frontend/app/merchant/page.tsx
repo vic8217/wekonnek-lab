@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Eye, EyeOff, KeyRound, LockKeyhole, Mail, Store } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
@@ -9,8 +10,8 @@ import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
 export default function MerchantLoginPage() {
 	const router = useRouter();
 	const { refreshAuth } = useAuth();
-	const [email, setEmail] = useState('merchant@wekonnek.com');
-	const [password, setPassword] = useState('merchant123');
+	const [email, setEmail] = useState('');
+	const [password, setPassword] = useState('');
 	const [merchantCode, setMerchantCode] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
 	const [loading, setLoading] = useState(false);
@@ -24,8 +25,8 @@ export default function MerchantLoginPage() {
 			if (!response.ok) throw new Error(body.message || 'Invalid email address or password');
 			const apiUser = body.user; const role = apiUser.role ?? apiUser.user_type;
 			if (role !== 'merchant') throw new Error('This account is not authorized for the Merchant Portal.');
-			const user: AuthUser = { id: apiUser.id, email: apiUser.email, phone: apiUser.phone, firstName: apiUser.firstName ?? apiUser.first_name ?? null, lastName: apiUser.lastName ?? apiUser.last_name ?? null, role, userType: role };
-			setAuth(body.access_token, user); await refreshAuth(); router.replace('/merchant/dashboard');
+			const user: AuthUser = { id: apiUser.id, email: apiUser.email, phone: apiUser.phone, firstName: apiUser.firstName ?? apiUser.first_name ?? null, lastName: apiUser.lastName ?? apiUser.last_name ?? null, role, userType: role, mustChangePassword: Boolean(apiUser.mustChangePassword ?? apiUser.must_change_password) };
+			setAuth(body.access_token, user); await refreshAuth(); router.replace(user.mustChangePassword ? '/merchant/settings/security' : '/merchant/dashboard');
 		} catch (err) { setError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.'); }
 		finally { setLoading(false); }
 	}
@@ -42,6 +43,7 @@ export default function MerchantLoginPage() {
 				<label className="block text-xs font-black text-slate-600">MERCHANT CODE<div className="relative mt-2"><KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" value={merchantCode} onChange={event => setMerchantCode(event.target.value.toUpperCase())} required autoComplete="off" placeholder="WKM-XXXXXXXX" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm font-semibold uppercase tracking-wider outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label>
 				<label className="block text-xs font-black text-slate-600">EMAIL ADDRESS<div className="relative mt-2"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} required autoComplete="email" placeholder="merchant@wekonnek.com" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label>
 				<label className="block text-xs font-black text-slate-600">PASSWORD<div className="relative mt-2"><LockKeyhole className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} required autoComplete="current-password" placeholder="Enter your password" className="h-13 w-full rounded-xl border border-[#ccd8e9] px-12 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
+				<div className="text-right"><Link href="/merchant/reset-password" className="text-xs font-bold text-[#075cff] hover:underline">Forgot password? Use recovery key</Link></div>
 				<button disabled={loading} className="flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#1749e8] font-black text-white shadow-md transition hover:bg-[#0b3bd0] disabled:opacity-60">{loading ? 'Signing In…' : 'Open Merchant Portal'} {!loading && <ArrowRight size={18} />}</button>
 			</form><p className="mt-6 text-center text-xs leading-5 text-slate-400">Your merchant code is issued after your application is approved by WeKonnek admin staff.</p>
 		</div></section>

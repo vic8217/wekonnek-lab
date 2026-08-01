@@ -1,0 +1,4 @@
+ALTER TABLE "branches"
+ADD COLUMN IF NOT EXISTS "tin" VARCHAR(30),
+ADD COLUMN IF NOT EXISTS "registered_business_name" VARCHAR(255),
+ADD COLUMN IF NOT EXISTS "tax_classification" VARCHAR(50) NOT NULL DEFAULT '';

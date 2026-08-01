@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { getToken } from '@/hooks/use-auth';
 import Link from 'next/link';
+import { WalletCards, X } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface MerchantData {
+  id: number;
   name: string;
   subscription_tier: string;
   subscription_plan: string;
@@ -18,6 +20,28 @@ interface MerchantData {
   auto_renew?: boolean;
   status: string;
   is_active: boolean;
+  wallet_balance?: number;
+  plan_fee?: number;
+  add_on_fee?: number;
+  daily_subscription_fee?: number;
+  funded_days?: number;
+  active_through?: string | null;
+}
+
+interface MerchantOrder {
+  status?: string;
+  order_type?: string;
+  delivery_address?: string | null;
+  table_number?: string | null;
+  created_at?: string;
+  createdAt?: string;
+}
+
+interface OrderCounts {
+  delivery: number;
+  pickup: number;
+  inStore: number;
+  completed: number;
 }
 
 interface BillingRecord {
@@ -29,6 +53,16 @@ interface BillingRecord {
   status: string;
   created_at: string;
   period_end?: string | null;
+}
+
+interface SubscriptionCoverage {
+  wallet_balance: number;
+  plan_fee: number;
+  add_on_fee: number;
+  daily_subscription_fee: number;
+  funded_days: number;
+  active_through: string | null;
+  account_active?: boolean;
 }
 
 const PLAN_DAYS: Record<string, number> = { weekly: 7, monthly: 30, annual: 365 };
@@ -61,6 +95,21 @@ export default function MerchantDashboardPage() {
   const [activeTab, setActiveTab] = useState<'features' | 'billing'>('features');
   const [billing, setBilling] = useState<BillingRecord[]>([]);
   const [billingLoaded, setBillingLoaded] = useState(false);
+  const [coverage, setCoverage] = useState<SubscriptionCoverage | null>(null);
+  const [showWalletReload, setShowWalletReload] = useState(false);
+  const [reloadAmount, setReloadAmount] = useState('');
+  const [reloadGateway, setReloadGateway] = useState('paymongo');
+  const [reloadMethod, setReloadMethod] = useState('gcash');
+  const [reloadError, setReloadError] = useState('');
+  const [reloading, setReloading] = useState(false);
+  const [listingCount, setListingCount] = useState(0);
+  const [monthlyOrderCount, setMonthlyOrderCount] = useState(0);
+  const [orderCounts, setOrderCounts] = useState<OrderCounts>({
+    delivery: 0,
+    pickup: 0,
+    inStore: 0,
+    completed: 0,
+  });
 
   useEffect(() => {
     const fetchMerchantData = async () => {
@@ -68,12 +117,59 @@ export default function MerchantDashboardPage() {
         const token = getToken();
         if (!token) return;
 
-        const res = await fetch(`${API}/api/merchants/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const headers = { Authorization: `Bearer ${token}` };
+        const [res, coverageRes] = await Promise.all([
+          fetch(`${API}/api/merchants/me`, { headers }),
+          fetch(`${API}/api/merchants/me/subscription-coverage`, { headers }),
+        ]);
         if (!res.ok) return;
         const merchantData = await res.json();
         setMerchant(merchantData);
+        const [ordersRes, productsRes] = await Promise.all([
+          fetch(`${API}/api/orders?merchantId=${merchantData.id}`, { headers }),
+          fetch(`${API}/api/products?merchantId=${merchantData.id}`, { headers }),
+        ]);
+        if (productsRes.ok) {
+          const productsData = await productsRes.json();
+          const products = Array.isArray(productsData) ? productsData : productsData?.data || [];
+          setListingCount(products.length);
+        }
+        if (ordersRes.ok) {
+          const ordersData = await ordersRes.json();
+          const orders: MerchantOrder[] = Array.isArray(ordersData)
+            ? ordersData
+            : Array.isArray(ordersData?.data)
+              ? ordersData.data
+              : [];
+          const orderType = (order: MerchantOrder) =>
+            order.order_type ||
+            (order.delivery_address ? 'delivery' : order.table_number ? 'in_store' : 'pickup');
+          setOrderCounts({
+            delivery: orders.filter((order) => orderType(order) === 'delivery').length,
+            pickup: orders.filter((order) => orderType(order) === 'pickup').length,
+            inStore: orders.filter((order) => ['in_store', 'dine_in'].includes(orderType(order))).length,
+            completed: orders.filter((order) => order.status?.toLowerCase() === 'completed').length,
+          });
+          const monthStart = new Date();
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+          setMonthlyOrderCount(orders.filter((order) => {
+            const createdAt = order.created_at || order.createdAt;
+            return createdAt ? new Date(createdAt) >= monthStart : false;
+          }).length);
+        }
+        setCoverage({
+          wallet_balance: Number(merchantData.wallet_balance || 0),
+          plan_fee: Number(merchantData.plan_fee ?? merchantData.subscription_amount ?? 0),
+          add_on_fee: Number(merchantData.add_on_fee || 0),
+          daily_subscription_fee: Number(
+            merchantData.daily_subscription_fee ?? merchantData.subscription_amount ?? 0,
+          ),
+          funded_days: Number(merchantData.funded_days || 0),
+          active_through: merchantData.active_through || null,
+          account_active: merchantData.account_active,
+        });
+        if (coverageRes.ok) setCoverage(await coverageRes.json());
       } catch (error) {
         console.error('Error fetching merchant data:', error);
       } finally {
@@ -109,7 +205,7 @@ export default function MerchantDashboardPage() {
 
   const subscriptionTier = merchant?.subscription_tier || 'basic';
   const subscriptionPlan = merchant?.subscription_plan || 'monthly';
-  const isActive = merchant?.is_active || false;
+  const isActive = coverage?.account_active ?? merchant?.is_active ?? false;
   const subscriptionStatus = merchant?.subscription_status || 'active';
   const planDays = PLAN_DAYS[subscriptionPlan] || 30;
 
@@ -127,6 +223,82 @@ export default function MerchantDashboardPage() {
       )
     : 0;
   const isExpired = renewalDate ? renewalDate.getTime() < Date.now() : false;
+  const isDailyPlan = subscriptionPlan.toLowerCase() === 'daily';
+  const walletFunded = !isDailyPlan || (coverage?.funded_days || 0) > 0;
+  const activeThrough = coverage?.active_through ? new Date(coverage.active_through) : null;
+  const hasInStoreOrdering = subscriptionTier.toLowerCase() === 'platinum';
+  const listingLimit = subscriptionTier.toLowerCase() === 'basic'
+    ? 10
+    : subscriptionTier.toLowerCase() === 'gold'
+      ? 20
+      : null;
+  const listingUsage = listingLimit ? Math.min(100, (listingCount / listingLimit) * 100) : 0;
+
+  const orderCards = [
+    {
+      label: 'Orders for Delivery',
+      count: orderCounts.delivery,
+      href: '/merchant/orders?tab=delivery',
+      color: 'bg-blue-50 text-blue-700',
+    },
+    {
+      label: 'Orders for Pickup',
+      count: orderCounts.pickup,
+      href: '/merchant/orders?tab=pickup',
+      color: 'bg-amber-50 text-amber-700',
+    },
+    {
+      label: 'In-Store Orders',
+      count: hasInStoreOrdering ? orderCounts.inStore : 0,
+      href: hasInStoreOrdering
+        ? '/merchant/orders?tab=in_store'
+        : '/merchant/subscription/upgrade?required=platinum',
+      color: 'bg-purple-50 text-purple-700',
+      locked: !hasInStoreOrdering,
+    },
+    {
+      label: 'Completed Orders',
+      count: orderCounts.completed,
+      href: '/merchant/orders?status=completed',
+      color: 'bg-green-50 text-green-700',
+    },
+  ];
+
+  const reloadWallet = async () => {
+    const amount = Number(reloadAmount);
+    if (!Number.isFinite(amount) || amount < 50 || amount > 50000) {
+      setReloadError('Enter an amount from ₱50 to ₱50,000.');
+      return;
+    }
+    setReloading(true);
+    setReloadError('');
+    try {
+      const token = getToken();
+      const res = await fetch(`${API}/api/wallet/top-up`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          amount,
+          gateway: reloadGateway,
+          paymentMethod: reloadMethod,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Unable to start wallet reload.');
+      if (data.paymentUrl) {
+        window.location.assign(data.paymentUrl);
+        return;
+      }
+      setReloadError('The payment provider did not return a checkout link.');
+    } catch (error) {
+      setReloadError(error instanceof Error ? error.message : 'Unable to start wallet reload.');
+    } finally {
+      setReloading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -149,11 +321,47 @@ export default function MerchantDashboardPage() {
         </div>
       </div>
 
+      {/* Order Summary */}
+      <section>
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Order Summary</h2>
+          <p className="text-sm text-gray-600">Monitor orders by fulfillment type and status.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {orderCards.map((card) => (
+            <article key={card.label} className="flex min-h-44 flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl ${card.color}`}>
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2m-6 0a3 3 0 006 0m-6 7h6m-6 4h4" />
+                </svg>
+              </div>
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">{card.label}</p>
+                  <p className="mt-1 text-3xl font-black text-gray-900">{card.count}</p>
+                </div>
+                {card.locked && (
+                  <span className="rounded-full bg-purple-100 px-2 py-1 text-[10px] font-bold uppercase text-purple-700">
+                    Platinum
+                  </span>
+                )}
+              </div>
+              <Link
+                href={card.href}
+                className="mt-auto inline-flex items-center justify-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-red-600 hover:bg-red-50 hover:text-red-600"
+              >
+                View Details
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
+
       {/* Quick Actions */}
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
         <h2 className="text-xl font-bold text-gray-900 mb-2">Quick Actions</h2>
         <p className="text-gray-600 mb-4">Access frequently used features</p>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4">
           <Link
             href="/merchant/products/new"
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
@@ -178,6 +386,12 @@ export default function MerchantDashboardPage() {
           >
             Inventory
           </Link>
+          <Link
+            href="/merchant/keywords"
+            className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
+          >
+            Keywords
+          </Link>
         </div>
       </div>
 
@@ -201,12 +415,12 @@ export default function MerchantDashboardPage() {
               </div>
               <span
                 className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${
-                  isExpired || subscriptionStatus === 'expired'
+                  isExpired || subscriptionStatus === 'expired' || !walletFunded
                     ? 'bg-red-100 text-red-800'
                     : 'bg-green-100 text-green-800'
                 }`}
               >
-                {isExpired ? 'Expired' : subscriptionStatus}
+                {isDailyPlan && !walletFunded ? 'Reload needed' : isExpired ? 'Expired' : subscriptionStatus}
               </span>
             </div>
             <div className="space-y-3">
@@ -216,34 +430,87 @@ export default function MerchantDashboardPage() {
                   {startDate ? startDate.toLocaleDateString() : '—'}
                 </span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Renewal Date:</span>
-                <span className="font-medium">
-                  {renewalDate ? renewalDate.toLocaleDateString() : '—'}
-                </span>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-gray-600">Days Remaining</span>
-                  <span className="font-medium">{daysRemaining} days</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full ${isExpired ? 'bg-red-500' : 'bg-blue-600'}`}
-                    style={{ width: `${Math.min(100, (daysRemaining / planDays) * 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Auto-renewal</span>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    merchant?.auto_renew ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  {merchant?.auto_renew ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
+              {isDailyPlan ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <p className="text-xs font-medium text-gray-500">Wallet balance</p>
+                      <p className="mt-1 text-xl font-bold text-gray-900">
+                        ₱{Number(coverage?.wallet_balance || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-gray-50 p-3">
+                      <p className="text-xs font-medium text-gray-500">Daily subscription fee</p>
+                      <p className="mt-1 text-xl font-bold text-gray-900">
+                        {coverage
+                          ? `₱${Number(coverage.daily_subscription_fee).toLocaleString()}`
+                          : 'Loading...'}
+                      </p>
+                    </div>
+                  </div>
+                  {coverage && coverage.add_on_fee > 0 && (
+                    <p className="text-xs text-gray-500">
+                      Includes ₱{coverage.plan_fee.toLocaleString()} plan fee and ₱
+                      {coverage.add_on_fee.toLocaleString()} add-ons.
+                    </p>
+                  )}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Funded days:</span>
+                    <span className="font-medium">{coverage?.funded_days || 0} days</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Account active through:</span>
+                    <span className="font-medium">
+                      {activeThrough
+                        ? activeThrough.toLocaleDateString(undefined, {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })
+                        : 'Wallet reload required'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWalletReload(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 font-semibold text-white transition-colors hover:bg-red-700"
+                  >
+                    <WalletCards className="h-5 w-5" />
+                    Reload Wallet
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Renewal Date:</span>
+                    <span className="font-medium">
+                      {renewalDate ? renewalDate.toLocaleDateString() : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-gray-600">Days Remaining</span>
+                      <span className="font-medium">{daysRemaining} days</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full ${isExpired ? 'bg-red-500' : 'bg-blue-600'}`}
+                        style={{ width: `${Math.min(100, (daysRemaining / planDays) * 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Auto-renewal</span>
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        merchant?.auto_renew ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {merchant?.auto_renew ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                </>
+              )}
               {(isExpired || daysRemaining <= 7) && (
                 <Link
                   href="/merchant/subscription/upgrade"
@@ -259,19 +526,21 @@ export default function MerchantDashboardPage() {
           <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900">Ad Visibility</h3>
-              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">Visible</span>
+              <span className={`${isActive ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'} px-3 py-1 rounded-full text-sm font-medium`}>
+                {isActive ? 'Visible' : 'Hidden'}
+              </span>
             </div>
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-sm text-gray-600">Impressions</span>
-                  <span className="text-lg font-bold text-gray-900">12,453</span>
+                  <span className="text-lg font-bold text-gray-900">0</span>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-sm text-gray-600">Clicks</span>
-                  <span className="text-lg font-bold text-gray-900">847</span>
+                  <span className="text-lg font-bold text-gray-900">0</span>
                 </div>
               </div>
             </div>
@@ -284,21 +553,29 @@ export default function MerchantDashboardPage() {
           <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900">Store Status</h3>
-              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">Online</span>
+              <span className={`${isActive ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'} px-3 py-1 rounded-full text-sm font-medium`}>
+                {isActive ? 'Online' : 'Offline'}
+              </span>
             </div>
             <div className="space-y-3">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Store Name</p>
-                <p className="font-medium text-gray-900">{merchant?.name || 'The Garden Cafe'}</p>
+                <p className="font-medium text-gray-900">{merchant?.name || 'Your store'}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Status</p>
-                <p className="font-medium text-gray-900">Accepting orders</p>
+                <p className="font-medium text-gray-900">{isActive ? 'Accepting orders' : 'Not accepting orders'}</p>
               </div>
+              {isDailyPlan && !walletFunded && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <p className="font-semibold">Wallet balance is insufficient.</p>
+                  <p className="mt-1">Reload your wallet to put your store back online and resume customer orders.</p>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">Store Active</span>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" defaultChecked={isActive} />
+                  <input type="checkbox" className="sr-only peer" checked={isActive} readOnly disabled={!walletFunded} />
                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
                 </label>
               </div>
@@ -313,12 +590,12 @@ export default function MerchantDashboardPage() {
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Used</span>
-                <span className="text-lg font-bold text-gray-900">15 / 20</span>
+                <span className="text-lg font-bold text-gray-900">{listingCount} / {listingLimit ?? 'Unlimited'}</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-red-600 h-2 rounded-full" style={{ width: '75%' }}></div>
+                <div className="bg-red-600 h-2 rounded-full" style={{ width: `${listingUsage}%` }}></div>
               </div>
-              <p className="text-sm text-gray-600">79% used</p>
+              <p className="text-sm text-gray-600">{listingLimit ? `${Math.round(listingUsage)}% used` : `${listingCount} active listing${listingCount === 1 ? '' : 's'}`}</p>
             </div>
           </div>
 
@@ -331,13 +608,13 @@ export default function MerchantDashboardPage() {
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-sm text-gray-600">Views</span>
-                  <span className="text-lg font-bold text-gray-900">1,243</span>
+                  <span className="text-lg font-bold text-gray-900">0</span>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-sm text-gray-600">Orders</span>
-                  <span className="text-lg font-bold text-gray-900">20</span>
+                  <span className="text-lg font-bold text-gray-900">{monthlyOrderCount}</span>
                 </div>
               </div>
             </div>
@@ -448,6 +725,78 @@ export default function MerchantDashboardPage() {
           </div>
         )}
       </div>
+
+      {showWalletReload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Reload wallet</h2>
+                <p className="mt-1 text-sm text-gray-600">Add funds for daily subscription charges.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWalletReload(false)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                aria-label="Close wallet reload"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-gray-700">Amount (₱)</span>
+                <input
+                  type="number"
+                  min="50"
+                  max="50000"
+                  step="1"
+                  value={reloadAmount}
+                  onChange={(event) => setReloadAmount(event.target.value)}
+                  placeholder="500"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-gray-700">Payment provider</span>
+                <select
+                  value={reloadGateway}
+                  onChange={(event) => setReloadGateway(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-red-500"
+                >
+                  <option value="paymongo">PayMongo</option>
+                  <option value="maya">Maya</option>
+                  <option value="xendit">Xendit</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-gray-700">Payment method</span>
+                <select
+                  value={reloadMethod}
+                  onChange={(event) => setReloadMethod(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-red-500"
+                >
+                  <option value="gcash">GCash</option>
+                  <option value="maya_pay">Maya</option>
+                  <option value="card">Card</option>
+                  <option value="grab_pay">GrabPay</option>
+                </select>
+              </label>
+              {reloadError && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{reloadError}</p>
+              )}
+              <button
+                type="button"
+                onClick={reloadWallet}
+                disabled={reloading}
+                className="w-full rounded-lg bg-red-600 py-2.5 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {reloading ? 'Opening checkout...' : 'Continue to payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

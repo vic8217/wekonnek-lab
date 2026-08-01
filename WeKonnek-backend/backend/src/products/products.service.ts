@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -25,6 +25,15 @@ export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createProductDto: CreateProductDto, merchantId: number) {
+    const merchant = await this.prisma.merchant.findUnique({
+      where: { id: merchantId },
+      select: { taxClassification: true },
+    });
+    if (!merchant?.taxClassification?.trim()) {
+      throw new BadRequestException(
+        'Choose a business tax classification in your merchant profile before adding products.',
+      );
+    }
     const product = await this.prisma.product.create({
       data: { ...createProductDto, merchantId } as any,
     });

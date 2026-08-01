@@ -15,6 +15,7 @@ import {
 } from '@/lib/e-invoice';
 import { downloadInvoicePDF } from '@/lib/invoice-pdf';
 import EInvoiceView from '@/components/EInvoiceView';
+import ProFormaInvoiceSample from '@/components/ProFormaInvoiceSample';
 
 type Tab = 'invoices' | 'memos' | 'summary' | 'eis';
 
@@ -25,6 +26,8 @@ export default function MerchantInvoicesPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [showAudit, setShowAudit] = useState(false);
+  const [showProForma, setShowProForma] = useState(false);
+  const [merchantName, setMerchantName] = useState('Sample Merchant');
 
   // Filters
   const [tab, setTab] = useState<Tab>('invoices');
@@ -50,6 +53,7 @@ export default function MerchantInvoicesPage() {
       const merchant = await res.json();
       if (!merchant) return;
       setMerchantId(merchant.id);
+      setMerchantName(merchant.name || 'Sample Merchant');
       const data = await getMerchantInvoices(merchant.id);
       setInvoices(data);
     } catch (e) { console.error(e); }
@@ -146,6 +150,10 @@ export default function MerchantInvoicesPage() {
           <p className="text-gray-500 text-sm">BIR-compliant invoicing — VAT, non-VAT, exempt, zero-rated, credit/debit memos</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setShowProForma(true)}
+            className="px-3 py-2 bg-gray-900 text-white rounded-lg text-xs font-semibold hover:bg-gray-800 transition">
+            🧾 Pro-Forma Sample
+          </button>
           <button onClick={() => handleExport('sales_journal')}
             className="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition">
             📊 Sales Journal
@@ -214,6 +222,10 @@ export default function MerchantInvoicesPage() {
 
           {/* Mobile export buttons */}
           <div className="flex gap-2 lg:hidden overflow-x-auto no-scrollbar">
+            <button onClick={() => setShowProForma(true)}
+              className="px-3 py-1.5 bg-gray-900 text-white rounded-lg text-[10px] font-semibold whitespace-nowrap">
+              🧾 Pro-Forma Sample
+            </button>
             <button onClick={() => handleExport('sales_journal')}
               className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-[10px] font-semibold whitespace-nowrap">
               📊 Export Sales Journal
@@ -408,6 +420,9 @@ export default function MerchantInvoicesPage() {
       {/* ═══ Modals ═══ */}
       {selectedInvoice && (
         <EInvoiceView invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />
+      )}
+      {showProForma && (
+        <ProFormaInvoiceSample sellerName={merchantName} onClose={() => setShowProForma(false)} />
       )}
 
       {showAudit && (

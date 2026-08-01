@@ -21,7 +21,7 @@ interface MerchantApplication {
   subscription_plan: string;
   subscription_amount: number;
   payment_method: string;
-  status: 'pending' | 'reviewing' | 'approved' | 'rejected';
+  status: 'pending' | 'reviewing' | 'for_approval' | 'approved' | 'rejected';
   submitted_at: string;
   reviewed_by?: string;
   reviewed_at?: string;
@@ -50,6 +50,19 @@ interface MerchantApplication {
   establishment_photo_url?: string;
   authorized_person_photo_url?: string;
   business_documents_urls?: string[];
+  selected_add_ons?: Array<{
+    id: string;
+    name: string;
+    amount: number | string;
+    quantity: number;
+    subtotal: number;
+    billingUnit: string;
+    amountBasis?: string | null;
+  }>;
+  total_fee?: number;
+  reviewed_by_name?: string;
+  temporary_password?: string;
+  recovery_key?: string;
 }
 
 interface EligibleCoordinator {
@@ -98,7 +111,7 @@ export default function MerchantApplicationsPage() {
 
   const statusCounts = applications.reduce((counts, app) => {
     if (app.status === 'pending' && app.assignment_status !== 'assigned') counts.pending++;
-    if (app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned') counts.reviewing++;
+    if (app.status === 'for_approval') counts.reviewing++;
     if (app.status === 'approved') counts.approved++;
     counts.total++;
     return counts;
@@ -197,6 +210,8 @@ export default function MerchantApplicationsPage() {
         return 'bg-yellow-100 text-yellow-800';
       case 'reviewing':
         return 'bg-blue-100 text-blue-800';
+      case 'for_approval':
+        return 'bg-green-100 text-green-800';
       case 'approved':
         return 'bg-green-100 text-green-800';
       case 'rejected':
@@ -219,7 +234,7 @@ export default function MerchantApplicationsPage() {
     const belongsToTab = selectedFilter === 'pending'
       ? app.status === 'pending' && app.assignment_status !== 'assigned'
       : selectedFilter === 'reviewing'
-        ? app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned'
+        ? app.status === 'for_approval'
         : selectedFilter === 'approved'
           ? app.status === 'approved'
           : true;
@@ -266,10 +281,10 @@ export default function MerchantApplicationsPage() {
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Reviewing</p>
+              <p className="text-sm text-gray-600 mb-1">For Approval</p>
               <p className="text-3xl font-bold text-gray-900">{statusCounts.reviewing}</p>
             </div>
-            <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
@@ -327,7 +342,7 @@ export default function MerchantApplicationsPage() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Review <span className="ml-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{statusCounts.reviewing}</span>
+            For Approval <span className="ml-1 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{statusCounts.reviewing}</span>
           </button>
           <button
             onClick={() => setSelectedFilter('approved')}
@@ -379,7 +394,7 @@ export default function MerchantApplicationsPage() {
                   <th className="px-6 py-3 text-left text-sm font-semibold">Contact</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Plan</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Payment</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold">Submitted</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold">{selectedFilter === 'approved' ? 'Approved' : 'Submitted'}</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Status</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Coordinator</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Action</th>
@@ -423,25 +438,24 @@ export default function MerchantApplicationsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm">
-                          <div className="font-medium text-gray-900">₱{app.subscription_amount.toLocaleString()}</div>
+                          <div className="font-medium text-gray-900">₱{Number(app.total_fee ?? app.subscription_amount).toLocaleString()}</div>
+                          {app.selected_add_ons?.length ? <div className="text-gray-500">{app.selected_add_ons.length} add-on{app.selected_add_ons.length === 1 ? '' : 's'}</div> : null}
                           <div className="text-gray-500">{app.payment_method || 'N/A'}</div>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
-                        <div>{formatDate(app.submitted_at)}</div>
-                        <div className="text-gray-500">{formatTime(app.submitted_at)}</div>
+                        <div>{formatDate(selectedFilter === 'approved' && app.reviewed_at ? app.reviewed_at : app.submitted_at)}</div>
+                        <div className="text-gray-500">{formatTime(selectedFilter === 'approved' && app.reviewed_at ? app.reviewed_at : app.submitted_at)}</div>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(app.status)}`}>
-                          {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
+                          {app.status.replaceAll('_', ' ').replace(/\b\w/g, character => character.toUpperCase())}
                         </span>
                       </td>
-                      <td className="px-6 py-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${app.assignment_status === 'assigned' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{app.assignment_status === 'assigned' ? 'Assigned' : 'Unassigned'}</span></td>
+                      <td className="px-6 py-4">{selectedFilter === 'approved' ? <div className="text-sm"><p className="font-medium text-gray-900">{app.reviewed_by_name || 'Admin staff'}</p><p className="text-gray-500">Approved</p></div> : <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${app.assignment_status === 'assigned' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>{app.assignment_status === 'assigned' ? 'Assigned' : 'Unassigned'}</span>}</td>
                       <td className="px-6 py-4">
                         {app.status === 'pending' && app.assignment_status !== 'assigned' ? (
                           <button onClick={() => openAssignment(app)} className="inline-flex items-center rounded-lg bg-[#165BB8] px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-[#124A94]">Assign</button>
-                        ) : app.status !== 'approved' && app.status !== 'rejected' && app.assignment_status === 'assigned' ? (
-                          <button onClick={() => handleStatusChange(app.id, 'approved')} className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-green-700">Approve</button>
                         ) : (
                           <button onClick={() => handleView(app)} className="inline-flex items-center gap-2 rounded-lg bg-[#165BB8] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#124A94]">
                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
@@ -542,10 +556,36 @@ export default function MerchantApplicationsPage() {
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <ApplicationDetail label="Subscription tier" value={selectedApplication.subscription_tier} capitalize />
                     <ApplicationDetail label="Subscription plan" value={selectedApplication.subscription_plan} capitalize />
-                    <ApplicationDetail label="Payment amount" value={`₱${selectedApplication.subscription_amount.toLocaleString()}`} />
+                    <ApplicationDetail label="Plan fee" value={`₱${Number(selectedApplication.subscription_amount).toLocaleString()}`} />
+                    <ApplicationDetail label="Total fee" value={`₱${Number(selectedApplication.total_fee ?? selectedApplication.subscription_amount).toLocaleString()}`} />
                     <ApplicationDetail label="Payment method" value={selectedApplication.payment_method} />
                     <ApplicationDetail label="Assignment" value={selectedApplication.assignment_status} capitalize />
                     {selectedApplication.merchant_code && <ApplicationDetail label="Merchant code" value={selectedApplication.merchant_code} />}
+                    {selectedApplication.reviewed_by_name && <ApplicationDetail label="Approved by" value={selectedApplication.reviewed_by_name} />}
+                    {selectedApplication.reviewed_at && <ApplicationDetail label="Approved date and time" value={new Date(selectedApplication.reviewed_at).toLocaleString()} />}
+                  </div>
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">Selected add-ons</p>
+                    {selectedApplication.selected_add_ons?.length ? <div className="grid gap-2 sm:grid-cols-2">{selectedApplication.selected_add_ons.map(addOn => {
+                      const quantity = Number(addOn.quantity || 1);
+                      const unitPrice = Number(addOn.amount);
+                      const subtotal = Number(addOn.subtotal ?? unitPrice * quantity);
+                      const itemLabel = addOn.amountBasis === 'keyword'
+                        ? 'keywords'
+                        : addOn.amountBasis === 'inventory'
+                          ? 'products/items'
+                          : 'units';
+                      return <div key={addOn.id} className="rounded-xl border border-gray-200 px-4 py-3 text-sm">
+                        <div className="flex items-start justify-between gap-4">
+                          <div><p className="font-bold text-gray-900">{addOn.name}</p><p className="text-xs text-gray-500">Per {addOn.billingUnit}{addOn.amountBasis ? ` · Per ${addOn.amountBasis === 'inventory' ? 'inventory item' : 'keyword'}` : ''}</p></div>
+                          <span className="font-black text-gray-900">₱{subtotal.toLocaleString()}</span>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs">
+                          <span className="font-bold text-blue-800">{quantity.toLocaleString()} {itemLabel}</span>
+                          <span className="text-blue-700">₱{unitPrice.toLocaleString()} × {quantity.toLocaleString()}</span>
+                        </div>
+                      </div>;
+                    })}</div> : <div className="rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-500">No add-ons selected.</div>}
                   </div>
                 </section>
 
@@ -554,22 +594,12 @@ export default function MerchantApplicationsPage() {
                 {/* Action Buttons */}
                 <div className="flex gap-3 pt-4 border-t border-gray-200">
                   {selectedApplication.status === 'pending' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusChange(selectedApplication.id, 'reviewing')}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                      >
-                        Mark as Reviewing
-                      </button>
-                      <button
-                        onClick={() => handleStatusChange(selectedApplication.id, 'approved')}
-                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                      >
-                        Approve
-                      </button>
-                    </>
+                    <p className="text-sm text-amber-700">Waiting for coordinator review before admin approval.</p>
                   )}
                   {selectedApplication.status === 'reviewing' && (
+                    <p className="text-sm text-blue-700">Coordinator review is in progress.</p>
+                  )}
+                  {selectedApplication.status === 'for_approval' && (
                     <>
                       <button
                         onClick={() => handleStatusChange(selectedApplication.id, 'approved')}

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API = '/api/backend';
 
 interface Merchant {
   id: number;
@@ -15,6 +15,28 @@ interface Merchant {
   status: string;
   created_at: string;
   suspension_reason?: string;
+  merchant_code?: string;
+  temporary_password?: string;
+  recovery_key?: string;
+  total_fee?: number;
+  total_subscription_fee?: number;
+  wallet_balance?: number;
+}
+
+interface MerchantDetails extends Merchant {
+  fee_breakdown: {
+    plan: { name: string; amount: number; billing_unit: string };
+    add_ons: Array<{ id: string; name: string; amount: number; quantity?: number; subtotal?: number; billing_unit: string; amount_basis?: string | null }>;
+    add_on_fee: number;
+    total_fee: number;
+  };
+}
+
+interface MerchantLedger {
+  merchant: { id: number; name: string; merchant_code?: string };
+  fee_breakdown: MerchantDetails['fee_breakdown'];
+  balance: { total_billed: number; total_paid: number; unpaid: number };
+  payments: Array<{ id: number; tier: string; plan: string; amount: number; payment_method: string; gateway?: string; status: string; payment_ref?: string; period_start?: string; period_end?: string; created_at: string }>;
 }
 
 export default function MerchantManagementPage() {
@@ -25,6 +47,10 @@ export default function MerchantManagementPage() {
   const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showReinstateModal, setShowReinstateModal] = useState(false);
+  const [details, setDetails] = useState<MerchantDetails | null>(null);
+  const [ledger, setLedger] = useState<MerchantLedger | null>(null);
+  const [dialogLoading, setDialogLoading] = useState(false);
+  const [generatingRecoveryKey, setGeneratingRecoveryKey] = useState(false);
 
   useEffect(() => {
     fetchMerchants();
@@ -34,7 +60,7 @@ export default function MerchantManagementPage() {
     try {
       const token = getToken();
       const params = selectedStatus !== 'all' ? `?status=${selectedStatus}` : '';
-      const res = await fetch(`${API}/api/merchants${params}`, {
+      const res = await fetch(`${API}/merchants/admin${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch merchants');
@@ -49,7 +75,7 @@ export default function MerchantManagementPage() {
 
   const getStatusCounts = async () => {
     const token = getToken();
-    const res = await fetch(`${API}/api/merchants`, {
+    const res = await fetch(`${API}/merchants/admin`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = res.ok ? await res.json() : [];
@@ -96,6 +122,53 @@ export default function MerchantManagementPage() {
     setShowReinstateModal(true);
   };
 
+  const openDetails = async (merchant: Merchant) => {
+    setDialogLoading(true);
+    try {
+      const response = await fetch(`${API}/merchants/admin/${merchant.id}/details`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Unable to load merchant details');
+      setDetails(body);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load merchant details');
+    } finally {
+      setDialogLoading(false);
+    }
+  };
+
+  const openLedger = async (merchant: Merchant) => {
+    setDialogLoading(true);
+    try {
+      const response = await fetch(`${API}/merchants/admin/${merchant.id}/ledger`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Unable to load subscription ledger');
+      setLedger(body);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to load subscription ledger');
+    } finally {
+      setDialogLoading(false);
+    }
+  };
+
+  const generateRecoveryKey = async () => {
+    if (!details) return;
+    setGeneratingRecoveryKey(true);
+    try {
+      const response = await fetch(`${API}/merchants/admin/${details.id}/recovery-key`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Unable to generate recovery key');
+      setDetails(current => current ? { ...current, recovery_key: body.recovery_key } : current);
+      toast.success('A new recovery key was generated.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to generate recovery key');
+    } finally {
+      setGeneratingRecoveryKey(false);
+    }
+  };
+
   const confirmSuspend = async (merchantId: number, actionType: string, duration: number, reason: string) => {
     try {
       const token = getToken();
@@ -111,7 +184,7 @@ export default function MerchantManagementPage() {
         updates.suspension_duration = duration;
       }
 
-      const res = await fetch(`${API}/api/merchants/${merchantId}`, {
+      const res = await fetch(`${API}/merchants/${merchantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(updates),
@@ -132,7 +205,7 @@ export default function MerchantManagementPage() {
   const confirmReinstate = async (merchantId: number) => {
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/merchants/${merchantId}`, {
+      const res = await fetch(`${API}/merchants/${merchantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -323,6 +396,9 @@ export default function MerchantManagementPage() {
                 <th className="px-6 py-4 text-left font-medium">Business Name</th>
                 <th className="px-6 py-4 text-left font-medium">Contact</th>
                 <th className="px-6 py-4 text-left font-medium">Tier</th>
+                <th className="px-6 py-4 text-left font-medium">Merchant code</th>
+                <th className="px-6 py-4 text-left font-medium">Total subscription fee</th>
+                <th className="px-6 py-4 text-left font-medium">Wallet balance</th>
                 <th className="px-6 py-4 text-left font-medium">Joined Date</th>
                 <th className="px-6 py-4 text-left font-medium">Status</th>
                 <th className="px-6 py-4 text-left font-medium">Action</th>
@@ -331,13 +407,13 @@ export default function MerchantManagementPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     Loading merchants...
                   </td>
                 </tr>
               ) : filteredMerchants.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     No merchants found
                   </td>
                 </tr>
@@ -367,6 +443,11 @@ export default function MerchantManagementPage() {
                       <span className="font-medium text-gray-900 capitalize">{merchant.subscription_tier || 'N/A'}</span>
                     </td>
                     <td className="px-6 py-4">
+                      <span className="font-mono text-sm text-gray-900">{merchant.merchant_code || 'N/A'}</span>
+                    </td>
+                    <td className="px-6 py-4 font-bold text-gray-900">₱{Number(merchant.total_subscription_fee ?? merchant.total_fee ?? 0).toLocaleString()}</td>
+                    <td className="px-6 py-4"><span className="font-bold text-red-700">₱{Number(merchant.wallet_balance || 0).toLocaleString()}</span><p className="mt-1 text-xs text-gray-500">Ledger unpaid</p></td>
+                    <td className="px-6 py-4">
                       <div>
                         <p className="text-gray-900">{formatDate(merchant.created_at)}</p>
                         <p className="text-sm text-gray-500">{formatTime(merchant.created_at)}</p>
@@ -378,6 +459,9 @@ export default function MerchantManagementPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => openDetails(merchant)} disabled={dialogLoading} className="rounded-lg bg-blue-100 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-200">View</button>
+                        <button onClick={() => openLedger(merchant)} disabled={dialogLoading} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200">Ledger</button>
                       {merchant.status === 'active' ? (
                         <button
                           onClick={() => handleSuspend(merchant)}
@@ -399,6 +483,7 @@ export default function MerchantManagementPage() {
                           Reinstate
                         </button>
                       )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -425,8 +510,48 @@ export default function MerchantManagementPage() {
           onConfirm={confirmReinstate}
         />
       )}
+      {details && <MerchantDetailsModal details={details} generatingRecoveryKey={generatingRecoveryKey} onGenerateRecoveryKey={generateRecoveryKey} onClose={() => setDetails(null)} />}
+      {ledger && <MerchantLedgerModal ledger={ledger} onClose={() => setLedger(null)} />}
     </div>
   );
+}
+
+function FeeBreakdown({ breakdown }: { breakdown: MerchantDetails['fee_breakdown'] }) {
+  return <div className="overflow-hidden rounded-lg border border-gray-200">
+    <div className="flex items-center justify-between bg-gray-50 px-4 py-3 text-sm"><div><p className="font-bold capitalize text-gray-900">{breakdown.plan.name} plan</p><p className="text-xs text-gray-500">Per {breakdown.plan.billing_unit}</p></div><span className="font-black text-gray-900">₱{Number(breakdown.plan.amount).toLocaleString()}</span></div>
+    {breakdown.add_ons.map(addOn => {
+      const quantity = Number(addOn.quantity || 1);
+      const subtotal = Number(addOn.subtotal ?? Number(addOn.amount) * quantity);
+      return <div key={addOn.id} className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm"><div><p className="font-bold text-gray-900">{addOn.name}</p><p className="text-xs text-gray-500">₱{Number(addOn.amount).toLocaleString()} × {quantity} {addOn.amount_basis === 'keyword' ? 'keyword(s)' : 'product(s)/item(s)'}</p><p className="text-xs text-gray-500">Per {addOn.billing_unit}{addOn.amount_basis ? ` · Per ${addOn.amount_basis === 'inventory' ? 'inventory item' : 'keyword'}` : ''}</p></div><span className="font-bold text-gray-900">₱{subtotal.toLocaleString()}</span></div>;
+    })}
+    <div className="flex items-center justify-between border-t-2 border-gray-300 bg-blue-50 px-4 py-3"><span className="font-black text-blue-900">Total subscription fee</span><span className="text-lg font-black text-blue-900">₱{Number(breakdown.total_fee).toLocaleString()}</span></div>
+  </div>;
+}
+
+function MerchantDetailsModal({ details, generatingRecoveryKey, onGenerateRecoveryKey, onClose }: { details: MerchantDetails; generatingRecoveryKey: boolean; onGenerateRecoveryKey: () => void; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+    <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
+      <div className="flex items-start justify-between border-b border-gray-200 p-6"><div><h3 className="text-xl font-black text-gray-900">{details.name}</h3><p className="mt-1 text-sm text-gray-500">{details.email || 'No email'} · {details.phone || 'No phone'}</p></div><button onClick={onClose} className="p-2 text-gray-500" aria-label="Close">✕</button></div>
+      <div className="space-y-6 p-6">
+        <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Account access</h4><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-gray-50 p-4"><p className="text-xs font-bold text-gray-500">Merchant code</p><p className="mt-1 font-mono font-bold">{details.merchant_code || 'N/A'}</p></div><div className="rounded-lg bg-gray-50 p-4"><p className="text-xs font-bold text-gray-500">Temporary password</p><p className="mt-1 font-mono font-bold">{details.temporary_password || 'N/A'}</p></div></div>
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase text-amber-700">Recovery key</p><p className="mt-1 break-all font-mono text-sm font-bold text-amber-900">{details.recovery_key || 'Generate only when the merchant needs password recovery.'}</p></div><button onClick={onGenerateRecoveryKey} disabled={generatingRecoveryKey} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{generatingRecoveryKey ? 'Generating...' : details.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div>
+        </section>
+        <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Fee breakdown</h4><FeeBreakdown breakdown={details.fee_breakdown} /></section>
+      </div>
+    </div>
+  </div>;
+}
+
+function MerchantLedgerModal({ ledger, onClose }: { ledger: MerchantLedger; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+    <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl">
+      <div className="flex items-start justify-between border-b border-gray-200 p-6"><div><h3 className="text-xl font-black text-gray-900">Subscription ledger</h3><p className="mt-1 text-sm text-gray-500">{ledger.merchant.name}{ledger.merchant.merchant_code ? ` · ${ledger.merchant.merchant_code}` : ''}</p></div><button onClick={onClose} className="p-2 text-gray-500" aria-label="Close">✕</button></div>
+      <div className="space-y-6 p-6">
+        <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Current billing</h4><FeeBreakdown breakdown={ledger.fee_breakdown} /><div className="mt-3 grid gap-3 sm:grid-cols-3"><div className="rounded-lg bg-gray-50 p-4"><p className="text-xs font-bold uppercase text-gray-500">Billed</p><p className="mt-1 text-xl font-black text-gray-900">₱{Number(ledger.balance.total_billed).toLocaleString()}</p></div><div className="rounded-lg bg-emerald-50 p-4"><p className="text-xs font-bold uppercase text-emerald-700">Paid</p><p className="mt-1 text-xl font-black text-emerald-800">₱{Number(ledger.balance.total_paid).toLocaleString()}</p></div><div className="rounded-lg bg-red-50 p-4"><p className="text-xs font-bold uppercase text-red-700">Unpaid balance</p><p className="mt-1 text-xl font-black text-red-800">₱{Number(ledger.balance.unpaid).toLocaleString()}</p></div></div></section>
+        <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Payment history</h4><div className="overflow-x-auto rounded-lg border border-gray-200"><table className="w-full text-sm"><thead className="bg-gray-50"><tr>{['Date', 'Plan', 'Period', 'Amount', 'Method', 'Reference', 'Status'].map(label => <th key={label} className="px-4 py-3 text-left font-bold text-gray-600">{label}</th>)}</tr></thead><tbody className="divide-y divide-gray-200">{ledger.payments.length ? ledger.payments.map(payment => <tr key={payment.id}><td className="px-4 py-3">{new Date(payment.created_at).toLocaleString()}</td><td className="px-4 py-3 capitalize">{payment.tier} · {payment.plan}</td><td className="px-4 py-3">{payment.period_start ? new Date(payment.period_start).toLocaleDateString() : 'N/A'} – {payment.period_end ? new Date(payment.period_end).toLocaleDateString() : 'N/A'}</td><td className="px-4 py-3 font-bold">₱{Number(payment.amount).toLocaleString()}</td><td className="px-4 py-3 capitalize">{payment.payment_method}{payment.gateway ? ` (${payment.gateway})` : ''}</td><td className="px-4 py-3 font-mono text-xs">{payment.payment_ref || 'N/A'}</td><td className="px-4 py-3 capitalize">{payment.status}</td></tr>) : <tr><td colSpan={7} className="p-8 text-center text-gray-500">No subscription payments recorded.</td></tr>}</tbody></table></div></section>
+      </div>
+    </div>
+  </div>;
 }
 
 // Suspend Modal Component

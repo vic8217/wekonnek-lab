@@ -60,7 +60,52 @@ interface MerchantProfile {
   tin?: string;
   isVatRegistered?: boolean;
   registeredBusinessName?: string;
+  taxClassification: TaxClassification | '';
 }
+
+type TaxClassification =
+  | 'vat_registered'
+  | 'non_vat_percentage_tax'
+  | 'vat_exempt'
+  | 'zero_rated_vat'
+  | 'government_entity'
+  | 'boi_peza_registered';
+
+const TAX_CLASSIFICATIONS: Record<
+  TaxClassification,
+  { label: string; invoiceType: string; taxComputation: string }
+> = {
+  vat_registered: {
+    label: 'VAT Registered',
+    invoiceType: 'VAT Invoice',
+    taxComputation: '12% VAT',
+  },
+  non_vat_percentage_tax: {
+    label: 'Non-VAT (Percentage Tax)',
+    invoiceType: 'Non-VAT Invoice',
+    taxComputation: 'Percentage Tax (if applicable)',
+  },
+  vat_exempt: {
+    label: 'VAT-Exempt',
+    invoiceType: 'VAT-Exempt Invoice',
+    taxComputation: 'No VAT',
+  },
+  zero_rated_vat: {
+    label: 'Zero-Rated VAT',
+    invoiceType: 'Zero-Rated VAT Invoice',
+    taxComputation: '0% VAT',
+  },
+  government_entity: {
+    label: 'Government Entity',
+    invoiceType: 'Special government rules',
+    taxComputation: 'Depends on transaction',
+  },
+  boi_peza_registered: {
+    label: 'BOI/PEZA Registered',
+    invoiceType: 'Special incentives',
+    taxComputation: 'Depends on registration/incentives',
+  },
+};
 
 interface OperatingHours {
   monday: { open: string; close: string };
@@ -88,6 +133,9 @@ export default function MerchantProfilePage() {
     address: '',
     description: '',
     website: '',
+    taxClassification: '' as TaxClassification | '',
+    tin: '',
+    registeredBusinessName: '',
   });
 
   const [operatingHours, setOperatingHours] = useState<OperatingHours>({
@@ -137,6 +185,12 @@ export default function MerchantProfilePage() {
           tin: merchantData.tin,
           isVatRegistered: merchantData.isVatRegistered || merchantData.is_vat_registered,
           registeredBusinessName: merchantData.registeredBusinessName || merchantData.registered_business_name,
+          taxClassification:
+            merchantData.taxClassification ||
+            merchantData.tax_classification ||
+            (merchantData.isVatRegistered || merchantData.is_vat_registered
+              ? 'vat_registered'
+              : ''),
         };
         setMerchant(merchantProfile);
         setFormData({
@@ -146,6 +200,9 @@ export default function MerchantProfilePage() {
           address: merchantProfile.address,
           description: merchantProfile.description,
           website: merchantProfile.website,
+          taxClassification: merchantProfile.taxClassification,
+          tin: merchantProfile.tin || '',
+          registeredBusinessName: merchantProfile.registeredBusinessName || merchantProfile.name,
         });
         
         if (merchantProfile.coverImageUrl) setBannerPreview(merchantProfile.coverImageUrl);
@@ -161,7 +218,7 @@ export default function MerchantProfilePage() {
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -359,28 +416,63 @@ export default function MerchantProfilePage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 TIN (Tax Identification Number)
               </label>
-              <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-700">
-                {merchant?.tin || <span className="text-gray-400 italic">Not set — update in merchant settings</span>}
-              </div>
+              <input
+                type="text"
+                name="tin"
+                value={formData.tin}
+                onChange={handleInputChange}
+                placeholder="Enter TIN"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-700 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Registered Business Name
               </label>
-              <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-gray-700">
-                {merchant?.registeredBusinessName || merchant?.name || <span className="text-gray-400 italic">Not set</span>}
-              </div>
+              <input
+                type="text"
+                name="registeredBusinessName"
+                value={formData.registeredBusinessName}
+                onChange={handleInputChange}
+                placeholder={formData.name || 'Registered business name'}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-700 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                VAT Registration
+              <label htmlFor="taxClassification" className="block text-sm font-medium text-gray-700 mb-2">
+                Business Tax Classification
               </label>
-              <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
-                <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${merchant?.isVatRegistered ? 'text-green-700' : 'text-gray-500'}`}>
-                  <span className={`w-2 h-2 rounded-full ${merchant?.isVatRegistered ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                  {merchant?.isVatRegistered ? 'VAT Registered' : 'Non-VAT'}
-                </span>
-              </div>
+              <select
+                id="taxClassification"
+                name="taxClassification"
+                value={formData.taxClassification}
+                onChange={handleInputChange}
+                required
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-700 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100"
+              >
+                <option value="" disabled>Select a business tax classification</option>
+                {(Object.entries(TAX_CLASSIFICATIONS) as Array<
+                  [TaxClassification, (typeof TAX_CLASSIFICATIONS)[TaxClassification]]
+                >).map(([value, option]) => (
+                  <option key={value} value={value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Invoice Type</p>
+              <p className="mt-1 text-sm font-semibold text-gray-800">
+                {formData.taxClassification
+                  ? TAX_CLASSIFICATIONS[formData.taxClassification].invoiceType
+                  : 'Select a classification'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Tax Computation</p>
+              <p className="mt-1 text-sm font-semibold text-gray-800">
+                {formData.taxClassification
+                  ? TAX_CLASSIFICATIONS[formData.taxClassification].taxComputation
+                  : 'Select a classification'}
+              </p>
             </div>
             <div className="flex items-end">
               <a

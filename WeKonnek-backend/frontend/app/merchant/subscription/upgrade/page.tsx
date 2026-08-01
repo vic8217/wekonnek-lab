@@ -9,13 +9,17 @@ import { uploadApi } from '@/lib/api';
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 type Tier = 'basic' | 'gold' | 'platinum';
-type Plan = 'weekly' | 'monthly' | 'annual';
+type Plan = 'daily';
 
 interface PlanInfo {
-  tier: Tier;
-  prices: Record<Plan, number>;
+  id: string;
+  audience: string;
+  tier: string;
+  fixedAmount: number | string;
+  variableOrderPercent?: number | string | null;
+  productLimit?: number | null;
   features: string[];
-  listingLimit: number;
+  isActive: boolean;
 }
 
 interface MerchantData {
@@ -24,20 +28,18 @@ interface MerchantData {
   subscription_expires_at?: string | null;
 }
 
-const PLAN_LABELS: Record<Plan, string> = {
-  weekly: 'Weekly',
-  monthly: 'Monthly',
-  annual: 'Annual',
-};
-
 const TIER_ACCENT: Record<Tier, string> = {
   basic: 'border-gray-300',
   gold: 'border-yellow-400',
   platinum: 'border-purple-500',
 };
 
-const peso = (n: number) =>
-  `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
+const peso = (value: number | null | undefined) => {
+  const amount = Number(value);
+  return `₱${(Number.isFinite(amount) ? amount : 0).toLocaleString('en-PH', {
+    minimumFractionDigits: 0,
+  })}`;
+};
 
 export default function SubscriptionUpgradePage() {
   const searchParams = useSearchParams();
@@ -47,8 +49,8 @@ export default function SubscriptionUpgradePage() {
   const [merchant, setMerchant] = useState<MerchantData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [selectedTier, setSelectedTier] = useState<Tier>('gold');
-  const [selectedPlan, setSelectedPlan] = useState<Plan>('monthly');
+  const [selectedTier] = useState<Tier>('platinum');
+  const selectedPlan: Plan = 'daily';
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'manual'>('online');
   const [gateway, setGateway] = useState<'gcash' | 'maya' | 'card'>('gcash');
   const [proofFile, setProofFile] = useState<File | null>(null);
@@ -59,11 +61,15 @@ export default function SubscriptionUpgradePage() {
   const paid = searchParams.get('paid');
 
   useEffect(() => {
+    let paymentMessage: { type: 'success' | 'error'; text: string } | null = null;
     if (paid === '1') {
-      setMessage({ type: 'success', text: 'Payment received! Your subscription has been updated.' });
+      paymentMessage = { type: 'success', text: 'Payment received! Your subscription has been updated.' };
     } else if (paid === '0') {
-      setMessage({ type: 'error', text: 'Payment was not completed. Please try again.' });
+      paymentMessage = { type: 'error', text: 'Payment was not completed. Please try again.' };
     }
+    if (!paymentMessage) return;
+    const updateMessage = setTimeout(() => setMessage(paymentMessage), 0);
+    return () => clearTimeout(updateMessage);
   }, [paid]);
 
   useEffect(() => {
@@ -71,7 +77,11 @@ export default function SubscriptionUpgradePage() {
       try {
         const token = getToken();
         const [plansRes, merchantRes] = await Promise.all([
-          fetch(`${API}/api/subscriptions/plans`),
+          token
+            ? fetch(`${API}/api/subscriptions/merchant-options`, {
+                headers: { Authorization: `Bearer ${token}` },
+              })
+            : Promise.resolve(null),
           token
             ? fetch(`${API}/api/merchants/me`, {
                 headers: { Authorization: `Bearer ${token}` },
@@ -79,13 +89,22 @@ export default function SubscriptionUpgradePage() {
             : Promise.resolve(null),
         ]);
 
-        if (plansRes.ok) setPlans(await plansRes.json());
+        if (plansRes?.ok) {
+          const data = await plansRes.json();
+          const merchantPlans = Array.isArray(data?.plans) ? data.plans : [];
+          setPlans(
+            merchantPlans.filter(
+              (plan: PlanInfo) =>
+                plan.audience === 'merchant' &&
+                plan.isActive &&
+                plan.tier.toLowerCase() === 'platinum',
+            ),
+          );
+        }
 
         if (merchantRes && merchantRes.ok) {
           const m: MerchantData = await merchantRes.json();
           setMerchant(m);
-          if (m.subscription_tier) setSelectedTier(m.subscription_tier as Tier);
-          if (m.subscription_plan) setSelectedPlan(m.subscription_plan as Plan);
         }
       } catch (e) {
         console.error('Failed to load subscription plans', e);
@@ -97,10 +116,10 @@ export default function SubscriptionUpgradePage() {
   }, []);
 
   const selectedPlanInfo = useMemo(
-    () => plans.find((p) => p.tier === selectedTier),
+    () => plans.find((p) => p.tier.toLowerCase() === selectedTier),
     [plans, selectedTier],
   );
-  const amount = selectedPlanInfo?.prices[selectedPlan] ?? 0;
+  const amount = Number(selectedPlanInfo?.fixedAmount ?? 0);
 
   const currentTier = merchant?.subscription_tier;
   const currentPlan = merchant?.subscription_plan;
@@ -170,8 +189,11 @@ export default function SubscriptionUpgradePage() {
         setMessage({ type: 'success', text: 'Your subscription has been updated.' });
         setTimeout(() => router.push('/merchant/dashboard'), 1500);
       }
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message || 'Something went wrong.' });
+    } catch (e: unknown) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Something went wrong.',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -188,8 +210,8 @@ export default function SubscriptionUpgradePage() {
           <Link href="/merchant/dashboard" className="text-sm text-gray-500 hover:text-gray-700">
             ← Back to dashboard
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900 mt-1">Manage Subscription</h1>
-          <p className="text-gray-600">Choose the plan that fits your business.</p>
+          <h1 className="text-3xl font-bold text-gray-900 mt-1">Change Subscription Plan</h1>
+          <p className="text-gray-600">Upgrade your business to the Platinum plan.</p>
         </div>
       </div>
 
@@ -205,43 +227,40 @@ export default function SubscriptionUpgradePage() {
         </div>
       )}
 
-      {/* Billing period toggle */}
-      <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1 w-fit">
-        {(['weekly', 'monthly', 'annual'] as Plan[]).map((p) => (
-          <button
-            key={p}
-            onClick={() => setSelectedPlan(p)}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              selectedPlan === p ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            {PLAN_LABELS[p]}
-          </button>
-        ))}
-      </div>
-
       {/* Tier cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="max-w-xl">
+        {plans.length === 0 && (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-gray-500">
+            The Platinum merchant tier is not currently available. Ask an administrator to activate it.
+          </div>
+        )}
         {plans.map((p) => {
-          const isSelected = p.tier === selectedTier;
-          const isActivePlan = p.tier === currentTier && selectedPlan === currentPlan;
+          const tier = p.tier.toLowerCase();
+          const isSelected = tier === selectedTier;
+          const isActivePlan = tier === currentTier && selectedPlan === currentPlan;
           return (
-            <button
-              key={p.tier}
-              onClick={() => setSelectedTier(p.tier)}
+            <div
+              key={p.id}
               className={`text-left bg-white rounded-xl border-2 p-6 transition-all ${
-                isSelected ? 'border-red-600 ring-2 ring-red-100' : TIER_ACCENT[p.tier]
+                isSelected ? 'border-red-600 ring-2 ring-red-100' : TIER_ACCENT.platinum
               }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-bold text-gray-900 capitalize">{p.tier}</h3>
-                {p.tier === currentTier && (
+                {tier === currentTier && (
                   <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Current tier</span>
                 )}
               </div>
               <div className="mb-4">
-                <span className="text-3xl font-extrabold text-gray-900">{peso(p.prices[selectedPlan])}</span>
-                <span className="text-gray-500 text-sm">/{selectedPlan.replace('ly', '')}</span>
+                <span className="text-3xl font-extrabold text-gray-900">{peso(Number(p.fixedAmount))}</span>
+                <span className="text-gray-500 text-sm">/day</span>
+              </div>
+              <div className="mb-4 space-y-1 text-sm text-gray-700">
+                <p>
+                  <b>{p.variableOrderPercent == null ? 'N/A' : `${Number(p.variableOrderPercent)}%`}</b>{' '}
+                  on system sales (net of VAT amount)
+                </p>
+                <p><b>{p.productLimit ?? 0}</b> products</p>
               </div>
               <ul className="space-y-2">
                 {p.features.map((f) => (
@@ -256,7 +275,7 @@ export default function SubscriptionUpgradePage() {
               {isActivePlan && (
                 <p className="mt-4 text-xs text-gray-500">This is your active plan</p>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -266,9 +285,7 @@ export default function SubscriptionUpgradePage() {
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <div>
             <p className="text-sm text-gray-600">Selected plan</p>
-            <p className="text-lg font-bold text-gray-900 capitalize">
-              {selectedTier} · {PLAN_LABELS[selectedPlan]}
-            </p>
+            <p className="text-lg font-bold text-gray-900 capitalize">{selectedTier}</p>
           </div>
           <div className="text-right">
             <p className="text-sm text-gray-600">Amount due</p>
@@ -335,16 +352,10 @@ export default function SubscriptionUpgradePage() {
 
         <button
           onClick={handleSubmit}
-          disabled={submitting || (isCurrent && paymentMethod === 'online')}
+          disabled={submitting || !selectedPlanInfo || (isCurrent && paymentMethod === 'online')}
           className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting
-            ? 'Processing...'
-            : isCurrent
-            ? 'Renew current plan'
-            : paymentMethod === 'online'
-            ? `Pay ${peso(amount)} & Activate`
-            : `Submit ${peso(amount)} for approval`}
+          {submitting ? 'Processing...' : 'Change Plan'}
         </button>
       </div>
     </div>

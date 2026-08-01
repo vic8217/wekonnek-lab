@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { computeExpiry } from '../subscriptions/subscription-plans';
 import { randomBytes } from 'crypto';
+import * as bcrypt from 'bcryptjs';
 
 function serializeApplication(a: any) {
   if (!a) return a;
@@ -43,6 +44,12 @@ function serializeApplication(a: any) {
     subscriptionPlan: a.subscriptionPlan,
     subscription_amount: a.subscriptionAmount,
     subscriptionAmount: a.subscriptionAmount,
+    selected_add_on_ids: a.selectedAddOnIds,
+    selectedAddOnIds: a.selectedAddOnIds,
+    selected_add_on_quantities: a.selectedAddOnQuantities || {},
+    selectedAddOnQuantities: a.selectedAddOnQuantities || {},
+    temporary_password: a.temporaryPassword,
+    recovery_key: a.recoveryKey,
     payment_method: a.paymentMethod,
     payment_proof_url: a.paymentProofUrl,
     business_permit_url: a.businessPermitUrl,
@@ -61,6 +68,15 @@ function serializeApplication(a: any) {
     created_at: a.createdAt,
     updated_at: a.updatedAt,
   };
+}
+
+function addOnQuantity(
+  quantities: unknown,
+  addOnId: string,
+): number {
+  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
+  const value = Number((quantities as Record<string, unknown>)[addOnId]);
+  return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
 function slugify(name: string): string {
@@ -165,7 +181,41 @@ export class MerchantApplicationsService {
       where,
       orderBy: { submittedAt: 'desc' },
     });
-    return apps.map(serializeApplication);
+    const reviewerIds = [...new Set(apps.map(app => app.reviewedBy).filter(Boolean))] as string[];
+    const addOnIds = [...new Set(apps.flatMap(app => app.selectedAddOnIds))];
+    const [reviewers, addOns]: [
+      Array<{ id: string; firstName: string | null; lastName: string | null; email: string | null }>,
+      Array<{ id: string; name: string; amount: unknown; billingUnit: string; amountBasis: string | null }>,
+    ] = await Promise.all([
+      reviewerIds.length ? this.prisma.user.findMany({
+        where: { id: { in: reviewerIds } },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      }) : [],
+      addOnIds.length ? this.prisma.subscriptionAddOnPackage.findMany({
+        where: { id: { in: addOnIds } },
+        select: { id: true, name: true, amount: true, billingUnit: true, amountBasis: true },
+      }) : [],
+    ]);
+    const reviewerById = new Map<string, string>();
+    reviewers.forEach(user => reviewerById.set(
+      user.id,
+      [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Admin staff',
+    ));
+    const addOnById = new Map<string, (typeof addOns)[number]>();
+    addOns.forEach(addOn => addOnById.set(addOn.id, addOn));
+    return apps.map(app => {
+      const selectedAddOns = app.selectedAddOnIds.flatMap(id => {
+        const addOn = addOnById.get(id);
+        const quantity = addOnQuantity(app.selectedAddOnQuantities, id);
+        return addOn ? [{ ...addOn, quantity, subtotal: Number(addOn.amount) * quantity }] : [];
+      });
+      return {
+        ...serializeApplication(app),
+        selected_add_ons: selectedAddOns,
+        total_fee: Number(app.subscriptionAmount) + selectedAddOns.reduce((sum, addOn) => sum + addOn.subtotal, 0),
+        reviewed_by_name: app.reviewedBy ? reviewerById.get(app.reviewedBy) || 'Admin staff' : null,
+      };
+    });
   }
 
   async coverageOptions() {
@@ -228,9 +278,17 @@ export class MerchantApplicationsService {
     if (!isAdmin && coverageRules.length === 0) throw new ForbiddenException('Your coordinator zone has no city or municipality coverage');
     const applications = await this.prisma.merchantApplication.findMany({
       where: {
-        source: 'website_callback',
-        status: { in: ['pending', 'reviewing'] },
-        AND: [{ OR: [{ assignedCoordinatorId: null }, { assignedCoordinatorId: user.id }] }],
+        OR: [
+          {
+            source: 'website_callback',
+            status: { in: ['pending', 'reviewing'] },
+            assignedCoordinatorId: null,
+          },
+          {
+            assignedCoordinatorId: user.id,
+            status: { in: ['pending', 'reviewing', 'for_approval', 'approved', 'rejected'] },
+          },
+        ],
       },
       orderBy: { submittedAt: 'desc' },
     });
@@ -254,11 +312,141 @@ export class MerchantApplicationsService {
       where: {
         id,
         assignedCoordinatorId: user.id,
-        status: { in: ['pending', 'reviewing'] },
       },
     });
     if (!application) throw new ForbiddenException('This application is not assigned to your coordinator account');
-    return serializeApplication(application);
+    const serialized = serializeApplication(application);
+    if (application.status !== 'approved' || !application.merchantCode) return serialized;
+
+    const [merchant, reviewer] = await Promise.all([
+      this.prisma.merchant.findUnique({ where: { merchantCode: application.merchantCode } }),
+      application.reviewedBy
+        ? this.prisma.user.findUnique({
+            where: { id: application.reviewedBy },
+            select: { firstName: true, lastName: true, email: true },
+          })
+        : null,
+    ]);
+    if (!merchant) return serialized;
+
+    const [wallet, addOns, payments] = await Promise.all([
+      merchant.userId
+        ? this.prisma.wallet.findUnique({ where: { userId: merchant.userId } })
+        : null,
+      this.prisma.subscriptionAddOnPackage.findMany({
+        where: { id: { in: application.selectedAddOnIds } },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.subscriptionPayment.findMany({
+        where: { merchantId: merchant.id },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+    const planFee = Number(application.subscriptionAmount);
+    const addOnFee = addOns.reduce(
+      (sum, addOn) =>
+        sum + Number(addOn.amount) * addOnQuantity(application.selectedAddOnQuantities, addOn.id),
+      0,
+    );
+    const totalFee = planFee + addOnFee;
+    const totalPaid = payments
+      .filter(payment => payment.status === 'paid')
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const walletBalance = Number(wallet?.balance || 0);
+    const hasDailyCoverage = application.subscriptionPlan !== 'daily' || walletBalance >= totalFee;
+    const accountStatus = hasDailyCoverage
+      ? merchant.status === 'inactive' ? 'active' : merchant.status
+      : merchant.status === 'active' ? 'inactive' : merchant.status;
+    if (
+      merchant.isActive !== (hasDailyCoverage && accountStatus === 'active')
+      || merchant.status !== accountStatus
+      || merchant.subscriptionStatus !== (hasDailyCoverage ? 'active' : 'inactive')
+    ) {
+      await this.prisma.merchant.update({
+        where: { id: merchant.id },
+        data: {
+          isActive: hasDailyCoverage && accountStatus === 'active',
+          status: accountStatus,
+          subscriptionStatus: hasDailyCoverage ? 'active' : 'inactive',
+        },
+      });
+    }
+    const reviewerName = reviewer
+      ? [reviewer.firstName, reviewer.lastName].filter(Boolean).join(' ') || reviewer.email
+      : null;
+
+    return {
+      ...serialized,
+      merchant_account: {
+        id: merchant.id,
+        merchant_code: application.merchantCode,
+        temporary_password: application.temporaryPassword,
+        recovery_key: application.recoveryKey,
+        status: accountStatus,
+        joined_at: merchant.createdAt,
+        approved_at: application.reviewedAt,
+        approved_by_name: reviewerName,
+        wallet_balance: walletBalance,
+        fee_breakdown: {
+          plan: {
+            name: application.subscriptionTier,
+            amount: planFee,
+            billing_unit: application.subscriptionPlan,
+          },
+          add_ons: addOns.map(addOn => ({
+            id: addOn.id,
+            name: addOn.name,
+            amount: Number(addOn.amount),
+            quantity: addOnQuantity(application.selectedAddOnQuantities, addOn.id),
+            subtotal:
+              Number(addOn.amount) *
+              addOnQuantity(application.selectedAddOnQuantities, addOn.id),
+            billing_unit: addOn.billingUnit,
+            amount_basis: addOn.amountBasis,
+          })),
+          add_on_fee: addOnFee,
+          total_fee: totalFee,
+        },
+        ledger: {
+          total_billed: totalFee,
+          total_paid: totalPaid,
+          unpaid: Math.max(totalFee - totalPaid, 0),
+          payments: payments.map(payment => ({
+            id: payment.id,
+            tier: payment.tier,
+            plan: payment.plan,
+            amount: Number(payment.amount),
+            payment_method: payment.paymentMethod,
+            gateway: payment.gateway,
+            status: payment.status,
+            payment_ref: payment.paymentRef,
+            period_start: payment.periodStart,
+            period_end: payment.periodEnd,
+            created_at: payment.createdAt,
+          })),
+        },
+      },
+    };
+  }
+
+  async generateCoordinatorMerchantRecoveryKey(id: number, user: { id: string }) {
+    const application = await this.prisma.merchantApplication.findFirst({
+      where: {
+        id,
+        assignedCoordinatorId: user.id,
+        status: 'approved',
+        userId: { not: null },
+      },
+    });
+    if (!application?.merchantCode) {
+      throw new ForbiddenException('This approved merchant is not assigned to your coordinator account');
+    }
+    const recoveryKey = `WKR-${randomBytes(18).toString('base64url')}`;
+    await this.prisma.merchantApplication.update({
+      where: { id },
+      data: { recoveryKey },
+    });
+    return { recovery_key: recoveryKey, merchant_code: application.merchantCode };
   }
 
   async updateCoordinatorReview(
@@ -273,12 +461,42 @@ export class MerchantApplicationsService {
       establishment_photo_url?: string | null;
       authorized_person_photo_url?: string | null;
       business_documents_urls?: string[];
+      subscription_tier?: string;
+      selected_add_on_ids?: string[];
+      selected_add_on_quantities?: Record<string, number>;
     },
   ) {
     const application = await this.prisma.merchantApplication.findFirst({
-      where: { id, assignedCoordinatorId: user.id, status: { in: ['pending', 'reviewing'] } },
+      where: { id, assignedCoordinatorId: user.id, status: { in: ['pending', 'reviewing', 'for_approval', 'approved'] } },
     });
     if (!application) throw new ForbiddenException('This application is not assigned to your coordinator account');
+
+    const selectedTier = String(input.subscription_tier || '').trim().toLowerCase();
+    if (!selectedTier) throw new BadRequestException('Select one merchant plan');
+    const plan = await this.prisma.subscriptionPlanDefinition.findFirst({
+      where: { audience: 'merchant', tier: selectedTier, isActive: true },
+    });
+    if (!plan) throw new BadRequestException('The selected merchant plan is unavailable');
+
+    const selectedAddOnIds = [...new Set(input.selected_add_on_ids || [])];
+    const validAddOns = selectedAddOnIds.length
+      ? await this.prisma.subscriptionAddOnPackage.findMany({
+          where: { id: { in: selectedAddOnIds }, audience: 'merchant', isActive: true },
+          select: { id: true, amount: true },
+        })
+      : [];
+    if (validAddOns.length !== selectedAddOnIds.length) {
+      throw new BadRequestException('One or more selected add-ons are unavailable');
+    }
+    const selectedAddOnQuantities = Object.fromEntries(
+      selectedAddOnIds.map(id => {
+        const quantity = Number(input.selected_add_on_quantities?.[id] ?? 1);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1_000_000) {
+          throw new BadRequestException('Add-on quantity must be a whole number greater than zero');
+        }
+        return [id, quantity];
+      }),
+    );
 
     const missingDocumentUpdates = {
       paymentProofUrl: application.paymentProofUrl ? undefined : input.payment_proof_url || undefined,
@@ -294,13 +512,51 @@ export class MerchantApplicationsService {
       data: {
         ...missingDocumentUpdates,
         coordinatorNotes: input.coordinator_notes?.trim() || null,
+        subscriptionTier: plan.tier,
+        subscriptionPlan: 'daily',
+        subscriptionAmount: plan.fixedAmount,
+        selectedAddOnIds,
+        selectedAddOnQuantities,
         businessDocumentsUrls: additionalDocuments.length
           ? [...application.businessDocumentsUrls, ...additionalDocuments]
           : undefined,
-        status: application.status === 'pending' ? 'reviewing' : application.status,
+        // A completed coordinator review is ready for the administrator's
+        // final decision. Approved applications retain their status when a
+        // coordinator later updates only the subscription configuration.
+        status: application.status === 'approved' ? 'approved' : 'for_approval',
       },
     });
-    return serializeApplication(updated);
+    if (application.status === 'approved' && application.merchantCode) {
+      const merchant = await this.prisma.merchant.update({
+        where: { merchantCode: application.merchantCode },
+        data: {
+          subscriptionTier: plan.tier,
+          subscriptionPlan: 'daily',
+          subscriptionAmount: plan.fixedAmount,
+        },
+      });
+      const pendingPayment = await this.prisma.subscriptionPayment.findFirst({
+        where: { merchantId: merchant.id, status: 'pending' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (pendingPayment) {
+        const updatedFee = Number(plan.fixedAmount)
+          + validAddOns.reduce(
+            (sum, addOn) =>
+              sum + Number(addOn.amount) * addOnQuantity(selectedAddOnQuantities, addOn.id),
+            0,
+          );
+        await this.prisma.subscriptionPayment.update({
+          where: { id: pendingPayment.id },
+          data: {
+            tier: plan.tier,
+            plan: 'daily',
+            amount: updatedFee,
+          },
+        });
+      }
+    }
+    return this.findAssignedCoordinatorLead(id, user);
   }
 
   async eligibleCoordinators(id: number) {
@@ -362,13 +618,30 @@ export class MerchantApplicationsService {
       where: { id: Number(id) },
     });
     if (!application) throw new NotFoundException('Application not found');
-    if (status === 'approved' && !application.assignedCoordinatorId) {
-      throw new BadRequestException('Assign a coordinator before approving this application');
+    if (status === 'approved' && application.status !== 'for_approval') {
+      throw new BadRequestException('The coordinator must complete the review before this application can be approved');
     }
 
     const merchantCode = status === 'approved'
       ? application.merchantCode ?? await this.generateMerchantCode()
       : application.merchantCode;
+    const temporaryPassword = status === 'approved' && !application.temporaryPassword
+      ? `Wk!${randomBytes(9).toString('base64url')}`
+      : application.temporaryPassword;
+    let merchantUserId = application.userId;
+    if (status === 'approved' && temporaryPassword) {
+      const password = await bcrypt.hash(temporaryPassword, 10);
+      const names = (application.contactName || application.businessName).trim().split(/\s+/);
+      const firstName = names.shift() || 'Merchant';
+      const lastName = names.join(' ') || null;
+      const matchingUser = merchantUserId
+        ? await this.prisma.user.findUnique({ where: { id: merchantUserId } })
+        : await this.prisma.user.findFirst({ where: { OR: [{ email: application.email }, { phone: application.phone || '' }] } });
+      const user = matchingUser
+        ? await this.prisma.user.update({ where: { id: matchingUser.id }, data: { firstName, lastName, email: application.email, phone: application.phone || matchingUser.phone, password, mustChangePassword: true, role: 'merchant', isActive: true, isVerified: true, status: 'active' } })
+        : await this.prisma.user.create({ data: { firstName, lastName, email: application.email, phone: application.phone || `merchant-${application.id}`, password, mustChangePassword: true, role: 'merchant', isActive: true, isVerified: true, status: 'active' } });
+      merchantUserId = user.id;
+    }
     const updated = await this.prisma.merchantApplication.update({
       where: { id: Number(id) },
       data: {
@@ -377,15 +650,32 @@ export class MerchantApplicationsService {
         reviewedAt: new Date(),
         rejectionReason: status === 'rejected' ? opts.rejectionReason ?? null : null,
         merchantCode,
+        userId: merchantUserId,
+        temporaryPassword,
       },
     });
 
     // On approval, create the live Merchant record + promote the owner.
     if (status === 'approved') {
-      await this.provisionMerchant({ ...application, merchantCode });
+      await this.provisionMerchant({ ...application, merchantCode, userId: merchantUserId });
     }
 
     return serializeApplication(updated);
+  }
+
+  async resetMerchantPassword(recoveryKey: string, newPassword: string) {
+    if (!recoveryKey || newPassword.length < 8) {
+      throw new BadRequestException('A valid recovery key and password of at least 8 characters are required');
+    }
+    const application = await this.prisma.merchantApplication.findFirst({
+      where: { recoveryKey, userId: { not: null }, status: 'approved' },
+    });
+    if (!application?.userId) throw new BadRequestException('Recovery key is invalid');
+    await this.prisma.user.update({
+      where: { id: application.userId },
+      data: { password: await bcrypt.hash(newPassword, 10) },
+    });
+    return { message: 'Password changed successfully' };
   }
 
   private async provisionMerchant(application: any) {
@@ -442,16 +732,45 @@ export class MerchantApplicationsService {
       },
     });
 
-    // Record the initial subscription payment for billing history.
+    const selectedAddOns = application.selectedAddOnIds?.length
+      ? await this.prisma.subscriptionAddOnPackage.findMany({
+          where: { id: { in: application.selectedAddOnIds } },
+          select: { id: true, amount: true },
+        })
+      : [];
+    const initialAmount = Number(application.subscriptionAmount)
+      + selectedAddOns.reduce(
+        (sum, addOn) =>
+          sum + Number(addOn.amount) * addOnQuantity(application.selectedAddOnQuantities, addOn.id),
+        0,
+      );
+    if (application.subscriptionPlan === 'daily' && application.userId) {
+      const wallet = await this.prisma.wallet.findUnique({
+        where: { userId: application.userId },
+        select: { balance: true },
+      });
+      if (Number(wallet?.balance || 0) < initialAmount) {
+        await this.prisma.merchant.update({
+          where: { id: merchant.id },
+          data: {
+            isActive: false,
+            status: 'inactive',
+            subscriptionStatus: 'inactive',
+          },
+        });
+      }
+    }
+
+    // Approval creates the bill; payment remains pending until it is actually received.
     await this.prisma.subscriptionPayment
       .create({
         data: {
           merchantId: merchant.id,
           tier: application.subscriptionTier,
           plan: application.subscriptionPlan,
-          amount: application.subscriptionAmount,
+          amount: initialAmount,
           paymentMethod: 'manual',
-          status: 'paid',
+          status: 'pending',
           paymentProofUrl: application.paymentProofUrl,
           periodStart: subscriptionStart,
           periodEnd: subscriptionEnd,

@@ -17,6 +17,8 @@ import { CreateMerchantDto } from './dto/create-merchant.dto';
 import { UpdateMerchantDto } from './dto/update-merchant.dto';
 import { SearchMerchantsDto } from './dto/search-merchants.dto';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
+import { UserRole } from '@prisma/client';
 
 @ApiTags('merchants')
 @Controller('merchants')
@@ -41,6 +43,47 @@ export class MerchantsController {
   @ApiOperation({ summary: 'Get the merchant profile owned by the logged-in user' })
   findMine(@Req() req: any) {
     return this.merchantsService.findByUserId(req.user.id);
+  }
+
+  @Get('me/subscription-coverage')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get wallet-funded subscription coverage for the logged-in merchant' })
+  getMySubscriptionCoverage(@Req() req: any) {
+    return this.merchantsService.getSubscriptionCoverage(req.user.id);
+  }
+
+  @Get('admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Admin merchant list with onboarding credentials' })
+  findAllForAdmin(@Query('status') status?: string) {
+    return this.merchantsService.findAllForAdmin(status);
+  }
+
+  @Get('admin/:id/details')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiBearerAuth()
+  getAdminDetails(@Param('id', ParseIntPipe) id: number) {
+    return this.merchantsService.getAdminDetails(id);
+  }
+
+  @Get('admin/:id/ledger')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiBearerAuth()
+  getSubscriptionLedger(@Param('id', ParseIntPipe) id: number) {
+    return this.merchantsService.getSubscriptionLedger(id);
+  }
+
+  @Post('admin/:id/recovery-key')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiBearerAuth()
+  generateRecoveryKey(@Param('id', ParseIntPipe) id: number) {
+    return this.merchantsService.generateRecoveryKey(id);
   }
 
   @Get('search')

@@ -12,6 +12,12 @@ import {
 } from '@prisma/client';
 import { PaymentGatewayService } from './payment-gateway.service';
 
+function addOnQuantity(quantities: unknown, id: string) {
+  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
+  const value = Number((quantities as Record<string, unknown>)[id]);
+  return Number.isInteger(value) && value > 0 ? value : 1;
+}
+
 @Injectable()
 export class WalletService {
   constructor(
@@ -266,10 +272,11 @@ export class WalletService {
 
       const wallet = await this.prisma.wallet.findUnique({ where: { id: txn.walletId } });
       if (wallet) {
-        await this.prisma.wallet.update({
+        const updatedWallet = await this.prisma.wallet.update({
           where: { id: wallet.id },
           data: { balance: wallet.balance + txn.netAmount },
         });
+        await this.syncMerchantSubscriptionStatus(wallet.userId, updatedWallet.balance);
       }
     } else {
       await this.prisma.walletTransaction.update({
@@ -299,6 +306,41 @@ export class WalletService {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     return `WHP-${prefix}-${timestamp}${random}`;
+  }
+
+  private async syncMerchantSubscriptionStatus(userId: string, walletBalance: number) {
+    const merchant = await this.prisma.merchant.findFirst({
+      where: { userId, subscriptionPlan: 'daily' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!merchant?.merchantCode) return;
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { merchantCode: merchant.merchantCode },
+    });
+    const addOns = application?.selectedAddOnIds.length
+      ? await this.prisma.subscriptionAddOnPackage.findMany({
+          where: { id: { in: application.selectedAddOnIds } },
+          select: { id: true, amount: true },
+        })
+      : [];
+    const dailyFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount)
+      + addOns.reduce(
+        (sum, addOn) =>
+          sum + Number(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+        0,
+      );
+    const hasCoverage = walletBalance >= dailyFee;
+    const status = hasCoverage
+      ? merchant.status === 'inactive' ? 'active' : merchant.status
+      : merchant.status === 'active' ? 'inactive' : merchant.status;
+    await this.prisma.merchant.update({
+      where: { id: merchant.id },
+      data: {
+        isActive: hasCoverage && status === 'active',
+        status,
+        subscriptionStatus: hasCoverage ? 'active' : 'inactive',
+      },
+    });
   }
 
   private calculateCashOutFee(amount: number): number {
