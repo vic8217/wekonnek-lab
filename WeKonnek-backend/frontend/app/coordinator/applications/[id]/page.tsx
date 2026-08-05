@@ -107,6 +107,16 @@ const documentFields = [
   ['authorized_person_photo_url', 'Authorized person photo'],
 ] as const;
 
+async function readResponseBody(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: response.ok ? 'The server returned an invalid response' : text };
+  }
+}
+
 export default function CoordinatorMerchantReviewPage() {
   const id = String(useParams().id || '');
   const [application, setApplication] = useState<Application | null>(null);
@@ -138,7 +148,7 @@ export default function CoordinatorMerchantReviewPage() {
           cache: 'no-store',
         }),
       ]);
-      const applicationBody = await applicationResponse.json();
+      const applicationBody = await readResponseBody(applicationResponse);
       if (!applicationResponse.ok) throw new Error(applicationBody.message || 'Unable to load the assigned application');
       setApplication(applicationBody);
       setNotes(applicationBody.coordinator_notes || '');
@@ -147,7 +157,7 @@ export default function CoordinatorMerchantReviewPage() {
       setSelectedAddOnQuantities(applicationBody.selected_add_on_quantities || {});
       setEditingSubscription(false);
       if (plansResponse.ok) {
-        const options = await plansResponse.json();
+        const options = await readResponseBody(plansResponse);
         setPlans(Array.isArray(options.plans) ? options.plans : []);
         setAddOns(Array.isArray(options.addOns) ? options.addOns : []);
       }
@@ -168,7 +178,7 @@ export default function CoordinatorMerchantReviewPage() {
     formData.append('file', file);
     formData.append('type', 'document');
     const response = await fetch('/api/backend/upload', { method: 'POST', body: formData });
-    const body = await response.json();
+    const body = await readResponseBody(response);
     if (!response.ok) throw new Error(body.message || 'Document upload failed');
     return String(body.url);
   };
@@ -195,7 +205,7 @@ export default function CoordinatorMerchantReviewPage() {
           selected_add_on_quantities: selectedAddOnQuantities,
         }),
       });
-      const body = await response.json();
+      const body = await readResponseBody(response);
       if (!response.ok) throw new Error(body.message || 'Unable to save coordinator review');
       if (application.status !== 'approved' && body.status !== 'for_approval') {
         throw new Error(`Review was saved but the application status is still ${body.status || 'unknown'}. Restart the backend and submit again.`);
@@ -222,7 +232,7 @@ export default function CoordinatorMerchantReviewPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-      const body = await response.json();
+      const body = await readResponseBody(response);
       if (!response.ok) throw new Error(body.message || 'Unable to generate recovery key');
       setApplication(current => current?.merchant_account
         ? {
@@ -398,7 +408,7 @@ function MerchantAccountOverview({
     </div>
 
     <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Detail label="Merchant code" value={account.merchant_code} />
+      <Detail label="Store ID / Merchant code" value={account.merchant_code} />
       <Detail label="Temporary password" value={account.temporary_password} />
       <Detail label="Wallet balance" value={`₱${Number(account.wallet_balance).toLocaleString()}`} />
       <Detail label="Total subscription fee" value={`₱${Number(account.fee_breakdown.total_fee).toLocaleString()}`} />

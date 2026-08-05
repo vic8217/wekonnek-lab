@@ -1,5 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { randomBytes } from 'crypto';
+
+const PASSKEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 const TAX_CLASSIFICATIONS = new Set([
   'vat_registered',
@@ -16,26 +19,71 @@ function addOnQuantity(quantities: unknown, id: string) {
   return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
+function philippineBillingKey(now = new Date()) {
+  const local = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  return `${local.getUTCFullYear()}${String(local.getUTCMonth() + 1).padStart(2, '0')}${String(local.getUTCDate()).padStart(2, '0')}`;
+}
+
 @Injectable()
 export class BranchesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAllByMerchant(merchantId: number) {
+  private async assertMerchantAccess(merchantId: number, requester: { id: string; role?: string }) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new NotFoundException('Merchant not found');
+    if (merchant.userId !== requester.id && !['admin', 'staff'].includes(String(requester.role))) {
+      throw new ForbiddenException('You do not have access to this merchant account');
+    }
+    return merchant;
+  }
+
+  private createPasskey() {
+    return `WK-${randomBytes(9).toString('base64url')}`;
+  }
+
+  private createShopId(merchantId: number, latitude: unknown, longitude: unknown) {
+    const coordinate = (value: unknown) => Number(value).toFixed(5).replace('-', 'M').replace('.', '');
+    return `WKS-${merchantId}-${coordinate(latitude)}-${coordinate(longitude)}`.toUpperCase();
+  }
+
+  private async ensureShopAccess(branch: any): Promise<any> {
+    const now = new Date();
+    const needsShopId = !branch.shopId && Number.isFinite(Number(branch.latitude)) && Number.isFinite(Number(branch.longitude));
+    const needsPasskey = !branch.passkey || !branch.passkeyExpiresAt || branch.passkeyExpiresAt <= now;
+    if (!needsShopId && !needsPasskey) return branch;
+
+    return this.prisma.branch.update({
+      where: { id: branch.id },
+      data: {
+        ...(needsShopId ? { shopId: this.createShopId(branch.merchantId, branch.latitude, branch.longitude) } : {}),
+        ...(needsPasskey
+          ? { passkey: this.createPasskey(), passkeyExpiresAt: new Date(now.getTime() + PASSKEY_LIFETIME_MS) }
+          : {}),
+      },
+      include: { _count: { select: { staff: true } } },
+    });
+  }
+
+  async findAllByMerchant(merchantId: number, requester: { id: string; role?: string }) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+    if (merchant.userId !== requester.id && !['admin', 'staff'].includes(String(requester.role))) {
+      throw new ForbiddenException('You do not have access to this merchant account');
+    }
+
+    const application = merchant.merchantCode
+      ? await this.prisma.merchantApplication.findUnique({ where: { merchantCode: merchant.merchantCode } })
+      : null;
 
     let walletBalance = 0;
     let dailyFee = Number(merchant.subscriptionAmount);
     let hasWalletCoverage = true;
     if (merchant.subscriptionPlan.toLowerCase() === 'daily') {
-      const [wallet, application] = await Promise.all([
+      const wallet = await (
         merchant.userId
           ? this.prisma.wallet.findUnique({ where: { userId: merchant.userId } })
-          : null,
-        merchant.merchantCode
-          ? this.prisma.merchantApplication.findUnique({ where: { merchantCode: merchant.merchantCode } })
-          : null,
-      ]);
+          : Promise.resolve(null)
+      );
       walletBalance = Number(wallet?.balance || 0);
       const addOns = application?.selectedAddOnIds.length
         ? await this.prisma.subscriptionAddOnPackage.findMany({
@@ -52,7 +100,13 @@ export class BranchesService {
               addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
           0,
         );
-      hasWalletCoverage = walletBalance >= dailyFee;
+      const paidToday = wallet
+        ? await this.prisma.walletTransaction.findUnique({
+            where: { referenceNumber: `SUB-${merchant.id}-${philippineBillingKey()}` },
+            select: { id: true },
+          })
+        : null;
+      hasWalletCoverage = Boolean(paidToday) || walletBalance >= dailyFee;
     }
     const isAdministrativelyActive = !['suspended', 'deactivated'].includes(
       merchant.status.toLowerCase(),
@@ -91,6 +145,7 @@ export class BranchesService {
         orderBy: { createdAt: 'desc' },
       });
     }
+    branches = await Promise.all(branches.map((branch) => this.ensureShopAccess(branch)));
     return branches.map((b) => ({
       ...b,
       merchant_id: b.merchantId,
@@ -106,16 +161,29 @@ export class BranchesService {
       wallet_balance: walletBalance,
       daily_subscription_fee: dailyFee,
       wallet_funded: hasWalletCoverage,
+      shop_id: b.shopId,
+      passkey: b.passkey,
+      passkey_expires_at: b.passkeyExpiresAt,
+      store_id: b.shopId,
+      temporary_password: b.passkey,
+      recovery_key: b.isDefault ? application?.recoveryKey ?? null : null,
     }));
   }
 
-  async create(merchantId: number, input: any) {
+  async create(merchantId: number, input: any, requester: { id: string; role?: string }) {
+    await this.assertMerchantAccess(merchantId, requester);
     if (!TAX_CLASSIFICATIONS.has(String(input.tax_classification ?? input.taxClassification ?? ''))) {
       throw new BadRequestException('Choose a valid business tax classification');
+    }
+    if (!Number.isFinite(Number(input.latitude)) || !Number.isFinite(Number(input.longitude))) {
+      throw new BadRequestException('Choose a valid shop location');
     }
     const data: any = {
       merchantId,
       name: input.name,
+      shopId: this.createShopId(merchantId, input.latitude, input.longitude),
+      passkey: this.createPasskey(),
+      passkeyExpiresAt: new Date(Date.now() + PASSKEY_LIFETIME_MS),
     };
 
     if (input.address !== undefined) data.address = input.address;
@@ -134,12 +202,20 @@ export class BranchesService {
       data.operatingHours = input.operating_hours ?? input.operatingHours;
 
     const branch = await this.prisma.branch.create({ data });
-    return { ...branch, merchant_id: branch.merchantId, is_active: branch.isActive };
+    return {
+      ...branch,
+      merchant_id: branch.merchantId,
+      is_active: branch.isActive,
+      shop_id: branch.shopId,
+      passkey: branch.passkey,
+      passkey_expires_at: branch.passkeyExpiresAt,
+    };
   }
 
-  async update(id: number, input: any) {
+  async update(id: number, input: any, requester: { id: string; role?: string }) {
     const existing = await this.prisma.branch.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Branch not found');
+    await this.assertMerchantAccess(existing.merchantId, requester);
 
     const data: any = {};
     const taxClassification = input.tax_classification ?? input.taxClassification;
@@ -165,13 +241,44 @@ export class BranchesService {
     if (input.is_active !== undefined || input.isActive !== undefined)
       data.isActive = input.is_active ?? input.isActive;
 
+    if (!existing.shopId && Number.isFinite(Number(input.latitude ?? existing.latitude)) && Number.isFinite(Number(input.longitude ?? existing.longitude))) {
+      data.shopId = this.createShopId(
+        existing.merchantId,
+        input.latitude ?? existing.latitude,
+        input.longitude ?? existing.longitude,
+      );
+    }
+    if (!existing.passkey || !existing.passkeyExpiresAt || existing.passkeyExpiresAt <= new Date()) {
+      data.passkey = this.createPasskey();
+      data.passkeyExpiresAt = new Date(Date.now() + PASSKEY_LIFETIME_MS);
+    }
     const branch = await this.prisma.branch.update({ where: { id }, data });
     return { ...branch, merchant_id: branch.merchantId, is_active: branch.isActive };
   }
 
-  async remove(id: number) {
+  async regeneratePasskey(id: number, requester: { id: string; role?: string }) {
     const existing = await this.prisma.branch.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Branch not found');
+    await this.assertMerchantAccess(existing.merchantId, requester);
+
+    const branch = await this.prisma.branch.update({
+      where: { id },
+      data: {
+        passkey: this.createPasskey(),
+        passkeyExpiresAt: new Date(Date.now() + PASSKEY_LIFETIME_MS),
+      },
+    });
+    return {
+      id: branch.id,
+      passkey: branch.passkey,
+      passkey_expires_at: branch.passkeyExpiresAt,
+    };
+  }
+
+  async remove(id: number, requester: { id: string; role?: string }) {
+    const existing = await this.prisma.branch.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Branch not found');
+    await this.assertMerchantAccess(existing.merchantId, requester);
     if (existing.isDefault) {
       throw new BadRequestException('The default shop cannot be deleted');
     }

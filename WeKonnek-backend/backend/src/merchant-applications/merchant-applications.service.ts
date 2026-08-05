@@ -19,6 +19,8 @@ function serializeApplication(a: any) {
     businessName: a.businessName,
     merchant_code: a.merchantCode,
     merchantCode: a.merchantCode,
+    store_id: a.merchantCode,
+    storeId: a.merchantCode,
     email: a.email,
     phone: a.phone,
     address: a.address,
@@ -623,11 +625,14 @@ export class MerchantApplicationsService {
     }
 
     const merchantCode = status === 'approved'
-      ? application.merchantCode ?? await this.generateMerchantCode()
+      ? application.merchantCode ?? await this.generateMerchantCode(application)
       : application.merchantCode;
     const temporaryPassword = status === 'approved' && !application.temporaryPassword
       ? `Wk!${randomBytes(9).toString('base64url')}`
       : application.temporaryPassword;
+    const recoveryKey = status === 'approved'
+      ? application.recoveryKey ?? `WKR-${randomBytes(18).toString('base64url')}`
+      : application.recoveryKey;
     let merchantUserId = application.userId;
     if (status === 'approved' && temporaryPassword) {
       const password = await bcrypt.hash(temporaryPassword, 10);
@@ -652,12 +657,13 @@ export class MerchantApplicationsService {
         merchantCode,
         userId: merchantUserId,
         temporaryPassword,
+        recoveryKey,
       },
     });
 
     // On approval, create the live Merchant record + promote the owner.
     if (status === 'approved') {
-      await this.provisionMerchant({ ...application, merchantCode, userId: merchantUserId });
+      await this.provisionMerchant({ ...application, merchantCode, userId: merchantUserId, recoveryKey });
     }
 
     return serializeApplication(updated);
@@ -679,18 +685,36 @@ export class MerchantApplicationsService {
   }
 
   private async provisionMerchant(application: any) {
+    const applicationCategory = String(application.categoryName || '').trim();
+    const category = applicationCategory
+      ? await this.prisma.category.findFirst({
+          where: {
+            isActive: true,
+            OR: [
+              { name: { equals: applicationCategory, mode: 'insensitive' } },
+              // Onboarding uses concise labels such as "Food", while the
+              // storefront catalog uses names such as "Food & Beverages".
+              { name: { startsWith: `${applicationCategory} `, mode: 'insensitive' } },
+            ],
+          },
+          orderBy: { id: 'asc' },
+          select: { id: true },
+        })
+      : null;
+
     // Avoid duplicates if approved twice.
     if (application.userId) {
       const existing = await this.prisma.merchant.findFirst({
         where: { userId: application.userId },
       });
       if (existing) {
-        return existing.merchantCode
-          ? existing
-          : this.prisma.merchant.update({
-              where: { id: existing.id },
-              data: { merchantCode: application.merchantCode },
-            });
+        return this.prisma.merchant.update({
+          where: { id: existing.id },
+          data: {
+            merchantCode: application.merchantCode,
+            categoryId: category?.id ?? existing.categoryId,
+          },
+        });
       }
     }
 
@@ -714,6 +738,7 @@ export class MerchantApplicationsService {
         userId: application.userId ?? null,
         name: application.businessName,
         slug,
+        categoryId: category?.id ?? null,
         email: application.email,
         phone: application.phone,
         address: application.address,
@@ -791,9 +816,27 @@ export class MerchantApplicationsService {
     return merchant;
   }
 
-  private async generateMerchantCode(): Promise<string> {
+  private async generateMerchantCode(application: {
+    geographicArea?: string | null;
+    barangay?: string | null;
+    cityMunicipality?: string | null;
+    address?: string | null;
+  }): Promise<string> {
+    const addressPart = (
+      application.geographicArea
+      || application.barangay
+      || application.cityMunicipality
+      || application.address
+      || 'STORE'
+    )
+      .normalize('NFKD')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase()
+      .slice(0, 8) || 'STORE';
     for (let attempt = 0; attempt < 10; attempt++) {
-      const code = `WKM-${randomBytes(4).toString('hex').toUpperCase()}`;
+      // Address makes the ID recognizable; the random suffix guarantees that
+      // two stores at the same address still receive distinct IDs.
+      const code = `WKM-${addressPart}-${randomBytes(3).toString('hex').toUpperCase()}`;
       const [merchant, application] = await Promise.all([
         this.prisma.merchant.findUnique({ where: { merchantCode: code } }),
         this.prisma.merchantApplication.findUnique({ where: { merchantCode: code } }),

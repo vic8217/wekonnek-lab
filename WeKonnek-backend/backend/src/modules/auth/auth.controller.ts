@@ -62,6 +62,11 @@ export class AuthController {
     return this.authService.loginWithPassword(identifier, body.password, body.merchantCode ?? body.merchant_code);
   }
 
+  @Post('shop-login')
+  shopLogin(@Body() body: { shopId?: string; shop_id?: string; passkey: string }) {
+    return this.authService.loginShop(body.shopId ?? body.shop_id ?? '', body.passkey);
+  }
+
   @Post('refresh')
   refresh(@Body() body: { refreshToken: string }) {
     return this.authService.refreshToken(body.refreshToken);

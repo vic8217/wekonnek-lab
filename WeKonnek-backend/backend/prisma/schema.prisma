@@ -1129,6 +1129,9 @@ model PointsTransaction {
 model Branch {
   id              Int       @id @default(autoincrement())
   merchantId      Int       @map("merchant_id")
+  shopId          String?   @unique @map("shop_id") @db.VarChar(80)
+  passkey         String?   @map("passkey") @db.VarChar(100)
+  passkeyExpiresAt DateTime? @map("passkey_expires_at") @db.Timestamptz
   name            String    @db.VarChar(255)
   address         String?   @db.Text
   city            String?   @db.VarChar(100)

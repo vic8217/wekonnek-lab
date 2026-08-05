@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth, getToken } from '@/hooks/use-auth';
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import ChangePasswordModal from './ChangePasswordModal';
 import MerchantNotificationBell from './MerchantNotificationBell';
 
@@ -13,11 +14,22 @@ interface MerchantInfo {
   name: string;
   logo_url: string | null;
   category_id: number | null;
+  category?: { name?: string | null } | null;
+}
+
+interface ActiveShop {
+  name: string;
+  branch_name?: string;
+  merchant_name?: string;
 }
 
 export default function MerchantHeader() {
+  const pathname = usePathname();
+  const isShopPortal = pathname.startsWith('/shop');
+  const portalBase = isShopPortal ? '/shop' : '/merchant';
   const { user: authUser, signOut } = useAuth();
   const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
+  const [activeShop, setActiveShop] = useState<ActiveShop | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
@@ -40,6 +52,16 @@ export default function MerchantHeader() {
     };
     fetchMerchant();
   }, [authUser]);
+
+  useEffect(() => {
+    if (!isShopPortal) return;
+    try {
+      const stored = sessionStorage.getItem('wk_active_shop');
+      setActiveShop(stored ? JSON.parse(stored) : null);
+    } catch {
+      setActiveShop(null);
+    }
+  }, [isShopPortal]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -64,7 +86,11 @@ export default function MerchantHeader() {
 
   const fullName = authUser ? `${authUser.firstName || ''} ${authUser.lastName || ''}`.trim() || 'User' : 'User';
   const userType = authUser?.role || 'Merchant';
-  const businessLabel = merchant?.category_id === 1 ? 'Restaurant' : merchant?.category_id === 4 ? 'Retail Store' : 'Merchant';
+  const categoryLabel = merchant?.category?.name?.trim() || 'Uncategorized';
+  const displayName = isShopPortal ? activeShop?.branch_name || activeShop?.name || fullName : fullName;
+  const displayRole = isShopPortal
+    ? `Shop${activeShop?.merchant_name || merchant?.name ? ` · ${activeShop?.merchant_name || merchant?.name}` : ''}`
+    : userType;
 
   return (
     <>
@@ -72,7 +98,7 @@ export default function MerchantHeader() {
       <header className="lg:hidden bg-gradient-to-r from-[#DB0002] to-[#A50002] text-white px-3 py-2.5">
         <div className="flex items-center justify-between">
           {/* Left: Logo + Gateway Title */}
-          <Link href="/merchant/dashboard" className="flex items-center gap-2">
+          <Link href={`${portalBase}/dashboard`} className="flex items-center gap-2">
             <Image
               src="/logo/weKonnekLogov1.png"
               alt="WeKonnek Logo"
@@ -81,14 +107,14 @@ export default function MerchantHeader() {
               className="w-10 h-7 bg-white rounded-md p-0.5 object-contain"
             />
             <div>
-              <p className="text-[8px] font-bold uppercase tracking-wider opacity-80 leading-tight">Merchant Admin</p>
+              <p className="text-[8px] font-bold uppercase tracking-wider opacity-80 leading-tight">{isShopPortal ? 'Shop' : 'Merchant Admin'}</p>
               <p className="text-xs font-bold leading-tight">Gateway</p>
             </div>
           </Link>
 
           {/* Center: Business Type Badge */}
           <div className="bg-white/20 rounded-full px-3 py-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider">{businessLabel}</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider">{categoryLabel}</span>
           </div>
 
           {/* Right: Store name + Actions */}
@@ -97,8 +123,8 @@ export default function MerchantHeader() {
             <MerchantNotificationBell variant="light" />
 
             {/* Avatar */}
-            <Link href="/merchant/profile" className="w-7 h-7 bg-white rounded-full flex items-center justify-center text-xs font-bold text-red-600">
-              {fullName.charAt(0).toUpperCase()}
+            <Link href={`${portalBase}/profile`} className="w-7 h-7 bg-white rounded-full flex items-center justify-center text-xs font-bold text-red-600">
+              {displayName.charAt(0).toUpperCase()}
             </Link>
           </div>
         </div>
@@ -119,7 +145,7 @@ export default function MerchantHeader() {
                 {merchant?.name?.charAt(0) || 'M'}
               </div>
             )}
-            <span className="text-xs font-semibold truncate max-w-[160px]">{merchant?.name || 'My Store'}</span>
+            <span className="text-xs font-semibold truncate max-w-[160px]">{isShopPortal ? displayName : merchant?.name || 'My Store'}</span>
           </div>
           <span className="text-[9px] bg-green-400 text-green-900 px-2 py-0.5 rounded-full font-bold">Active</span>
         </div>
@@ -140,8 +166,8 @@ export default function MerchantHeader() {
 
         {/* Business Type Indicator */}
         <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1.5">
-          <span className="text-sm font-medium text-gray-600">Business Type:</span>
-          <span className="text-sm font-bold text-gray-900">{businessLabel}</span>
+          <span className="text-sm font-medium text-gray-600">Category:</span>
+          <span className="text-sm font-bold text-gray-900">{categoryLabel}</span>
         </div>
 
         <div className="flex items-center space-x-4">
@@ -179,11 +205,11 @@ export default function MerchantHeader() {
               className="flex items-center space-x-3 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors"
             >
               <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                {fullName.charAt(0).toUpperCase()}
+                {displayName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col items-start">
-                <span className="text-sm font-medium text-gray-900">{fullName || 'Loading...'}</span>
-                <span className="text-xs text-gray-500 capitalize">{userType}</span>
+                <span className="text-sm font-medium text-gray-900">{displayName || 'Loading...'}</span>
+                <span className="text-xs text-gray-500 capitalize">{displayRole}</span>
               </div>
               <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -192,7 +218,7 @@ export default function MerchantHeader() {
             {showDropdown && (
               <div className="user-dropdown absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
                 <Link
-                  href="/merchant/profile"
+                  href={`${portalBase}/profile`}
                   className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                   onClick={() => setShowDropdown(false)}
                 >
@@ -201,7 +227,7 @@ export default function MerchantHeader() {
                 <button
                   onClick={() => {
                     setShowDropdown(false);
-                    signOut('/merchant');
+                    signOut(portalBase);
                   }}
                   className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >

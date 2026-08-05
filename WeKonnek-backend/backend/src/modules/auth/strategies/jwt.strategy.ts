@@ -17,9 +17,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; role: string }) {
+  async validate(payload: { sub: string; role: string; portal?: string; branchId?: number; merchantId?: number; shopId?: string }) {
     const user = await this.usersService.findById(payload.sub);
     if (!user) throw new UnauthorizedException();
-    return user;
+    return payload.portal === 'shop'
+      ? { ...user, portal: payload.portal, branchId: payload.branchId, merchantId: payload.merchantId, shopId: payload.shopId }
+      : user;
   }
 }

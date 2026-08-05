@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-export default function MerchantSidebar({ subscriptionTier }: { subscriptionTier: string }) {
+export default function MerchantSidebar({ subscriptionTier, basePath = '/merchant' }: { subscriptionTier: string; basePath?: '/merchant' | '/shop' }) {
   const pathname = usePathname();
   const hasPlatinum = subscriptionTier === 'platinum';
 
@@ -12,7 +12,7 @@ export default function MerchantSidebar({ subscriptionTier }: { subscriptionTier
     return paths.some((path) => pathname === path || pathname?.startsWith(path + '/'));
   };
 
-  const menuItems = [
+  const merchantMenuItems = [
     { href: '/merchant/dashboard', label: 'Dashboard', icon: 'grid' },
     { href: '/merchant/analytics', label: 'Analytics', icon: 'graph' },
     { href: '/merchant/orders', label: 'In-Store Orders', icon: 'orders', platinumOnly: true },
@@ -31,6 +31,23 @@ export default function MerchantSidebar({ subscriptionTier }: { subscriptionTier
     { href: '/merchant/profile', label: 'Profile', icon: 'person' },
     { href: '/merchant/settings/security', label: 'Settings', icon: 'shield' },
   ];
+  const merchantHiddenItems = new Set([
+    'In-Store Orders',
+    'Table QR Codes',
+    'Bookings',
+    'Reservations',
+    'My Shop',
+  ]);
+  const shopHiddenItems = new Set(['Shops', 'Staff', 'Products', 'Profile', 'Settings']);
+  const menuItems = merchantMenuItems
+    .filter(item => basePath === '/shop'
+      ? !shopHiddenItems.has(item.label)
+      : !merchantHiddenItems.has(item.label))
+    .map(item => ({
+      ...item,
+      href: item.href.replace('/merchant', basePath),
+      matches: item.matches?.map(path => path.replace('/merchant', basePath)),
+    }));
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
@@ -147,7 +164,7 @@ export default function MerchantSidebar({ subscriptionTier }: { subscriptionTier
           return (
             <Link
               key={item.href}
-              href={locked ? '/merchant/subscription/upgrade?required=platinum' : item.href}
+              href={locked ? `${basePath}/subscription/upgrade?required=platinum` : item.href}
               title={locked ? `${item.label} is available on the Platinum plan` : undefined}
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 active

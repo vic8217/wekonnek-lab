@@ -176,7 +176,7 @@ export default function MerchantApplicationsPage() {
       if (!res.ok) throw new Error(updated?.message || 'Failed to update application status');
 
       toast.success(newStatus === 'approved' && updated?.merchant_code
-        ? `Approved. Merchant code: ${updated.merchant_code}`
+        ? `Approved. Store ID: ${updated.merchant_code}`
         : `Application ${newStatus} successfully!`, { duration: 8000 });
       fetchApplications();
       setShowViewModal(false);
@@ -560,7 +560,7 @@ export default function MerchantApplicationsPage() {
                     <ApplicationDetail label="Total fee" value={`₱${Number(selectedApplication.total_fee ?? selectedApplication.subscription_amount).toLocaleString()}`} />
                     <ApplicationDetail label="Payment method" value={selectedApplication.payment_method} />
                     <ApplicationDetail label="Assignment" value={selectedApplication.assignment_status} capitalize />
-                    {selectedApplication.merchant_code && <ApplicationDetail label="Merchant code" value={selectedApplication.merchant_code} />}
+                    {selectedApplication.merchant_code && <ApplicationDetail label="Store ID / Merchant code" value={selectedApplication.merchant_code} />}
                     {selectedApplication.reviewed_by_name && <ApplicationDetail label="Approved by" value={selectedApplication.reviewed_by_name} />}
                     {selectedApplication.reviewed_at && <ApplicationDetail label="Approved date and time" value={new Date(selectedApplication.reviewed_at).toLocaleString()} />}
                   </div>

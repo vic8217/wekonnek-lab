@@ -17,6 +17,7 @@ export default function ConditionalFooter() {
   const hideFooter = pathname === '/' ||
                      pathname?.startsWith('/admin') || 
                      pathname?.startsWith('/merchant') || 
+                     pathname?.startsWith('/shop') ||
                      pathname?.startsWith('/customer') ||
                      pathname?.startsWith('/auth') ||
                      pathname === '/coordinator' ||

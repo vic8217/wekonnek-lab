@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { getToken } from '@/hooks/use-auth';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { WalletCards, X } from 'lucide-react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -65,6 +66,17 @@ interface SubscriptionCoverage {
   account_active?: boolean;
 }
 
+interface ActiveShop {
+  id: number;
+  name: string;
+  branch_name?: string;
+  shop_id: string;
+  merchant_name?: string;
+  is_default?: boolean;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
 const PLAN_DAYS: Record<string, number> = { weekly: 7, monthly: 30, annual: 365 };
 
 const TIER_FEATURES: Record<string, string[]> = {
@@ -89,6 +101,9 @@ const TIER_FEATURES: Record<string, string[]> = {
 };
 
 export default function MerchantDashboardPage() {
+  const pathname = usePathname();
+  const isShopPortal = pathname.startsWith('/shop');
+  const portalBase = isShopPortal ? '/shop' : '/merchant';
   const { user } = useAuth();
   const [merchant, setMerchant] = useState<MerchantData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,12 +119,24 @@ export default function MerchantDashboardPage() {
   const [reloading, setReloading] = useState(false);
   const [listingCount, setListingCount] = useState(0);
   const [monthlyOrderCount, setMonthlyOrderCount] = useState(0);
+  const [activeShop, setActiveShop] = useState<ActiveShop | null>(null);
+  const [merchantShops, setMerchantShops] = useState<ActiveShop[]>([]);
   const [orderCounts, setOrderCounts] = useState<OrderCounts>({
     delivery: 0,
     pickup: 0,
     inStore: 0,
     completed: 0,
   });
+
+  useEffect(() => {
+    if (!isShopPortal) return;
+    try {
+      const stored = sessionStorage.getItem('wk_active_shop');
+      setActiveShop(stored ? JSON.parse(stored) : null);
+    } catch {
+      setActiveShop(null);
+    }
+  }, [isShopPortal]);
 
   useEffect(() => {
     const fetchMerchantData = async () => {
@@ -125,10 +152,15 @@ export default function MerchantDashboardPage() {
         if (!res.ok) return;
         const merchantData = await res.json();
         setMerchant(merchantData);
-        const [ordersRes, productsRes] = await Promise.all([
+        const [ordersRes, productsRes, shopsRes] = await Promise.all([
           fetch(`${API}/api/orders?merchantId=${merchantData.id}`, { headers }),
           fetch(`${API}/api/products?merchantId=${merchantData.id}`, { headers }),
+          fetch(`${API}/api/merchants/${merchantData.id}/branches`, { headers }),
         ]);
+        if (shopsRes.ok) {
+          const shopsData = await shopsRes.json();
+          setMerchantShops(Array.isArray(shopsData) ? shopsData : shopsData?.data || []);
+        }
         if (productsRes.ok) {
           const productsData = await productsRes.json();
           const products = Array.isArray(productsData) ? productsData : productsData?.data || [];
@@ -224,8 +256,14 @@ export default function MerchantDashboardPage() {
     : 0;
   const isExpired = renewalDate ? renewalDate.getTime() < Date.now() : false;
   const isDailyPlan = subscriptionPlan.toLowerCase() === 'daily';
-  const walletFunded = !isDailyPlan || (coverage?.funded_days || 0) > 0;
+  const walletFunded = !isDailyPlan || Boolean(coverage?.account_active);
   const activeThrough = coverage?.active_through ? new Date(coverage.active_through) : null;
+  const shopsForStatus = isShopPortal
+    ? activeShop ? [activeShop] : []
+    : merchantShops;
+  const onlineShopCount = shopsForStatus.filter(
+    shop => (shop.is_active ?? shop.isActive) !== false && isActive,
+  ).length;
   const hasInStoreOrdering = subscriptionTier.toLowerCase() === 'platinum';
   const listingLimit = subscriptionTier.toLowerCase() === 'basic'
     ? 10
@@ -238,28 +276,25 @@ export default function MerchantDashboardPage() {
     {
       label: 'Orders for Delivery',
       count: orderCounts.delivery,
-      href: '/merchant/orders?tab=delivery',
+      href: `${portalBase}/operation-summary?view=delivery`,
       color: 'bg-blue-50 text-blue-700',
     },
     {
       label: 'Orders for Pickup',
       count: orderCounts.pickup,
-      href: '/merchant/orders?tab=pickup',
+      href: `${portalBase}/operation-summary?view=pickup`,
       color: 'bg-amber-50 text-amber-700',
     },
     {
       label: 'In-Store Orders',
       count: hasInStoreOrdering ? orderCounts.inStore : 0,
-      href: hasInStoreOrdering
-        ? '/merchant/orders?tab=in_store'
-        : '/merchant/subscription/upgrade?required=platinum',
+      href: `${portalBase}/operation-summary?view=in_store`,
       color: 'bg-purple-50 text-purple-700',
-      locked: !hasInStoreOrdering,
     },
     {
       label: 'Completed Orders',
       count: orderCounts.completed,
-      href: '/merchant/orders?status=completed',
+      href: `${portalBase}/operation-summary?view=completed`,
       color: 'bg-green-50 text-green-700',
     },
   ];
@@ -306,10 +341,18 @@ export default function MerchantDashboardPage() {
       <div className="bg-gradient-to-r from-red-600 to-purple-600 rounded-lg p-8 text-white relative">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-bold mb-2">Merchant Dashboard</h1>
-            <p className="text-red-100">Welcome back! Here's your subscription overview</p>
+            <h1 className="text-4xl font-bold mb-2">
+              {isShopPortal
+                ? `${activeShop?.merchant_name || merchant?.name || 'Shop'} · ${activeShop?.branch_name || activeShop?.name || 'Branch'}`
+                : 'Merchant Dashboard'}
+            </h1>
+            <p className="text-red-100">
+              {isShopPortal
+                ? `Shop Dashboard${activeShop?.shop_id ? ` · ${activeShop.shop_id}` : ''}`
+                : "Welcome back! Here's your subscription overview"}
+            </p>
           </div>
-          <Link
+          {!isShopPortal && <Link
             href="/merchant/subscription/upgrade"
             className="bg-white text-red-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors flex items-center gap-2"
           >
@@ -317,15 +360,15 @@ export default function MerchantDashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
             Upgrade Plan
-          </Link>
+          </Link>}
         </div>
       </div>
 
-      {/* Order Summary */}
+      {/* Shop operations summary */}
       <section>
         <div className="mb-4">
-          <h2 className="text-xl font-bold text-gray-900">Order Summary</h2>
-          <p className="text-sm text-gray-600">Monitor orders by fulfillment type and status.</p>
+          <h2 className="text-xl font-bold text-gray-900">Shop(s) Operation Summary</h2>
+          <p className="text-sm text-gray-600">Monitor orders across all of your shops.</p>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {orderCards.map((card) => (
@@ -340,11 +383,6 @@ export default function MerchantDashboardPage() {
                   <p className="text-sm font-medium text-gray-600">{card.label}</p>
                   <p className="mt-1 text-3xl font-black text-gray-900">{card.count}</p>
                 </div>
-                {card.locked && (
-                  <span className="rounded-full bg-purple-100 px-2 py-1 text-[10px] font-bold uppercase text-purple-700">
-                    Platinum
-                  </span>
-                )}
               </div>
               <Link
                 href={card.href}
@@ -363,31 +401,31 @@ export default function MerchantDashboardPage() {
         <p className="text-gray-600 mb-4">Access frequently used features</p>
         <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4">
           <Link
-            href="/merchant/products/new"
+            href={`${portalBase}/products/new`}
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
           >
             Add Product/Service
           </Link>
           <Link
-            href="/merchant/orders"
+            href={`${portalBase}/orders`}
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
           >
             View Orders
           </Link>
           <Link
-            href="/merchant/discounts"
+            href={`${portalBase}/discounts`}
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
           >
             Manage Discounts
           </Link>
           <Link
-            href="/merchant/inventory"
+            href={`${portalBase}/inventory`}
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
           >
             Inventory
           </Link>
           <Link
-            href="/merchant/keywords"
+            href={`${portalBase}/keywords`}
             className="bg-red-600 text-white px-6 py-4 rounded-lg hover:bg-red-700 transition-colors text-center font-medium"
           >
             Keywords
@@ -396,9 +434,9 @@ export default function MerchantDashboardPage() {
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${isShopPortal ? '' : 'lg:grid-cols-2'}`}>
         {/* Left Column */}
-        <div className="space-y-6">
+        {!isShopPortal && <div className="space-y-6">
           {/* Subscription Plan Card */}
           <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center justify-between mb-4">
@@ -415,12 +453,14 @@ export default function MerchantDashboardPage() {
               </div>
               <span
                 className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${
-                  isExpired || subscriptionStatus === 'expired' || !walletFunded
+                  (!isDailyPlan && (isExpired || subscriptionStatus === 'expired')) || !walletFunded
                     ? 'bg-red-100 text-red-800'
                     : 'bg-green-100 text-green-800'
                 }`}
               >
-                {isDailyPlan && !walletFunded ? 'Reload needed' : isExpired ? 'Expired' : subscriptionStatus}
+                {isDailyPlan
+                  ? walletFunded ? 'Active' : 'Reload needed'
+                  : isExpired ? 'Expired' : subscriptionStatus}
               </span>
             </div>
             <div className="space-y-3">
@@ -470,14 +510,23 @@ export default function MerchantDashboardPage() {
                         : 'Wallet reload required'}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowWalletReload(true)}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 font-semibold text-white transition-colors hover:bg-red-700"
-                  >
-                    <WalletCards className="h-5 w-5" />
-                    Reload Wallet
-                  </button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Link
+                      href="/merchant/wallet"
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-600 py-2.5 font-semibold text-red-600 transition-colors hover:bg-red-50"
+                    >
+                      <WalletCards className="h-5 w-5" />
+                      View Wallet
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setShowWalletReload(true)}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 font-semibold text-white transition-colors hover:bg-red-700"
+                    >
+                      <WalletCards className="h-5 w-5" />
+                      Reload Wallet
+                    </button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -511,7 +560,7 @@ export default function MerchantDashboardPage() {
                   </div>
                 </>
               )}
-              {(isExpired || daysRemaining <= 7) && (
+              {!isDailyPlan && (isExpired || daysRemaining <= 7) && (
                 <Link
                   href="/merchant/subscription/upgrade"
                   className="block text-center bg-red-600 text-white py-2 rounded-lg font-medium hover:bg-red-700 transition-colors mt-2"
@@ -545,40 +594,42 @@ export default function MerchantDashboardPage() {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Right Column */}
-        <div className="space-y-6">
-          {/* Store Status Card */}
+        <div className={isShopPortal ? 'grid gap-6 lg:grid-cols-3' : 'space-y-6'}>
+          {/* Shop Status Card */}
           <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900">Store Status</h3>
-              <span className={`${isActive ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'} px-3 py-1 rounded-full text-sm font-medium`}>
-                {isActive ? 'Online' : 'Offline'}
+              <h3 className="text-lg font-bold text-gray-900">Shop Status</h3>
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700">
+                {onlineShopCount} of {shopsForStatus.length} online
               </span>
             </div>
             <div className="space-y-3">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Store Name</p>
-                <p className="font-medium text-gray-900">{merchant?.name || 'Your store'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Status</p>
-                <p className="font-medium text-gray-900">{isActive ? 'Accepting orders' : 'Not accepting orders'}</p>
-              </div>
+              {shopsForStatus.map(shop => {
+                const online = (shop.is_active ?? shop.isActive) !== false && isActive;
+                return (
+                  <div key={shop.id} className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-gray-900">{shop.branch_name || shop.name}</p>
+                      {shop.shop_id && <p className="mt-0.5 truncate font-mono text-xs text-gray-500">{shop.shop_id}</p>}
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${online ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
+                      {online ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+                );
+              })}
+              {!shopsForStatus.length && (
+                <p className="rounded-lg bg-gray-50 px-4 py-5 text-center text-sm text-gray-500">No shops found.</p>
+              )}
               {isDailyPlan && !walletFunded && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   <p className="font-semibold">Wallet balance is insufficient.</p>
-                  <p className="mt-1">Reload your wallet to put your store back online and resume customer orders.</p>
+                  <p className="mt-1">Reload your wallet to put your shops back online and resume customer orders.</p>
                 </div>
               )}
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Store Active</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" checked={isActive} readOnly disabled={!walletFunded} />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
-                </label>
-              </div>
             </div>
           </div>
 
@@ -623,7 +674,7 @@ export default function MerchantDashboardPage() {
       </div>
 
       {/* Plan Features Section */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+      {!isShopPortal && <div className="bg-white rounded-lg shadow-sm border border-gray-200">
         <div className="border-b border-gray-200">
           <div className="flex space-x-4 px-6">
             <button
@@ -724,7 +775,7 @@ export default function MerchantDashboardPage() {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {showWalletReload && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

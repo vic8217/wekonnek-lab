@@ -247,8 +247,63 @@ export class AuthService {
     return { user: this.decorateUser(user), ...tokens };
   }
 
-  private generateTokens(userId: string, role: UserRole) {
-    const payload = { sub: userId, role };
+  async loginShop(shopId: string, passkey: string) {
+    const normalizedShopId = shopId?.trim().toUpperCase();
+    if (!normalizedShopId || !passkey) throw new UnauthorizedException('Invalid shop credentials');
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { shopId: normalizedShopId },
+      include: { merchant: true },
+    });
+    const merchantUser = branch?.merchant.userId
+      ? await this.prisma.user.findUnique({ where: { id: branch.merchant.userId } })
+      : null;
+    if (
+      !branch ||
+      !branch.passkey ||
+      branch.passkey !== passkey.trim() ||
+      !branch.passkeyExpiresAt ||
+      branch.passkeyExpiresAt <= new Date()
+    ) {
+      throw new UnauthorizedException('Invalid or expired shop credentials');
+    }
+    if (['suspended', 'deactivated'].includes(branch.merchant.status.toLowerCase())) {
+      throw new UnauthorizedException('This shop is currently unavailable');
+    }
+    if (!branch.isActive) {
+      throw new UnauthorizedException(
+        branch.merchant.subscriptionStatus.toLowerCase() === 'inactive'
+          ? 'Shop access is inactive. Reload the merchant wallet to cover the subscription fee.'
+          : 'This shop is inactive. Ask your merchant administrator to reactivate it.',
+      );
+    }
+    if (!merchantUser || !merchantUser.isActive) {
+      throw new UnauthorizedException('The merchant account is inactive. Please contact support.');
+    }
+
+    const tokens = this.generateTokens(merchantUser.id, UserRole.merchant, {
+      portal: 'shop',
+      merchantId: branch.merchantId,
+      branchId: branch.id,
+      shopId: branch.shopId,
+    });
+    return {
+      user: this.decorateUser(merchantUser),
+      shop: {
+        id: branch.id,
+        shop_id: branch.shopId,
+        name: branch.name,
+        branch_name: branch.name,
+        merchant_id: branch.merchantId,
+        merchant_name: branch.merchant.name,
+        is_default: branch.isDefault,
+      },
+      ...tokens,
+    };
+  }
+
+  private generateTokens(userId: string, role: UserRole, context: Record<string, unknown> = {}) {
+    const payload = { sub: userId, role, ...context };
     const accessToken = this.jwtService.sign(payload);
     const refreshToken = this.jwtService.sign(payload, { expiresIn: '30d' });
     // Provide both camelCase and snake_case so every client shape works.

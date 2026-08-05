@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
+import L from 'leaflet';
 import { useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -11,6 +12,15 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
+
+// Use an inline icon so the marker does not depend on Leaflet's image assets,
+// whose default relative URLs are not reliably resolved by Next.js.
+const shopLocationIcon = L.divIcon({
+  className: '',
+  html: '<span style="display:block;width:26px;height:26px;border:4px solid white;border-radius:50% 50% 50% 0;background:#DB0002;box-shadow:0 4px 12px rgba(15,23,42,.28);transform:rotate(-45deg)"><span style="display:block;width:6px;height:6px;margin:6px;border-radius:9999px;background:white"></span></span>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 26],
+});
 
 type TaxClassification = '' | 'vat_registered' | 'non_vat_percentage_tax' | 'vat_exempt' | 'zero_rated_vat' | 'government_entity' | 'boi_peza_registered';
 
@@ -52,6 +62,12 @@ interface Branch {
   wallet_balance?: number;
   daily_subscription_fee?: number;
   wallet_funded?: boolean;
+  store_id?: string | null;
+  temporary_password?: string | null;
+  recovery_key?: string | null;
+  shop_id?: string | null;
+  passkey?: string | null;
+  passkey_expires_at?: string | null;
 }
 
 interface BranchForm {
@@ -102,6 +118,7 @@ export default function MerchantBranchesPage() {
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [form, setForm] = useState<BranchForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [regeneratingPasskeyId, setRegeneratingPasskeyId] = useState<number | null>(null);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -160,6 +177,21 @@ export default function MerchantBranchesPage() {
     };
     init();
   }, []);
+
+  useEffect(() => {
+    if (!merchantId) return;
+    const expirations = branches
+      .map(branch => branch.passkey_expires_at ? new Date(branch.passkey_expires_at).getTime() : NaN)
+      .filter(Number.isFinite);
+    if (!expirations.length) return;
+
+    const nextExpiration = Math.min(...expirations);
+    const timer = window.setTimeout(
+      () => void fetchBranches(merchantId),
+      Math.max(nextExpiration - Date.now() + 1000, 1000),
+    );
+    return () => window.clearTimeout(timer);
+  }, [branches, merchantId]);
 
   const openAddModal = () => {
     setEditingBranch(null);
@@ -273,6 +305,32 @@ export default function MerchantBranchesPage() {
     }
   };
 
+  const regeneratePasskey = async (branch: Branch) => {
+    if (!window.confirm(`Regenerate the passkey for ${branch.name}? The current passkey will stop working immediately.`)) return;
+    setRegeneratingPasskeyId(branch.id);
+    try {
+      const res = await fetch(`${API}/api/branches/${branch.id}/passkey`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'Failed to regenerate passkey');
+      setBranches(current => current.map(item => item.id === branch.id
+        ? {
+            ...item,
+            passkey: body.passkey,
+            temporary_password: body.passkey,
+            passkey_expires_at: body.passkey_expires_at,
+          }
+        : item));
+      toast.success('Shop passkey regenerated');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Failed to regenerate passkey');
+    } finally {
+      setRegeneratingPasskeyId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -350,6 +408,25 @@ export default function MerchantBranchesPage() {
               {branch.wallet_funded === false && (
                 <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
                   Wallet balance ₱{Number(branch.wallet_balance || 0).toLocaleString()} is below the ₱{Number(branch.daily_subscription_fee || 0).toLocaleString()} daily subscription fee.
+                </div>
+              )}
+
+              {(branch.shop_id || branch.store_id) && (
+                <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
+                  <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-blue-700">Account access</p>
+                  <div className="space-y-2 text-xs">
+                    <div><p className="font-semibold text-gray-500">Shop ID</p><p className="mt-0.5 break-all font-mono font-bold text-gray-900">{branch.shop_id || branch.store_id || 'N/A'}</p></div>
+                    <div><p className="font-semibold text-gray-500">Passkey</p><p className="mt-0.5 break-all font-mono font-bold text-gray-900">{branch.passkey || branch.temporary_password || 'N/A'}</p></div>
+                    <div><p className="font-semibold text-gray-500">Passkey valid until</p><p className="mt-0.5 font-semibold text-gray-900">{branch.passkey_expires_at ? new Date(branch.passkey_expires_at).toLocaleString() : 'N/A'}</p></div>
+                    <button
+                      type="button"
+                      onClick={() => regeneratePasskey(branch)}
+                      disabled={regeneratingPasskeyId === branch.id}
+                      className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {regeneratingPasskeyId === branch.id ? 'Regenerating…' : 'Regenerate passkey'}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -505,7 +582,10 @@ export default function MerchantBranchesPage() {
                         setForm(current => ({ ...current, latitude, longitude }))
                       }
                     />
-                    <Marker position={[form.latitude, form.longitude]} />
+                    <Marker
+                      position={[form.latitude, form.longitude]}
+                      icon={shopLocationIcon}
+                    />
                   </MapContainer>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -636,7 +716,7 @@ export default function MerchantBranchesPage() {
                 disabled={saving}
                 className="px-6 py-2.5 bg-[#DB0002] text-white rounded-lg text-sm font-semibold hover:bg-[#B80002] transition-colors disabled:opacity-50"
               >
-                {saving ? 'Saving…' : editingBranch ? 'Update Shop' : 'Create Shop'}
+                {saving ? 'Saving…' : editingBranch ? 'Update Shop' : 'Save Shop'}
               </button>
             </div>
           </div>

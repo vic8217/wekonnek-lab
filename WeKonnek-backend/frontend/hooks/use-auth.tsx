@@ -46,14 +46,17 @@ const COORDINATOR_TOKEN_KEY = 'wk_coordinator_token';
 const COORDINATOR_USER_KEY = 'wk_coordinator_user';
 const MERCHANT_TOKEN_KEY = 'wk_merchant_token';
 const MERCHANT_USER_KEY = 'wk_merchant_user';
+const SHOP_TOKEN_KEY = 'wk_shop_token';
+const SHOP_USER_KEY = 'wk_shop_user';
 
-type SessionScope = 'default' | 'merchant' | 'admin' | 'coordinator';
+export type SessionScope = 'default' | 'merchant' | 'shop' | 'admin' | 'coordinator';
 
 function scopeForPath(): SessionScope {
   if (typeof window === 'undefined') return 'default';
   if (window.location.pathname.startsWith('/admin')) return 'admin';
   if (window.location.pathname.startsWith('/coordinator')) return 'coordinator';
   if (window.location.pathname.startsWith('/merchant')) return 'merchant';
+  if (window.location.pathname.startsWith('/shop')) return 'shop';
   return 'default';
 }
 
@@ -70,19 +73,21 @@ function keysForScope(scope: SessionScope) {
     return { token: COORDINATOR_TOKEN_KEY, user: COORDINATOR_USER_KEY };
   }
   if (scope === 'merchant') return { token: MERCHANT_TOKEN_KEY, user: MERCHANT_USER_KEY };
+  if (scope === 'shop') return { token: SHOP_TOKEN_KEY, user: SHOP_USER_KEY };
   return { token: TOKEN_KEY, user: USER_KEY };
 }
 
 function storageForScope(scope: SessionScope): Storage {
   // Merchant credentials are tab-scoped so two onboarded merchants can be
   // opened in separate tabs without one login replacing the other.
-  return scope === 'merchant' ? sessionStorage : localStorage;
+  return scope === 'merchant' || scope === 'shop' ? sessionStorage : localStorage;
 }
 
 function userBelongsToScope(user: AuthUser, scope: SessionScope) {
   if (scope === 'admin') return user.userType === 'admin' || user.userType === 'staff';
   if (scope === 'coordinator') return user.userType === 'coordinator';
   if (scope === 'merchant') return user.userType === 'merchant';
+  if (scope === 'shop') return user.userType === 'merchant';
   return user.userType !== 'admin' && user.userType !== 'staff' && user.userType !== 'coordinator';
 }
 
