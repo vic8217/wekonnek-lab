@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { categoriesApi, merchantsApi, Category, Merchant } from '@/lib/api';
+import { merchantCategoriesApi, merchantsApi, MerchantCategory, Merchant } from '@/lib/api';
 import MerchantCard from '@/components/MerchantCard';
 import Link from 'next/link';
 
 export default function CategoryDetailPage() {
   const params = useParams();
   const slug = params.slug as string;
-  const [category, setCategory] = useState<Category | null>(null);
+  const [category, setCategory] = useState<MerchantCategory | null>(null);
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,8 +19,8 @@ export default function CategoryDetailPage() {
       try {
         setLoading(true);
         const [categoryData, merchantsData] = await Promise.all([
-          categoriesApi.getBySlug(slug),
-          merchantsApi.search({ categoryId: undefined }),
+          merchantCategoriesApi.getBySlug(slug),
+          merchantsApi.search({}),
         ]);
 
         setCategory(categoryData);

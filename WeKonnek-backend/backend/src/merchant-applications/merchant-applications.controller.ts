@@ -58,6 +58,21 @@ export class MerchantApplicationsController {
     return this.applicationsService.findCoordinatorLeads(req.user);
   }
 
+  @Get('coordinator/coverage-options')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.coordinator)
+  coordinatorCoverageOptions(@Req() req: any) {
+    return this.applicationsService.coordinatorCoverageOptions(req.user);
+  }
+
+  @Post('coordinator/leads')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.coordinator)
+  @ApiOperation({ summary: 'Create and self-assign a merchant onboarding application' })
+  createCoordinatorLead(@Req() req: any, @Body() body: Record<string, unknown>) {
+    return this.applicationsService.createByCoordinator(body, req.user);
+  }
+
   @Get('coordinator/leads/:id')
   @UseGuards(JwtAuthGuard)
   coordinatorLead(@Req() req: any, @Param('id', ParseIntPipe) id: number) {

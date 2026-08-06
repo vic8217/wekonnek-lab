@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -9,6 +9,27 @@ export class CategoriesService {
 
   async create(createCategoryDto: CreateCategoryDto) {
     return await this.prisma.category.create({ data: createCategoryDto });
+  }
+
+  async findForMerchant(merchantId: number) {
+    return this.prisma.category.findMany({
+      where: { isActive: true, ownerMerchantId: merchantId },
+      include: { subCategories: { where: { isActive: true, ownerMerchantId: merchantId }, orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }] } },
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async createForMerchant(merchantId: number, name: string) {
+    const cleanName = name?.trim();
+    if (!cleanName) throw new ConflictException('Category name is required');
+    const duplicate = await this.prisma.category.findFirst({
+      where: { ownerMerchantId: merchantId, name: { equals: cleanName, mode: 'insensitive' } },
+    });
+    if (duplicate) throw new ConflictException('You already have a category with this name');
+    const base = cleanName.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'category';
+    return this.prisma.category.create({
+      data: { name: cleanName, slug: `merchant-${merchantId}-${base}-${Date.now().toString(36)}`, ownerMerchantId: merchantId },
+    });
   }
 
   async findAll(includeInactive = false) {

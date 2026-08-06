@@ -13,6 +13,8 @@ export interface CartItem {
   quantity: number;
   image_url?: string;
   merchant_id?: number;
+  shop_id?: number;
+  variant_id?: number;
 }
 
 const STORAGE_PREFIX = 'cart_';

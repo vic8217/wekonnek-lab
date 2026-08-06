@@ -16,6 +16,8 @@ interface OrderItemInput {
   productId?: number;
   product_name?: string;
   productName?: string;
+  variant_id?: number;
+  variantId?: number;
   quantity: number;
   price: number;
   subtotal?: number;
@@ -24,6 +26,8 @@ interface OrderItemInput {
 interface CreateOrderInput {
   merchant_id?: number;
   merchantId?: number;
+  shop_id?: number;
+  shopId?: number;
   order_type?: string;
   orderType?: string;
   total_amount?: number;
@@ -50,6 +54,8 @@ function serializeOrder(order: any) {
     orderId: it.orderId,
     product_id: it.productId,
     productId: it.productId,
+    variant_id: it.variantId,
+    variantId: it.variantId,
     product_name: it.productName,
     productName: it.productName,
     quantity: it.quantity,
@@ -72,6 +78,8 @@ function serializeOrder(order: any) {
     userId: order.userId,
     merchant_id: order.merchantId,
     merchantId: order.merchantId,
+    shop_id: order.shopId,
+    shopId: order.shopId,
     status: order.status,
     order_type: order.orderType,
     orderType: order.orderType,
@@ -139,6 +147,10 @@ export class OrdersService {
     if (!merchant) {
       throw new NotFoundException('Merchant not found');
     }
+    const requestedShopId = input.shop_id ?? input.shopId;
+    if (!requestedShopId) throw new BadRequestException('shop_id is required so availability and inventory are scoped to a shop');
+    const shop = await this.prisma.branch.findFirst({ where: { id: Number(requestedShopId), merchantId: Number(merchantId), isActive: true } });
+    if (!shop) throw new BadRequestException('The selected shop is unavailable');
 
     const items = input.items.map((it) => {
       const quantity = Number(it.quantity) || 1;
@@ -147,6 +159,7 @@ export class OrdersService {
       return {
         productId: it.product_id ?? it.productId ?? null,
         productName: it.product_name ?? it.productName ?? 'Item',
+        variantId: it.variant_id ?? it.variantId ?? null,
         quantity,
         price,
         subtotal,
@@ -168,6 +181,7 @@ export class OrdersService {
         orderCode: this.generateOrderCode(),
         userId,
         merchantId: Number(merchantId),
+        shopId: shop.id,
         status: 'pending',
         orderType: input.order_type ?? input.orderType ?? 'delivery',
         totalAmount,
@@ -183,6 +197,7 @@ export class OrdersService {
           create: items.map((it) => ({
             productId: it.productId,
             productName: it.productName,
+            variantId: it.variantId,
             quantity: it.quantity,
             price: it.price,
             subtotal: it.subtotal,
@@ -195,9 +210,8 @@ export class OrdersService {
       },
     });
 
-    // Decrement stock for tracked products, then raise low/out-of-stock
-    // alerts for the merchant when a product crosses its threshold.
-    // Entirely best-effort — inventory alerting must never break checkout.
+    // Sales affect only the selected shop and variant. A tracked product can
+    // never fall back to the legacy merchant-wide Product.quantity field.
     try {
       const tracked = items.filter(
         (it): it is typeof it & { productId: number } => it.productId != null,
@@ -205,78 +219,38 @@ export class OrdersService {
 
       if (tracked.length > 0) {
         const ids = tracked.map((it) => it.productId);
-
-        // Snapshot quantities before decrementing so we can detect crossings.
-        const before = await this.prisma.product.findMany({
-          where: { id: { in: ids } },
-          select: { id: true, quantity: true },
-        });
-        const prevQty = new Map(before.map((p) => [p.id, p.quantity]));
-
-        await Promise.all(
-          tracked.map((it) =>
-            this.prisma.product
-              .updateMany({
-                where: { id: it.productId, quantity: { gte: it.quantity } },
-                data: { quantity: { decrement: it.quantity } },
-              })
-              .catch(() => undefined),
-          ),
-        );
-
-        // Re-read authoritative quantities after the decrement.
-        const after = await this.prisma.product.findMany({
-          where: { id: { in: ids } },
-          select: { id: true, name: true, quantity: true, lowStockThreshold: true },
+        const products = await this.prisma.product.findMany({ where: { id: { in: ids }, merchantId: Number(merchantId) } });
+        const byId = new Map(products.map(product => [product.id, product]));
+        const assignments = await this.prisma.shopProduct.findMany({ where: { shopId: shop.id, productId: { in: ids }, isEnabled: true } });
+        const assignedIds = new Set(assignments.map(assignment => assignment.productId));
+        await this.prisma.$transaction(async tx => {
+          for (const item of tracked) {
+            const product = byId.get(item.productId);
+            if (!product || !assignedIds.has(item.productId)) throw new BadRequestException(`${item.productName} is not sold by the selected shop`);
+            if (!product.trackInventory) continue;
+            if (product.hasVariants && item.variantId == null) throw new BadRequestException(`Select a variant for ${item.productName}`);
+            const balance = await tx.shopInventory.findFirst({ where: { merchantId: Number(merchantId), shopId: shop.id, productId: item.productId, variantId: item.variantId } });
+            if (!balance) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
+            if (balance.quantity - balance.reservedQuantity < item.quantity) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
+            const changed = await tx.shopInventory.updateMany({ where: { id: balance.id, reservedQuantity: balance.reservedQuantity }, data: { reservedQuantity: { increment: item.quantity } } });
+            if (changed.count !== 1) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
+            const updated = await tx.shopInventory.findUniqueOrThrow({ where: { id: balance.id } });
+            await tx.inventoryMovement.create({ data: { merchantId: Number(merchantId), shopId: shop.id, productId: item.productId, variantId: item.variantId, type: 'reservation', quantityChange: item.quantity, balanceAfter: updated.quantity, reference: created.orderCode, referenceType: 'order', referenceId: String(created.id), createdBy: userId } });
+          }
         });
 
         const ownerUserId = merchant.userId;
         if (ownerUserId) {
-          for (const prod of after) {
-            const old = prevQty.get(prod.id);
-            if (old == null) continue;
-            const threshold = prod.lowStockThreshold ?? 10;
-
-            // Only alert on the transition (not on every subsequent order).
-            const crossedToOut = old > 0 && prod.quantity === 0;
-            const crossedToLow =
-              old > threshold && prod.quantity > 0 && prod.quantity <= threshold;
-
-            if (crossedToOut) {
-              await this.notifications
-                .notify({
-                  userId: ownerUserId,
-                  title: 'Out of stock',
-                  body: `${prod.name} is now out of stock. Restock to keep selling it.`,
-                  type: NotificationType.inventory_alert,
-                  data: {
-                    kind: 'out_of_stock',
-                    productId: String(prod.id),
-                    productName: prod.name,
-                  },
-                })
-                .catch(() => undefined);
-            } else if (crossedToLow) {
-              await this.notifications
-                .notify({
-                  userId: ownerUserId,
-                  title: 'Low stock alert',
-                  body: `${prod.name} is running low — ${prod.quantity} left (alert at ${threshold}).`,
-                  type: NotificationType.inventory_alert,
-                  data: {
-                    kind: 'low_stock',
-                    productId: String(prod.id),
-                    productName: prod.name,
-                    quantity: String(prod.quantity),
-                  },
-                })
-                .catch(() => undefined);
-            }
+          const low = await this.prisma.shopInventory.findMany({ where: { merchantId: Number(merchantId), shopId: shop.id, productId: { in: ids } }, include: { product: true } });
+          for (const balance of low.filter(item => item.quantity - item.reservedQuantity <= item.reorderLevel)) {
+            const available = balance.quantity - balance.reservedQuantity;
+            await this.notifications.notify({ userId: ownerUserId, title: available === 0 ? 'Out of stock' : 'Low stock alert', body: `${balance.product.name} has ${available} available at ${shop.name}.`, type: NotificationType.inventory_alert, data: { kind: available === 0 ? 'out_of_stock' : 'low_stock', productId: String(balance.productId), shopId: String(shop.id) } }).catch(() => undefined);
           }
         }
       }
-    } catch {
-      // swallow — inventory alerts are non-critical to order creation
+    } catch (error) {
+      await this.prisma.wkOrder.delete({ where: { id: created.id } }).catch(() => undefined);
+      throw error;
     }
 
     // Notify the merchant of the incoming order (best-effort).
@@ -428,8 +402,30 @@ export class OrdersService {
     if (!status) throw new BadRequestException('status is required');
     const existing = await this.prisma.wkOrder.findUnique({
       where: { id: Number(id) },
+      include: { orderItems: true },
     });
     if (!existing) throw new NotFoundException('Order not found');
+
+    const wasFinalized = ['completed', 'delivered'].includes(existing.status);
+    const willFinalize = ['completed', 'delivered'].includes(status);
+    const willCancel = status === 'cancelled' && existing.status !== 'cancelled' && !wasFinalized;
+    if (existing.shopId && ((!wasFinalized && willFinalize) || willCancel)) {
+      await this.prisma.$transaction(async tx => {
+        for (const item of existing.orderItems.filter(item => item.productId != null)) {
+          const product = await tx.product.findUnique({ where: { id: item.productId! }, select: { trackInventory: true } });
+          if (!product?.trackInventory) continue;
+          const balance = await tx.shopInventory.findFirst({ where: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId } });
+          if (!balance || balance.reservedQuantity < item.quantity) throw new BadRequestException(`Reserved inventory is missing for ${item.productName}`);
+          if (willCancel) {
+            const updated = await tx.shopInventory.update({ where: { id: balance.id }, data: { reservedQuantity: { decrement: item.quantity } } });
+            await tx.inventoryMovement.create({ data: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId, type: 'reservation_release', quantityChange: -item.quantity, balanceAfter: updated.quantity, reference: existing.orderCode, referenceType: 'order', referenceId: String(existing.id) } });
+          } else {
+            const updated = await tx.shopInventory.update({ where: { id: balance.id }, data: { reservedQuantity: { decrement: item.quantity }, quantity: { decrement: item.quantity } } });
+            await tx.inventoryMovement.create({ data: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId, type: 'sale', quantityChange: -item.quantity, balanceAfter: updated.quantity, reference: existing.orderCode, referenceType: 'order', referenceId: String(existing.id) } });
+          }
+        }
+      });
+    }
 
     // When a COD order is completed/delivered, mark it as paid.
     const data: any = { status };

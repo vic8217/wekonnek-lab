@@ -17,7 +17,9 @@ apiClient.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = window.location.pathname.startsWith('/merchant')
       ? sessionStorage.getItem('wk_merchant_token')
-      : localStorage.getItem('wk_token');
+      : window.location.pathname.startsWith('/shop')
+        ? sessionStorage.getItem('wk_shop_token')
+        : localStorage.getItem('wk_token');
     if (token) {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;
@@ -54,6 +56,27 @@ export interface SubCategory {
   updatedAt: string;
 }
 
+export interface MerchantSubCategory {
+  id: number;
+  categoryId: number;
+  name: string;
+  slug: string;
+  groupName?: string;
+  isActive: boolean;
+  displayOrder: number;
+}
+
+export interface MerchantCategory {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  icon?: string;
+  isActive: boolean;
+  displayOrder: number;
+  subCategories?: MerchantSubCategory[];
+}
+
 export interface Merchant {
   id: number;
   name: string;
@@ -83,8 +106,8 @@ export interface Merchant {
   is_vat_registered?: boolean;
   registeredBusinessName?: string;
   registered_business_name?: string;
-  category?: Category;
-  subCategory?: SubCategory;
+  category?: MerchantCategory;
+  subCategory?: MerchantSubCategory;
   createdAt: string;
   updatedAt: string;
 }
@@ -113,6 +136,14 @@ export interface PaginatedResponse<T> {
 
 // API Functions
 export const categoriesApi = {
+  getMine: async (): Promise<Category[]> => {
+    const response = await apiClient.get('/categories/merchant/mine');
+    return response.data;
+  },
+  createMine: async (name: string): Promise<Category> => {
+    const response = await apiClient.post('/categories/merchant/mine', { name });
+    return response.data;
+  },
   getAll: async (includeInactive = false): Promise<Category[]> => {
     const response = await apiClient.get('/categories', {
       params: { includeInactive },
@@ -130,6 +161,14 @@ export const categoriesApi = {
 };
 
 export const subCategoriesApi = {
+  getMineByCategory: async (categoryId: number): Promise<SubCategory[]> => {
+    const response = await apiClient.get(`/sub-categories/merchant/category/${categoryId}`);
+    return response.data;
+  },
+  createMine: async (categoryId: number, name: string): Promise<SubCategory> => {
+    const response = await apiClient.post('/sub-categories/merchant/mine', { categoryId, name });
+    return response.data;
+  },
   getAll: async (includeInactive = false): Promise<SubCategory[]> => {
     const response = await apiClient.get('/sub-categories', {
       params: { includeInactive },
@@ -147,6 +186,21 @@ export const subCategoriesApi = {
   },
   getById: async (id: number): Promise<SubCategory> => {
     const response = await apiClient.get(`/sub-categories/${id}`);
+    return response.data;
+  },
+};
+
+export const merchantCategoriesApi = {
+  getAll: async (): Promise<MerchantCategory[]> => {
+    const response = await apiClient.get('/backend/merchant-categories');
+    return response.data;
+  },
+  getSubCategories: async (categoryId: number): Promise<MerchantSubCategory[]> => {
+    const response = await apiClient.get(`/backend/merchant-categories/${categoryId}/sub-categories`);
+    return response.data;
+  },
+  getBySlug: async (slug: string): Promise<MerchantCategory> => {
+    const response = await apiClient.get(`/backend/merchant-categories/slug/${slug}`);
     return response.data;
   },
 };
@@ -203,7 +257,7 @@ export interface Product {
   merchantId: number;
   name: string;
   description?: string;
-  productCode: string;
+  productCode?: string;
   sku?: string;
   price: number;
   quantity: number;
@@ -216,19 +270,40 @@ export interface Product {
   subCategory?: SubCategory;
   createdAt: string;
   updatedAt: string;
+  productType?: string;
+  brand?: string;
+  unit?: string;
+  baseSku?: string;
+  barcode?: string;
+  costPrice?: number;
+  sellingPrice?: number;
+  discountPrice?: number;
+  hasVariants?: boolean;
+  trackInventory?: boolean;
+  availabilityStatus?: 'Available' | 'Unavailable' | 'Draft' | 'Archived';
+  options?: Array<{ id: number; name: string; values: Array<{ id: number; value: string }> }>;
+  variants?: Array<{ id: number; sku: string; barcode?: string; price?: number; imageUrl?: string; isActive: boolean; availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable'; optionValues?: Array<{ optionValue: { value: string; option: { name: string } } }> }>;
 }
 
 export interface CreateProductData {
   name: string;
+  productType?: string;
   description?: string;
-  productCode: string;
-  sku?: string;
-  price: number;
-  quantity: number;
+  brand?: string;
+  unit: string;
+  baseSku?: string;
+  barcode?: string;
+  sellingPrice: number;
+  costPrice?: number;
+  discountPrice?: number;
   imageUrl?: string;
-  isAvailable?: boolean;
-  categoryId: number;
+  hasVariants: boolean;
+  trackInventory: boolean;
+  availabilityStatus: string;
+  categoryId?: number;
   subCategoryId?: number;
+  options?: Array<{ name: string; values: string[] }>;
+  variants?: Array<{ sku: string; barcode?: string; price?: number; imageUrl?: string; isActive?: boolean; optionValues?: Record<string, string> }>;
 }
 
 export const productsApi = {
@@ -251,6 +326,37 @@ export const productsApi = {
   delete: async (id: number): Promise<void> => {
     await apiClient.delete(`/products/${id}`);
   },
+};
+
+export interface ShopInventoryBalance {
+  id: number;
+  productId: number;
+  variantId?: number | null;
+  quantity: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+  reorderLevel: number;
+  stockStatus: 'In Stock' | 'Low Stock' | 'Out of Stock';
+}
+
+export interface ShopProductAssignment {
+  id: number;
+  productId: number;
+  isEnabled: boolean;
+  priceOverride?: number | null;
+  effectivePrice: number;
+  product: Product;
+  inventory: ShopInventoryBalance[];
+}
+
+export const inventoryApi = {
+  getShopInventory: async (): Promise<ShopProductAssignment[]> => (await apiClient.get('/backend/inventory')).data,
+  getShopProducts: async (): Promise<Array<{ product: Product; assignment: Omit<ShopProductAssignment, 'product' | 'inventory' | 'effectivePrice'> | null }>> => (await apiClient.get('/backend/inventory/products')).data,
+  assignProduct: async (productId: number, data: { isEnabled: boolean; priceOverride?: number | null }) => (await apiClient.patch(`/backend/inventory/products/${productId}`, data)).data,
+  setReorderLevel: async (data: { productId: number; variantId?: number | null; reorderLevel: number }) => (await apiClient.patch('/backend/inventory/reorder-level', data)).data,
+  recordMovement: async (data: { productId: number; variantId?: number | null; type: 'receipt' | 'sale' | 'return' | 'adjustment'; quantity: number; notes?: string }) => (await apiClient.post('/backend/inventory/movements', data)).data,
+  getMovements: async (productId?: number): Promise<any[]> => (await apiClient.get('/backend/inventory/movements', { params: { productId } })).data,
+  transfer: async (data: { destinationShopId: number; productId: number; variantId?: number | null; quantity: number; reference?: string; notes?: string }) => (await apiClient.post('/backend/inventory/transfers', data)).data,
 };
 
 // Staff Posts API

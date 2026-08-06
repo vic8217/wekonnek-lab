@@ -36,6 +36,7 @@ interface SubCategory {
 const PAGE_SIZE = 10;
 
 export default function AdminCategoriesPage() {
+  const [taxonomyTab, setTaxonomyTab] = useState<'merchant' | 'product'>('merchant');
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -382,6 +383,8 @@ export default function AdminCategoriesPage() {
     setCurrentPage(1);
   }, [search, statusFilter]);
 
+  if (taxonomyTab === 'merchant') return <MerchantTaxonomyPanel onSelectProduct={() => setTaxonomyTab('product')} />;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -395,6 +398,7 @@ export default function AdminCategoriesPage() {
 
   return (
     <div className="space-y-6">
+      <TaxonomyTabs active="product" onMerchant={() => setTaxonomyTab('merchant')} onProduct={() => setTaxonomyTab('product')} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1010,3 +1014,38 @@ export default function AdminCategoriesPage() {
     </div>
   );
 }
+
+type MerchantTaxonomySubcategory = { id: number; name: string; slug: string; groupName?: string | null };
+type MerchantTaxonomyCategory = { id: number; name: string; slug: string; description?: string; subCategories?: MerchantTaxonomySubcategory[] };
+
+function TaxonomyTabs({ active, onMerchant, onProduct }: { active: 'merchant' | 'product'; onMerchant: () => void; onProduct: () => void }) {
+  return <div className="inline-flex rounded-xl bg-gray-200 p-1">
+    <button onClick={onMerchant} className={`rounded-lg px-5 py-2 text-sm font-bold ${active === 'merchant' ? 'bg-white text-[#DB0002] shadow-sm' : 'text-gray-600'}`}>Merchant Categories</button>
+    <button onClick={onProduct} className={`rounded-lg px-5 py-2 text-sm font-bold ${active === 'product' ? 'bg-white text-[#DB0002] shadow-sm' : 'text-gray-600'}`}>Product Categories</button>
+  </div>;
+}
+
+function MerchantTaxonomyPanel({ onSelectProduct }: { onSelectProduct: () => void }) {
+  const [categories, setCategories] = useState<MerchantTaxonomyCategory[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    fetch('/api/backend/merchant-categories')
+      .then(async response => { const body = await response.json().catch(() => null); if (!response.ok) throw new Error(body?.message || 'Unable to load merchant categories'); return body; })
+      .then(body => setCategories(Array.isArray(body) ? body : []))
+      .catch(err => setError(err instanceof Error ? err.message : 'Unable to load merchant categories'))
+      .finally(() => setLoading(false));
+  }, []);
+  const subcategoryCount = categories.reduce((sum, category) => sum + (category.subCategories?.length || 0), 0);
+  return <div className="space-y-6">
+    <TaxonomyTabs active="merchant" onMerchant={() => undefined} onProduct={onSelectProduct} />
+    <div><h1 className="text-3xl font-bold text-gray-900">Merchant Category Management</h1><p className="mt-2 text-gray-600">Business classifications used for merchant onboarding and marketplace discovery. These are separate from product catalogue categories.</p></div>
+    {loading ? <div className="rounded-xl border bg-white p-12 text-center text-gray-500">Loading merchant categories…</div> : error ? <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-700"><p className="font-bold">Merchant taxonomy could not be loaded.</p><p className="mt-1 text-sm">{error}</p><p className="mt-2 text-sm">Apply the latest Prisma migration and restart the backend.</p></div> : <>
+      <div className="grid gap-4 md:grid-cols-3"><Stat label="Merchant Categories" value={categories.length} /><Stat label="Merchant Subcategories" value={subcategoryCount} /><Stat label="Taxonomy Source" value="PDF v2" /></div>
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"><div className="border-b p-5"><h2 className="text-xl font-bold text-gray-900">All Merchant Categories</h2><p className="text-sm text-gray-500">Click a category to view its onboarding subcategories.</p></div><div className="divide-y">{categories.map(category => <div key={category.id}><button onClick={() => setExpanded(current => current === category.id ? null : category.id)} className="flex w-full items-center justify-between p-5 text-left hover:bg-gray-50"><div><p className="font-bold text-gray-900">{category.name}</p><p className="mt-1 text-sm text-gray-500">{category.subCategories?.length || 0} subcategories · {category.slug}</p></div><span className={`text-xl text-gray-400 transition-transform ${expanded === category.id ? 'rotate-180' : ''}`}>⌄</span></button>{expanded === category.id && <div className="border-t bg-gray-50 p-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{category.subCategories?.map(subcategory => <div key={subcategory.id} className="rounded-lg border bg-white p-3"><p className="font-semibold text-gray-900">{subcategory.name}</p>{subcategory.groupName && <p className="mt-1 text-xs font-bold uppercase tracking-wide text-blue-600">{subcategory.groupName}</p>}</div>)}</div></div>}</div>)}</div></div>
+    </>}
+  </div>;
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) { return <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"><p className="text-sm text-gray-600">{label}</p><p className="mt-1 text-2xl font-bold text-gray-900">{value}</p></div>; }

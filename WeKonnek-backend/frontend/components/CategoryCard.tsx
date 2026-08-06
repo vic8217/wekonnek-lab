@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Category } from '@/lib/api';
+import { Category, MerchantCategory } from '@/lib/api';
 
 interface CategoryCardProps {
-  category: Category;
+  category: Category | MerchantCategory;
 }
 
 export default function CategoryCard({ category }: CategoryCardProps) {

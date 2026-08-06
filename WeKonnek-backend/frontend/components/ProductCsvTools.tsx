@@ -36,9 +36,9 @@ export default function ProductCsvTools({ onImported, className }: ProductCsvToo
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast.success('Products exported successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Export error:', error);
-      toast.error(error.message || 'Failed to export products');
+      toast.error(error instanceof Error ? error.message : 'Failed to export products');
     }
   };
 
@@ -71,18 +71,19 @@ export default function ProductCsvTools({ onImported, className }: ProductCsvToo
       if (result.errors?.length > 0) {
         toast.error(`${result.errors.length} row${result.errors.length !== 1 ? 's' : ''} had errors`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Import error:', error);
-      toast.error(error.message || 'Failed to import products');
+      toast.error(error instanceof Error ? error.message : 'Failed to import products');
     } finally {
       setImporting(false);
     }
   };
 
   const downloadTemplate = () => {
-    const headers = 'name,description,productCode,sku,price,quantity,imageUrl,isAvailable,lowStockThreshold,categoryId,subCategoryId';
-    const sampleRow = 'Sample Product,A great product,PROD-001,SKU-001,99.00,50,,true,10,1,1';
-    const csv = `${headers}\n${sampleRow}`;
+    const headers = 'name,description,brand,category,subcategory,unit,sellingPrice,costPrice,discountPrice,baseSku,barcode,hasVariants,optionName,optionValues,variantSkus,variantPrices,trackInventory,availabilityStatus';
+    const standardRow = 'Sample Product,A standard product,Sample Brand,Main Products,,Piece,99.00,60.00,89.00,SKU-001,123456789,false,,,,,true,Available';
+    const variantRow = 'Sample Shirt,A product with size variants,Sample Brand,Apparel,Shirts,Piece,499.00,250.00,,SHIRT,,true,Size,Small|Medium|Large,SHIRT-S|SHIRT-M|SHIRT-L,499|549|599,true,Available';
+    const csv = `${headers}\n${standardRow}\n${variantRow}`;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -138,8 +139,8 @@ export default function ProductCsvTools({ onImported, className }: ProductCsvToo
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-sm text-blue-800 font-medium mb-1">CSV Format</p>
               <p className="text-xs text-blue-700">
-                Your CSV must include a header row with columns: <strong>name</strong>, <strong>productCode</strong>, <strong>price</strong>, <strong>quantity</strong> (required).
-                Optional: description, sku, imageUrl, isAvailable, lowStockThreshold, categoryId, subCategoryId.
+                Required columns: <strong>name</strong>, <strong>unit</strong>, <strong>sellingPrice</strong>, and <strong>availabilityStatus</strong>.
+                Optional: description, brand, category, subcategory, costPrice, discountPrice, baseSku, barcode, hasVariants, and trackInventory. When <strong>hasVariants</strong> is true, provide optionName plus matching pipe-separated optionValues, variantSkus, and variantPrices.
               </p>
               <button
                 type="button"

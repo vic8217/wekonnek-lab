@@ -26,6 +26,7 @@ function serializeApplication(a: any) {
     address: a.address,
     contact_name: a.contactName,
     category_name: a.categoryName,
+    sub_category_name: a.subCategoryName,
     city_municipality: a.cityMunicipality,
     barangay: a.barangay,
     council_district: a.councilDistrict,
@@ -124,6 +125,77 @@ function coverageMatchesApplication(
 export class MerchantApplicationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async approvedCoordinator(user: { id: string; email?: string | null }) {
+    const coordinator = await this.prisma.coordinatorApplication.findFirst({
+      where: {
+        OR: [{ userId: user.id }, { email: { equals: user.email ?? '', mode: 'insensitive' } }],
+        status: 'approved',
+      },
+      include: { managementZone: { include: { coverages: true } } },
+      orderBy: { submittedAt: 'desc' },
+    });
+    if (!coordinator?.managementZone) throw new ForbiddenException('No approved coordinator zone is assigned to this account');
+    return coordinator;
+  }
+
+  async coordinatorCoverageOptions(user: { id: string; email?: string | null }) {
+    const coordinator = await this.approvedCoordinator(user);
+    type Area = { code: string; name: string };
+    type District = { name: string; areas: Area[] };
+    const cities = new Map<string, { code: string; name: string; districts: District[] }>();
+    coordinator.managementZone!.coverages.forEach(item => {
+      const city = cities.get(item.cityMunicipalityCode) || { code: item.cityMunicipalityCode, name: item.cityMunicipalityName, districts: [] };
+      let district = city.districts.find(entry => entry.name === item.congressionalDistrict);
+      if (!district) { district = { name: item.congressionalDistrict, areas: [] }; city.districts.push(district); }
+      if (Array.isArray(item.areas)) item.areas.forEach(value => {
+        if (!value || typeof value !== 'object' || !('code' in value) || !('name' in value)) return;
+        const area = { code: String(value.code), name: String(value.name) };
+        if (!district!.areas.some(entry => entry.code === area.code)) district!.areas.push(area);
+      });
+      cities.set(item.cityMunicipalityCode, city);
+    });
+    return Array.from(cities.values());
+  }
+
+  async createByCoordinator(input: Record<string, unknown>, user: { id: string; email?: string | null }) {
+    const required = ['contact_name', 'business_name', 'phone', 'email', 'category_name', 'sub_category_name', 'address', 'city_municipality', 'council_district', 'geographic_area', 'has_branches', 'latitude', 'longitude'];
+    for (const field of required) {
+      if (input[field] === undefined || input[field] === null || String(input[field]).trim() === '') {
+        throw new BadRequestException(`${field.replaceAll('_', ' ')} is required`);
+      }
+    }
+    const coordinator = await this.approvedCoordinator(user);
+    const candidate = {
+      cityMunicipality: String(input.city_municipality),
+      councilDistrict: String(input.council_district),
+      geographicArea: String(input.geographic_area),
+      barangay: String(input.geographic_area),
+    };
+    if (!coordinator.managementZone!.coverages.some(coverage => coverageMatchesApplication(coverage, candidate))) {
+      throw new ForbiddenException('The merchant address must be inside your approved coverage zone');
+    }
+    const email = String(input.email).trim().toLowerCase();
+    const duplicate = await this.prisma.merchantApplication.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' }, status: { in: ['pending', 'reviewing', 'for_approval'] } },
+      select: { id: true },
+    });
+    if (duplicate) throw new BadRequestException('An active merchant application already uses this email address');
+    const application = await this.prisma.merchantApplication.create({
+      data: {
+        businessName: String(input.business_name).trim(), contactName: String(input.contact_name).trim(),
+        phone: String(input.phone).trim(), email, categoryName: String(input.category_name).trim(), subCategoryName: String(input.sub_category_name).trim(),
+        address: String(input.address).trim(), cityMunicipality: candidate.cityMunicipality,
+        councilDistrict: candidate.councilDistrict, geographicArea: candidate.geographicArea, barangay: candidate.geographicArea,
+        hasBranches: String(input.has_branches) === 'yes' || input.has_branches === true,
+        latitude: Number(input.latitude), longitude: Number(input.longitude),
+        businessDescription: input.business_description ? String(input.business_description).trim() : null,
+        source: 'coordinator_created', assignedCoordinatorId: user.id, assignedAt: new Date(),
+        subscriptionAmount: 0, businessDocumentsUrls: [], status: 'pending',
+      },
+    });
+    return serializeApplication(application);
+  }
+
   async create(input: any, userId?: string) {
     if (!input.business_name && !input.businessName) {
       throw new BadRequestException('business_name is required');
@@ -137,6 +209,7 @@ export class MerchantApplicationsService {
         address: input.address ?? null,
         contactName: input.contact_name ?? input.contactName ?? null,
         categoryName: input.category_name ?? input.categoryName ?? null,
+        subCategoryName: input.sub_category_name ?? input.subCategoryName ?? null,
         cityMunicipality: input.city_municipality ?? input.cityMunicipality ?? null,
         barangay: input.barangay ?? null,
         councilDistrict: input.council_district ?? input.councilDistrict ?? null,
@@ -687,17 +760,22 @@ export class MerchantApplicationsService {
   private async provisionMerchant(application: any) {
     const applicationCategory = String(application.categoryName || '').trim();
     const category = applicationCategory
-      ? await this.prisma.category.findFirst({
+      ? await this.prisma.merchantCategory.findFirst({
           where: {
             isActive: true,
             OR: [
               { name: { equals: applicationCategory, mode: 'insensitive' } },
-              // Onboarding uses concise labels such as "Food", while the
-              // storefront catalog uses names such as "Food & Beverages".
               { name: { startsWith: `${applicationCategory} `, mode: 'insensitive' } },
             ],
           },
           orderBy: { id: 'asc' },
+          select: { id: true },
+        })
+      : null;
+    const applicationSubCategory = String(application.subCategoryName || '').trim();
+    const subCategory = category && applicationSubCategory
+      ? await this.prisma.merchantSubCategory.findFirst({
+          where: { categoryId: category.id, isActive: true, name: { equals: applicationSubCategory, mode: 'insensitive' } },
           select: { id: true },
         })
       : null;
@@ -713,6 +791,7 @@ export class MerchantApplicationsService {
           data: {
             merchantCode: application.merchantCode,
             categoryId: category?.id ?? existing.categoryId,
+            subCategoryId: subCategory?.id ?? existing.subCategoryId,
           },
         });
       }
@@ -739,6 +818,7 @@ export class MerchantApplicationsService {
         name: application.businessName,
         slug,
         categoryId: category?.id ?? null,
+        subCategoryId: subCategory?.id ?? null,
         email: application.email,
         phone: application.phone,
         address: application.address,

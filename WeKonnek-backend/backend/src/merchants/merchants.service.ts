@@ -621,7 +621,7 @@ export class MerchantsService {
   async findBySlug(slug: string) {
     const merchant = await this.prisma.merchant.findUnique({
       where: { slug },
-      include: { category: true, subCategory: true },
+      include: { category: true, subCategory: true, branches: { where: { isActive: true }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }], select: { id: true, name: true, address: true, city: true, isDefault: true } } },
     });
 
     if (!merchant) {

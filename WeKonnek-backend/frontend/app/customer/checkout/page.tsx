@@ -463,6 +463,7 @@ export default function CheckoutPage() {
       const orderItems = cartItems.map(item => ({
         product_id: item.product_id,
         product_name: item.product_name,
+        variant_id: item.variant_id,
         quantity: item.quantity,
         price: item.price,
         subtotal: item.price * item.quantity,
@@ -473,6 +474,7 @@ export default function CheckoutPage() {
         headers,
         body: JSON.stringify({
           merchant_id: parseInt(merchantId || '0'),
+          shop_id: cartItems[0]?.shop_id,
           order_type: orderType,
           total_amount: total,
           delivery_address: orderType === 'delivery' ? deliveryAddress : null,

@@ -32,6 +32,7 @@ interface Merchant {
   is_verified: boolean;
   rating: number | null;
   total_reviews: number | null;
+  branches?: Array<{ id: number; name: string; address?: string | null; city?: string | null; isDefault: boolean }>;
 }
 
 interface Product {
@@ -43,6 +44,9 @@ interface Product {
   image_url: string | null;
   is_available: boolean;
   quantity: number | null;
+  availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable';
+  hasVariants?: boolean;
+  variants?: Array<{ id: number; sku: string; availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable'; optionValues?: Array<{ optionValue: { value: string } }> }>;
   category_id: number | null;
   sub_category_id: number | null;
 }
@@ -74,6 +78,8 @@ export default function CustomerMerchantDetailPage() {
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [cartCount, setCartCount] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [selectedShopId, setSelectedShopId] = useState<number | null>(null);
+  const [selectedVariants, setSelectedVariants] = useState<Record<number, number>>({});
 
   // Load merchant + products
   useEffect(() => {
@@ -90,8 +96,11 @@ export default function CustomerMerchantDetailPage() {
         const merchantData = await merchantRes.json();
         if (cancelled) return;
         setMerchant(merchantData as Merchant);
-
-        const productsRes = await fetch(`${API}/api/products?merchantId=${merchantData.id}&available=true`);
+        const requestedShop = Number(searchParams.get('shop'));
+        const selectedShop = merchantData.branches?.find((branch: { id: number }) => branch.id === requestedShop) || merchantData.branches?.[0];
+        if (!selectedShop) throw new Error('This merchant has no available shop');
+        setSelectedShopId(selectedShop.id);
+        const productsRes = await fetch(`${API}/api/products?merchantId=${merchantData.id}&shopId=${selectedShop.id}`);
         if (!productsRes.ok) throw new Error('Failed to load products');
         const productsRaw = await productsRes.json();
         if (cancelled) return;
@@ -122,7 +131,7 @@ export default function CustomerMerchantDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, searchParams]);
 
   // Sync cart count & items whenever the cart changes
   useEffect(() => {
@@ -189,7 +198,11 @@ export default function CustomerMerchantDetailPage() {
 
   const handleAdd = (product: Product) => {
     if (!merchant) return;
-    if (product.quantity != null && product.quantity <= 0) {
+    const variantId = product.hasVariants ? selectedVariants[product.id] : undefined;
+    if (product.hasVariants && !variantId) { alert('Select an available variant.'); return; }
+    const variant = product.variants?.find(item => item.id === variantId);
+    if (variant && variant.availabilityStatus !== 'Available') { alert('This variant is out of stock.'); return; }
+    if (product.availabilityStatus !== 'Available') {
       alert('This item is out of stock.');
       return;
     }
@@ -199,6 +212,8 @@ export default function CustomerMerchantDetailPage() {
       price: product.price,
       image_url: product.image_url || undefined,
       merchant_id: merchant.id,
+      shop_id: selectedShopId || undefined,
+      variant_id: variantId,
     });
   };
 
@@ -206,12 +221,7 @@ export default function CustomerMerchantDetailPage() {
     if (!merchant) return;
     const current = cart.find((c) => c.product_id === productId);
     const product = products.find((p) => p.id === productId);
-    const maxStock = product?.quantity ?? Infinity;
     const nextQty = (current?.quantity || 0) + 1;
-    if (nextQty > maxStock) {
-      alert(`Only ${maxStock} in stock.`);
-      return;
-    }
     cartUpdateQty(merchant.id, productId, nextQty);
   };
 
@@ -414,6 +424,16 @@ export default function CustomerMerchantDetailPage() {
         </div>
       )}
 
+      {merchant.branches && merchant.branches.length > 1 && (
+        <div className="mx-auto mt-3 max-w-3xl px-4">
+          <label className="block rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">Shopping from
+            <select value={selectedShopId || ''} onChange={event => { const params = new URLSearchParams(searchParams.toString()); params.set('shop', event.target.value); router.replace(`/merchants/${slug}?${params.toString()}`); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 font-medium text-gray-900">
+              {merchant.branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}{branch.city ? ` · ${branch.city}` : ''}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="max-w-3xl mx-auto px-4 mt-4 space-y-3">
         <div className="flex items-center gap-2">
@@ -503,8 +523,8 @@ export default function CustomerMerchantDetailPage() {
           <div className="grid grid-cols-2 gap-3">
             {filteredProducts.map((product) => {
               const inCart = getInCartQty(product.id);
-              const outOfStock =
-                product.quantity != null && product.quantity <= 0;
+              const selectedVariant = product.variants?.find(item => item.id === selectedVariants[product.id]);
+              const outOfStock = product.hasVariants ? Boolean(selectedVariant && selectedVariant.availabilityStatus !== 'Available') : product.availabilityStatus !== 'Available';
               return (
                 <div
                   key={product.id}
@@ -551,10 +571,11 @@ export default function CustomerMerchantDetailPage() {
                       )}
                     </div>
                     <div className="mt-3">
+                      {product.hasVariants && product.variants?.length ? <select value={selectedVariants[product.id] || ''} onChange={event => setSelectedVariants(current => ({ ...current, [product.id]: Number(event.target.value) }))} disabled={inCart > 0} className="mb-2 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs"><option value="">Select variant</option>{product.variants.map(variant => <option key={variant.id} value={variant.id} disabled={variant.availabilityStatus !== 'Available'}>{variant.optionValues?.map(link => link.optionValue.value).join(' / ') || variant.sku}{variant.availabilityStatus !== 'Available' ? ' — Out of Stock' : ''}</option>)}</select> : null}
                       {inCart === 0 ? (
                         <button
                           onClick={() => handleAdd(product)}
-                          disabled={outOfStock}
+                          disabled={outOfStock || Boolean(product.hasVariants && !selectedVariants[product.id])}
                           className="w-full py-2 rounded-xl bg-[#DB0002] text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-transform"
                         >
                           Add to Cart

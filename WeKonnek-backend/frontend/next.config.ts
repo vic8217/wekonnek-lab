@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    // The workspace lockfile and shared node_modules live one directory above
+    // the frontend package. Pinning this prevents Next.js from selecting an
+    // unrelated lockfile in /home/victor as the workspace root.
+    root: path.resolve(__dirname, '..'),
+  },
   images: {
     remotePatterns: [
       {

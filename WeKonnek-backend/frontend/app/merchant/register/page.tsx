@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import type L from 'leaflet';
-import { categoriesApi, subCategoriesApi, uploadApi } from '@/lib/api';
+import { merchantCategoriesApi, uploadApi } from '@/lib/api';
 import { getToken } from '@/hooks/use-auth';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -91,7 +91,7 @@ export default function MerchantRegistrationPage() {
 
   const fetchCategories = async () => {
     try {
-      const response = await categoriesApi.getAll(false);
+      const response = await merchantCategoriesApi.getAll();
       setCategories(response || []);
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -100,7 +100,7 @@ export default function MerchantRegistrationPage() {
 
   const fetchSubCategories = async (categoryId: number) => {
     try {
-      const allCategories = await categoriesApi.getAll(true);
+      const allCategories = await merchantCategoriesApi.getAll();
       const foundCategory = allCategories.find(c => c.id === categoryId);
       if (foundCategory?.subCategories) {
         setSubCategories(foundCategory.subCategories);
@@ -111,7 +111,7 @@ export default function MerchantRegistrationPage() {
     }
     
     try {
-      const subs = await subCategoriesApi.getByCategory(categoryId);
+      const subs = await merchantCategoriesApi.getSubCategories(categoryId);
       setSubCategories(subs || []);
     } catch (error) {
       console.error('Error fetching sub-categories:', error);

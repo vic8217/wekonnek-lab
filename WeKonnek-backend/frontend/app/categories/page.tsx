@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { categoriesApi, Category } from '@/lib/api';
+import { merchantCategoriesApi, MerchantCategory } from '@/lib/api';
 import CategoryCard from '@/components/CategoryCard';
 
 export default function CategoriesPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<MerchantCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,7 +13,7 @@ export default function CategoriesPage() {
     const fetchCategories = async () => {
       try {
         setLoading(true);
-        const data = await categoriesApi.getAll();
+        const data = await merchantCategoriesApi.getAll();
         setCategories(data);
       } catch (err) {
         setError('Failed to load categories. Please try again later.');

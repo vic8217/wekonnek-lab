@@ -37,7 +37,7 @@ const DEFAULT_MAP_CENTER: [number, number] = [14.5995, 120.9842];
 type CoverageArea = { code: string; name: string };
 type CoverageDistrict = { name: string; areas: CoverageArea[] };
 type CoverageOption = { code: string; name: string; districts: CoverageDistrict[] };
-type BusinessCategory = { id: number; name: string; isActive: boolean; displayOrder: number };
+type BusinessCategory = { id: number; name: string; isActive: boolean; displayOrder: number; subCategories?: Array<{ id: number; name: string; groupName?: string }> };
 
 const benefits = [
 	{
@@ -123,6 +123,7 @@ export default function ForMerchantsPage() {
 	const [mapExpanded, setMapExpanded] = useState(false);
 	const [mapDialogOpen, setMapDialogOpen] = useState(false);
 	const [categoryName, setCategoryName] = useState('');
+	const [subCategoryName, setSubCategoryName] = useState('');
 	const [businessCategories, setBusinessCategories] = useState<BusinessCategory[]>([]);
 	const [categoriesLoading, setCategoriesLoading] = useState(true);
 	const [businessAddress, setBusinessAddress] = useState('');
@@ -166,7 +167,7 @@ export default function ForMerchantsPage() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 	useEffect(() => {
-		fetch('/api/categories')
+		fetch('/api/backend/merchant-categories')
 			.then(response => response.ok ? response.json() : Promise.reject(new Error('Unable to load business categories')))
 			.then(body => {
 				const categories = Array.isArray(body) ? body : [];
@@ -239,7 +240,7 @@ export default function ForMerchantsPage() {
 			const contentType = response.headers.get('content-type') || '';
 			const result = contentType.includes('application/json') ? await response.json() : { message: 'Merchant application service is unavailable.' };
 			if (!response.ok) throw new Error(result.message || 'Unable to submit merchant application');
-			toast.success('Your merchant application was submitted as unassigned.'); form.reset(); setLocation(null); setCategoryName(''); setBusinessAddress(''); setHasBranches(''); setSelectedCity(''); setSelectedDistrict(''); setSelectedArea('');
+			toast.success('Your merchant application was submitted as unassigned.'); form.reset(); setLocation(null); setCategoryName(''); setSubCategoryName(''); setBusinessAddress(''); setHasBranches(''); setSelectedCity(''); setSelectedDistrict(''); setSelectedArea('');
 		} catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to submit merchant application'); }
 		finally { setSubmitting(false); }
 	};
@@ -290,9 +291,16 @@ export default function ForMerchantsPage() {
 						<FormField name="email" icon={Mail} placeholder="Email Address" type="email" required />
 						<label className="merchant-input flex items-center gap-3">
 							<BriefcaseBusiness size={19} className="shrink-0 text-[#7187a8]" />
-							<select name="category_name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} required disabled={categoriesLoading} className="min-w-0 flex-1 bg-transparent outline-none disabled:cursor-wait disabled:text-slate-400">
+							<select name="category_name" value={categoryName} onChange={(event) => { setCategoryName(event.target.value); setSubCategoryName(''); }} required disabled={categoriesLoading} className="min-w-0 flex-1 bg-transparent outline-none disabled:cursor-wait disabled:text-slate-400">
 								<option value="">{categoriesLoading ? 'Loading business categories…' : 'Business Category'}</option>
 								{businessCategories.map(category => <option key={category.id} value={category.name}>{category.name}</option>)}
+							</select>
+						</label>
+						<label className="merchant-input flex items-center gap-3">
+							<Tag size={19} className="shrink-0 text-[#7187a8]" />
+							<select name="sub_category_name" value={subCategoryName} onChange={event => setSubCategoryName(event.target.value)} required disabled={!categoryName} className="min-w-0 flex-1 bg-transparent outline-none disabled:text-slate-400">
+								<option value="">Business Subcategory</option>
+								{businessCategories.find(category => category.name === categoryName)?.subCategories?.map(subcategory => <option key={subcategory.id} value={subcategory.name}>{subcategory.groupName ? `${subcategory.groupName} — ` : ''}{subcategory.name}</option>)}
 							</select>
 						</label>
 						<label className="merchant-input flex items-center gap-3">

@@ -14,6 +14,7 @@ import { PrismaModule } from './prisma';
 // ─── WeKonnek Catalog Modules (existing) ─────────────
 import { CategoriesModule } from './categories/categories.module';
 import { SubCategoriesModule } from './sub-categories/sub-categories.module';
+import { MerchantCategoriesModule } from './merchant-categories/merchant-categories.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { ProductsModule } from './products/products.module';
 import { StaffPostsModule } from './staff-posts/staff-posts.module';
@@ -71,6 +72,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     // ─── WeKonnek Catalog ────────────────────────
     CategoriesModule,
     SubCategoriesModule,
+    MerchantCategoriesModule,
     MerchantsModule,
     ProductsModule,
     StaffPostsModule,

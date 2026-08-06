@@ -48,6 +48,13 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
       href: item.href.replace('/merchant', basePath),
       matches: item.matches?.map(path => path.replace('/merchant', basePath)),
     }));
+  if (basePath === '/shop') {
+    const position = Math.min(2, menuItems.length);
+    menuItems.splice(position, 0,
+      { href: '/shop/products', label: 'Products', icon: 'box', platinumOnly: false, matches: undefined },
+      { href: '/shop/inventory', label: 'Inventory', icon: 'inventory', platinumOnly: false, matches: undefined },
+    );
+  }
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
@@ -86,6 +93,10 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
           </svg>
+        );
+      case 'inventory':
+        return (
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h10M6 4v16m12-16v9" /></svg>
         );
       case 'graph':
         return (
@@ -161,9 +172,8 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
         {menuItems.map((item) => {
           const active = isActive(item);
           const locked = item.platinumOnly && !hasPlatinum;
-          return (
+          return (<div key={item.href}>{basePath === '/shop' && item.label === 'Products' && <p className="mb-2 mt-5 px-4 text-xs font-bold uppercase tracking-wider text-gray-400">My Shop</p>}
             <Link
-              key={item.href}
               href={locked ? `${basePath}/subscription/upgrade?required=platinum` : item.href}
               title={locked ? `${item.label} is available on the Platinum plan` : undefined}
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
@@ -180,7 +190,7 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
                 </span>
               )}
             </Link>
-          );
+          </div>);
         })}
       </nav>
     </div>

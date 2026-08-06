@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { merchantsApi, categoriesApi, type Merchant, type Category } from '@/lib/api';
+import { merchantsApi, merchantCategoriesApi, type Merchant, type MerchantCategory } from '@/lib/api';
 import VoiceSearchButton from '@/components/VoiceSearchButton';
 
 const FILTER_TABS = [
@@ -40,7 +40,7 @@ const SAMPLE_MERCHANTS: Merchant[] = [
 export default function MartHomePage() {
   const router = useRouter();
   const [merchants, setMerchants] = useState<Merchant[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<MerchantCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('All');
   const [search, setSearch] = useState('');
@@ -49,7 +49,7 @@ export default function MartHomePage() {
     setLoading(true);
     try {
       const [cats, result] = await Promise.all([
-        categoriesApi.getAll().catch(() => []),
+        merchantCategoriesApi.getAll().catch(() => []),
         merchantsApi.getAll().catch(() => []),
       ]);
       setCategories(cats);
