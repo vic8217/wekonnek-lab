@@ -55,11 +55,11 @@ export class UploadController {
   }
 
   @Post('multiple')
-  @ApiOperation({ summary: 'Upload multiple files (up to 10, max 10MB each)' })
+  @ApiOperation({ summary: 'Upload multiple files (up to 20, max 10MB each)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ schema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string', format: 'binary' } }, type: { type: 'string' } } } })
   @UseInterceptors(
-    FilesInterceptor('files', 10, {
+    FilesInterceptor('files', 20, {
       storage: memoryStorage(),
       limits: {
         fileSize: 10 * 1024 * 1024, // 10MB per file

@@ -24,7 +24,8 @@
     "prisma:studio": "prisma studio",
     "prisma:db:push": "prisma db push",
     "prisma:db:pull": "prisma db pull",
-    "prisma:seed": "npx tsx prisma/seed.ts"
+    "prisma:seed": "npx tsx prisma/seed.ts",
+    "prisma:seed:test-customer": "npx tsx prisma/seed-test-customer.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

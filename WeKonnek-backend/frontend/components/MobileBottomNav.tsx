@@ -1,13 +1,31 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { QrCode } from 'lucide-react';
-import { useAuth } from '@/hooks/use-auth';
+import { getToken, getUser, useAuth } from '@/hooks/use-auth';
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
   const { user: authUser } = useAuth();
+  const [hasStoredCustomerSession, setHasStoredCustomerSession] = useState(false);
+
+  useEffect(() => {
+    const syncSession = () => {
+      const storedUser = getUser();
+      setHasStoredCustomerSession(Boolean(getToken() && storedUser?.userType === 'customer'));
+    };
+    syncSession();
+    window.addEventListener('wekonnek-auth-changed', syncSession);
+    window.addEventListener('storage', syncSession);
+    return () => {
+      window.removeEventListener('wekonnek-auth-changed', syncSession);
+      window.removeEventListener('storage', syncSession);
+    };
+  }, []);
+
+  const isCustomerSignedIn = authUser?.userType === 'customer' || hasStoredCustomerSession;
 
   const isActive = (path: string) => {
     if (path === '/customer/dashboard') {
@@ -16,11 +34,11 @@ export default function MobileBottomNav() {
     return pathname?.startsWith(path);
   };
 
-  const profileHref = authUser
+  const profileHref = isCustomerSignedIn
     ? '/customer/profile'
-    : `/auth/login?redirect=${encodeURIComponent('/customer/profile')}`;
+    : '/auth/login';
 
-  const ordersHref = authUser
+  const ordersHref = isCustomerSignedIn
     ? '/customer/orders'
     : `/auth/login?redirect=${encodeURIComponent('/customer/orders')}`;
 
@@ -127,7 +145,7 @@ export default function MobileBottomNav() {
             />
           </svg>
           <span className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive('/customer/profile') || isActive('/customer/menu') ? 'text-[#DB0002]' : 'text-gray-400'}`}>
-            {authUser ? 'Profile' : 'Sign In'}
+            {isCustomerSignedIn ? 'Profile' : 'Sign In'}
           </span>
         </Link>
       </div>

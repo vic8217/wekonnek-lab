@@ -31,6 +31,7 @@ interface MerchantApplication {
   assigned_coordinator_id?: string;
   contact_name?: string;
   category_name?: string;
+  sub_category_name?: string;
   address?: string;
   city_municipality?: string;
   barangay?: string;
@@ -77,7 +78,7 @@ interface EligibleCoordinator {
 export default function MerchantApplicationsPage() {
   const [applications, setApplications] = useState<MerchantApplication[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedFilter, setSelectedFilter] = useState<string>('pending');
+  const [selectedFilter, setSelectedFilter] = useState<string>('reviewing');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApplication, setSelectedApplication] = useState<MerchantApplication | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -325,16 +326,6 @@ export default function MerchantApplicationsPage() {
         {/* Filter Tabs */}
         <div className="flex gap-2 mb-4 border-b border-gray-200">
           <button
-            onClick={() => setSelectedFilter('pending')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              selectedFilter === 'pending'
-                ? 'text-[#DB0002] border-b-2 border-[#DB0002]'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Pending <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{statusCounts.pending}</span>
-          </button>
-          <button
             onClick={() => setSelectedFilter('reviewing')}
             className={`px-4 py-2 font-medium transition-colors ${
               selectedFilter === 'reviewing'
@@ -391,6 +382,7 @@ export default function MerchantApplicationsPage() {
               <thead className="bg-[#DB0002] text-white">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Business</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold">Classification</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Contact</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Plan</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Payment</th>
@@ -403,13 +395,13 @@ export default function MerchantApplicationsPage() {
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                       Loading applications...
                     </td>
                   </tr>
                 ) : filteredApplications.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                       No applications found
                     </td>
                   </tr>
@@ -427,6 +419,12 @@ export default function MerchantApplicationsPage() {
                             <div className="font-medium text-gray-900">{app.business_name}</div>
                             <div className="text-sm text-gray-500">{app.email}</div>
                           </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">{app.category_name || 'Unclassified'}</div>
+                          <div className="text-gray-500">{app.sub_category_name || 'No subcategory'}</div>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900">{app.phone || 'N/A'}</td>
@@ -533,6 +531,7 @@ export default function MerchantApplicationsPage() {
                     <ApplicationDetail label="Business name" value={selectedApplication.business_name} />
                     <ApplicationDetail label="Contact person" value={selectedApplication.contact_name} />
                     <ApplicationDetail label="Business category" value={selectedApplication.category_name} />
+                    <ApplicationDetail label="Business subcategory" value={selectedApplication.sub_category_name} />
                     <ApplicationDetail label="Email" value={selectedApplication.email} />
                     <ApplicationDetail label="Phone" value={selectedApplication.phone} />
                     <ApplicationDetail label="Application source" value={selectedApplication.source?.replaceAll('_', ' ')} capitalize />

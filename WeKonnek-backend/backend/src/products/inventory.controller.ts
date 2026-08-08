@@ -26,6 +26,19 @@ export class InventoryController {
     return { merchantId: Number(merchantId), shopId: Number(shopId) };
   }
 
+  private async merchantId(req: any) {
+    const merchantId = req.user.merchantId || (await this.merchantsService.findByUserId(req.user.id) as any)?.id;
+    if (!merchantId) throw new ForbiddenException('No merchant profile is linked to this account');
+    if (req.user.portal === 'shop') throw new ForbiddenException('Merchant-wide inventory is only available in the merchant portal');
+    return Number(merchantId);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'Get inventory totals and per-shop balances for the authenticated merchant' })
+  async summary(@Req() req: any) {
+    return this.shopInventory.merchantSummary(await this.merchantId(req));
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get product assignments and balances for one shop' })
   async list(@Req() req: any, @Query('shopId') shopId?: string) {

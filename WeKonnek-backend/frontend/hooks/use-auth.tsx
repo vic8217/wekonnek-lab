@@ -48,6 +48,8 @@ const MERCHANT_TOKEN_KEY = 'wk_merchant_token';
 const MERCHANT_USER_KEY = 'wk_merchant_user';
 const SHOP_TOKEN_KEY = 'wk_shop_token';
 const SHOP_USER_KEY = 'wk_shop_user';
+const AUTH_CHANGED_EVENT = 'wekonnek-auth-changed';
+const SIGNED_OUT_KEY = 'wk_customer_signed_out';
 
 export type SessionScope = 'default' | 'merchant' | 'shop' | 'admin' | 'coordinator';
 
@@ -88,7 +90,9 @@ function userBelongsToScope(user: AuthUser, scope: SessionScope) {
   if (scope === 'coordinator') return user.userType === 'coordinator';
   if (scope === 'merchant') return user.userType === 'merchant';
   if (scope === 'shop') return user.userType === 'merchant';
-  return user.userType !== 'admin' && user.userType !== 'staff' && user.userType !== 'coordinator';
+  // The customer app is an independent account scope. In particular, a
+  // merchant login must never be accepted as a customer session.
+  return user.userType === 'customer';
 }
 
 function readStoredUser(key: string, storage: Storage = localStorage): AuthUser | null {
@@ -123,14 +127,29 @@ export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   const scope = scopeForPath();
   migrateLegacySession(scope);
-  return storageForScope(scope).getItem(keysForScope(scope).token);
+  const storage = storageForScope(scope);
+  const keys = keysForScope(scope);
+  const token = storage.getItem(keys.token);
+  const user = readStoredUser(keys.user, storage);
+  if (!token || !user || !userBelongsToScope(user, scope)) {
+    // Remove stale credentials that were written before portal sessions were
+    // separated. Never remove credentials belonging to another namespace.
+    storage.removeItem(keys.token);
+    storage.removeItem(keys.user);
+    return null;
+  }
+  return token;
 }
 
 export function getUser(): AuthUser | null {
   if (typeof window === 'undefined') return null;
   const scope = scopeForPath();
   migrateLegacySession(scope);
-  return readStoredUser(keysForScope(scope).user, storageForScope(scope));
+  const storage = storageForScope(scope);
+  const keys = keysForScope(scope);
+  const user = readStoredUser(keys.user, storage);
+  if (!user || !userBelongsToScope(user, scope)) return null;
+  return user;
 }
 
 export function setAuth(token: string, user: AuthUser, scope: SessionScope = scopeForUser(user)) {
@@ -138,13 +157,20 @@ export function setAuth(token: string, user: AuthUser, scope: SessionScope = sco
   const storage = storageForScope(scope);
   storage.setItem(keys.token, token);
   storage.setItem(keys.user, JSON.stringify(user));
+  if (scope === 'default') localStorage.removeItem(SIGNED_OUT_KEY);
+  // The native storage event only fires in other tabs. Notify providers and
+  // navigation components in this same window immediately.
+  window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT, { detail: { scope } }));
 }
 
 export function clearAuth() {
-  const keys = keysForScope(scopeForPath());
-  const storage = storageForScope(scopeForPath());
+  const scope = scopeForPath();
+  const keys = keysForScope(scope);
+  const storage = storageForScope(scope);
   storage.removeItem(keys.token);
   storage.removeItem(keys.user);
+  if (scope === 'default') localStorage.setItem(SIGNED_OUT_KEY, 'true');
+  window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT, { detail: { scope: scopeForPath() } }));
 }
 
 // ─── React context ────────────────────────────────────────
@@ -162,10 +188,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = useCallback(async () => {
     try {
-      const token = getToken();
+      let token = getToken();
       if (!token) {
-        setUser(undefined);
-        return;
+        if (scopeForPath() === 'default' && localStorage.getItem(SIGNED_OUT_KEY) === 'true') {
+          setUser(undefined);
+          return;
+        }
+        // Restore a session from the HTTP-only refresh cookie after a full
+        // navigation or when browser storage was temporarily unavailable.
+        const refreshResponse = await fetch(`${API}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          credentials: 'same-origin',
+        });
+        if (refreshResponse.ok) {
+          const session = await refreshResponse.json().catch(() => null);
+          const profile = session?.user;
+          const userType = (profile?.userType ?? profile?.user_type ?? profile?.role) as UserType | undefined;
+          if (session?.access_token && profile?.id && userType) {
+            setAuth(session.access_token, {
+              id: profile.id,
+              email: profile.email ?? undefined,
+              phone: profile.phone ?? undefined,
+              userType,
+              role: userType,
+              firstName: profile.firstName ?? profile.first_name ?? null,
+              lastName: profile.lastName ?? profile.last_name ?? null,
+              avatarUrl: profile.avatarUrl ?? profile.avatar_url ?? null,
+            });
+            token = getToken();
+          }
+        }
+        if (!token) {
+          setUser(undefined);
+          return;
+        }
       }
 
       const res = await fetch(`${API}/api/auth/me`, {
@@ -250,7 +308,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (e.key === keys.token || e.key === keys.user) refreshAuth();
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    const onAuthChanged = () => refreshAuth();
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+    };
   }, [refreshAuth]);
 
   const signOut = useCallback(async (redirectTo: string = ROUTES.login) => {

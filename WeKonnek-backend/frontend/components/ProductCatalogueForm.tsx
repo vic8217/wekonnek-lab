@@ -8,7 +8,6 @@ import { categoriesApi, CreateProductData, Product, productsApi, subCategoriesAp
 import { syncProductCategories } from '@/lib/product-categories';
 
 const UNITS = ['Piece', 'Pack', 'Bottle', 'Can', 'Cup', 'Glass', 'Plate', 'Serving', 'Bowl', 'Kilogram', 'Gram', 'Liter', 'Milliliter', 'Box', 'Pair', 'Roll', 'Meter', 'Set'];
-const STATUSES = ['Available', 'Unavailable', 'Draft', 'Archived'];
 const VARIANT_EXAMPLES = [
   { category: 'Food & Beverages', option: 'Size', values: 'Regular, Large', variant: 'Large Iced Latte — LATTE-LG' },
   { category: 'Groceries', option: 'Weight', values: '250 g, 500 g, 1 kg', variant: 'Rice 1 kg — RICE-1KG' },
@@ -120,7 +119,6 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
         <Field label="Discount Price (optional)"><input type="number" min="0" step="0.01" value={form.discountPrice} onChange={e => update('discountPrice', e.target.value)} className="input" /></Field>
         <Field label="SKU / Product Code (optional)"><input value={form.baseSku} onChange={e => update('baseSku', e.target.value)} className="input" /></Field>
         <Field label="Barcode (optional)"><input value={form.barcode} onChange={e => update('barcode', e.target.value)} className="input" /></Field>
-        <Field label="Availability"><select value={form.availabilityStatus} onChange={e => update('availabilityStatus', e.target.value)} className="input">{STATUSES.map(value => <option key={value}>{value}</option>)}</select></Field>
       </div></Section>
       <Section title="Configuration"><div className="flex flex-wrap gap-8"><Toggle label="Has Variants" checked={form.hasVariants} set={value => update('hasVariants', value)} /><Toggle label="Track Inventory" checked={form.trackInventory} set={value => update('trackInventory', value)} /></div></Section>
       {form.hasVariants && <Section title="Generic Variant Options"><div className="space-y-4">

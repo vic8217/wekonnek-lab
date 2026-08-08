@@ -109,6 +109,16 @@ export default function CustomerProfilePage() {
     }
   };
 
+  const connectIdentity = async (provider: 'google' | 'facebook' | 'apple') => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API}/api/auth/oauth/${provider}/link/start`, { headers: { Authorization: `Bearer ${token}` } });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || `Could not connect ${provider}.`);
+      window.location.assign(body.authorizationUrl);
+    } catch (error: any) { toast.error(error.message || 'Could not connect that sign-in method.'); }
+  };
+
   useEffect(() => {
     if (authLoading) return;
     if (!authUser) { setLoading(false); return; }
@@ -343,6 +353,10 @@ export default function CustomerProfilePage() {
               <h2 className="text-sm font-bold text-gray-900">Account Settings</h2>
             </div>
             <div>
+              <div className="px-4 py-3.5 border-b border-gray-50">
+                <p className="text-xs font-semibold text-gray-500 mb-2">CONNECTED SIGN-IN METHODS</p>
+                <div className="flex gap-2">{(['google', 'facebook', 'apple'] as const).map(provider => <button key={provider} onClick={() => connectIdentity(provider)} className="flex-1 rounded-lg border px-2 py-2 text-xs font-semibold capitalize hover:bg-gray-50">{provider}</button>)}</div>
+              </div>
               {/* Change Password */}
               <button
                 onClick={() => {
@@ -619,6 +633,7 @@ export default function CustomerProfilePage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Account Settings</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 flex items-center gap-2 px-4 py-3 border border-gray-200 rounded-lg"><span className="text-sm font-medium text-gray-700 mr-auto">Connect a sign-in method</span>{(['google', 'facebook', 'apple'] as const).map(provider => <button key={provider} onClick={() => connectIdentity(provider)} className="rounded-md border px-3 py-1.5 text-sm font-semibold capitalize hover:bg-gray-50">{provider}</button>)}</div>
             <button
               onClick={() => {
                 setPwdError(null);

@@ -1,87 +1,111 @@
-import { Injectable, UnauthorizedException, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
-import { SmsService } from './sms.service';
+import { OtpChannel, OtpDeliveryError, OtpDeliveryService } from './otp-delivery.service';
 import { UserRole } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import Redis from 'ioredis';
+import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
-  private readonly redis: Redis;
-
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
-    private readonly smsService: SmsService,
+    private readonly otpDelivery: OtpDeliveryService,
     private readonly prisma: PrismaService,
-  ) {
-    // Connect to Redis for OTP storage (scalable, persistent across restarts)
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-      keyPrefix: 'otp:',
-    });
+  ) {}
+
+  static normalizePhilippineMobile(value: string): string {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.startsWith('0063')) digits = digits.slice(2);
+    if (digits.startsWith('09')) digits = `63${digits.slice(1)}`;
+    else if (digits.startsWith('9')) digits = `63${digits}`;
+    if (!/^639\d{9}$/.test(digits)) throw new BadRequestException('Enter a valid Philippine mobile number.');
+    return `+${digits}`;
   }
 
-  private get isDev(): boolean {
-    return (process.env.NODE_ENV || 'development') !== 'production';
+  private hash(value: string) {
+    return createHash('sha256').update(`${process.env.OTP_HASH_SECRET || process.env.JWT_SECRET || 'development-only'}:${value}`).digest('hex');
   }
 
-  async sendOtp(
-    phone: string,
-    role?: UserRole,
-  ): Promise<{ message: string; isNewUser: boolean; devOtp?: string }> {
-    const code = this.isDev
-      ? '123456'
-      : Math.floor(100000 + Math.random() * 900000).toString();
+  private contextHashes(context: { ip?: string; device?: string } = {}) {
+    return { ipHash: context.ip ? this.hash(context.ip) : undefined, deviceHash: context.device ? this.hash(context.device) : undefined };
+  }
 
-    await this.redis.set(phone, code, 'EX', 300);
-
-    if (!this.isDev) {
-      await this.smsService.sendSms(
-        phone,
-        `Your WeKonnek verification code is: ${code}. Valid for 5 minutes.`,
-      );
+  async sendOtp(phoneInput: string, context: { ip?: string; device?: string; targetUserId?: string } = {}) {
+    const phone = AuthService.normalizePhilippineMobile(phoneInput);
+    const existing = await this.usersService.findByPhone(phone);
+    if (existing?.password && !context.targetUserId) {
+      throw new BadRequestException('This mobile number is already registered. Sign in with your mobile number and password.');
     }
+    return this.createOtpChallenge(phone, 'viber', context);
+  }
 
+  private async createOtpChallenge(phone: string, channel: OtpChannel, context: { ip?: string; device?: string; targetUserId?: string } = {}, resendCount = 0) {
+    const now = new Date();
+    const since = new Date(now.getTime() - 10 * 60_000);
+    const hashes = this.contextHashes(context);
+    const [phoneCount, ipCount, deviceCount, latest] = await Promise.all([
+      this.prisma.otpChallenge.count({ where: { phone, createdAt: { gte: since } } }),
+      hashes.ipHash ? this.prisma.otpChallenge.count({ where: { ipHash: hashes.ipHash, createdAt: { gte: since } } }) : 0,
+      hashes.deviceHash ? this.prisma.otpChallenge.count({ where: { deviceHash: hashes.deviceHash, createdAt: { gte: since } } }) : 0,
+      this.prisma.otpChallenge.findFirst({ where: { phone }, orderBy: { createdAt: 'desc' } }),
+    ]);
+    if (phoneCount >= 5 || ipCount >= 20 || deviceCount >= 10) throw new HttpException('Too many verification requests. Please try again later.', HttpStatus.TOO_MANY_REQUESTS);
+    if (latest?.cooldownUntil && latest.cooldownUntil > now) throw new HttpException('Please wait before requesting another code.', HttpStatus.TOO_MANY_REQUESTS);
+
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+    await this.prisma.otpChallenge.updateMany({ where: { phone, consumedAt: null, invalidatedAt: null }, data: { invalidatedAt: now } });
+    const challenge = await this.prisma.otpChallenge.create({ data: {
+      id: randomUUID(), phone, codeHash: this.hash(code), channel, purpose: context.targetUserId ? 'link_mobile' : 'customer_auth',
+      targetUserId: context.targetUserId, resendCount, ...hashes,
+      expiresAt: new Date(now.getTime() + 5 * 60_000), cooldownUntil: new Date(now.getTime() + 60_000),
+    } });
+
+    let delivered = true;
+    try { await this.otpDelivery.send(channel, phone, code); } catch (error) { if (!(error instanceof OtpDeliveryError)) throw error; delivered = false; await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { cooldownUntil: now } }); }
+    await this.audit('otp_requested', delivered, undefined, hashes, { channel });
     const user = await this.usersService.findByPhone(phone);
     return {
-      message: this.isDev
-        ? 'OTP sent (dev mode — use 123456)'
-        : 'OTP sent successfully',
-      isNewUser: !user,
-      ...(this.isDev ? { devOtp: code } : {}),
+      challengeId: challenge.id, maskedPhone: `+63 ••• ••• ${phone.slice(-4)}`, isNewUser: !user, channel,
+      deliveryStatus: delivered ? 'sent' : 'unavailable',
+      message: delivered ? `Verification code sent via ${channel === 'sms' ? 'SMS' : channel === 'viber' ? 'Viber' : 'WhatsApp'}.` : `${channel === 'viber' ? 'Viber' : channel} is currently unavailable. Choose another delivery option.`,
+      fallbackChannels: channel === 'viber' ? ['sms', 'whatsapp'] : channel === 'sms' ? ['whatsapp'] : [],
     };
   }
 
-  async verifyOtp(
-    phone: string,
-    code: string,
-    role: UserRole = UserRole.customer,
-  ) {
-    const stored = await this.redis.get(phone);
+  async resendOtp(challengeId: string, channel: OtpChannel, context: { ip?: string; device?: string } = {}) {
+    if (!['sms', 'whatsapp'].includes(channel)) throw new BadRequestException('Choose SMS or WhatsApp.');
+    const previous = await this.prisma.otpChallenge.findUnique({ where: { id: challengeId } });
+    if (!previous) throw new BadRequestException('Verification request not found.');
+    if (previous.resendCount >= 3) throw new HttpException('Resend limit reached. Please try again later.', HttpStatus.TOO_MANY_REQUESTS);
+    return this.createOtpChallenge(previous.phone, channel, { ...context, targetUserId: previous.targetUserId || undefined }, previous.resendCount + 1);
+  }
 
-    if (!stored) {
-      throw new BadRequestException('OTP not found or expired. Please request a new one.');
+  async verifyOtp(challengeId: string, code: string, context: { ip?: string; device?: string } = {}) {
+    if (!/^\d{6}$/.test(code || '')) throw new BadRequestException('Enter the six-digit verification code.');
+    const challenge = await this.prisma.otpChallenge.findUnique({ where: { id: challengeId } });
+    if (!challenge || challenge.invalidatedAt || challenge.consumedAt) throw new BadRequestException('This verification code is no longer valid. Request a new code.');
+    if (challenge.expiresAt <= new Date()) throw new BadRequestException('This verification code has expired. Request a new code.');
+    if (challenge.attempts >= challenge.maxAttempts) throw new HttpException('Too many incorrect attempts. Request a new code.', HttpStatus.TOO_MANY_REQUESTS);
+    const actual = Buffer.from(this.hash(code));
+    const expected = Buffer.from(challenge.codeHash);
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      const attempts = challenge.attempts + 1;
+      await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { attempts, ...(attempts >= challenge.maxAttempts ? { invalidatedAt: new Date() } : {}) } });
+      await this.audit('otp_verified', false, challenge.targetUserId || undefined, this.contextHashes(context), { reason: 'invalid_code' });
+      throw new UnauthorizedException(attempts >= challenge.maxAttempts ? 'Too many incorrect attempts. Request a new code.' : 'That verification code is incorrect.');
     }
+    await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } });
 
-    if (stored !== code) {
-      throw new UnauthorizedException('Invalid OTP');
-    }
-
-    await this.redis.del(phone);
-
-    // Find or create user
-    let user = await this.usersService.findByPhone(phone);
+    const phone = challenge.phone;
+    let user = challenge.targetUserId ? await this.usersService.findById(challenge.targetUserId) : await this.usersService.findByPhone(phone);
     const isNewUser = !user;
-
     if (!user) {
       user = await this.usersService.create({
         phone,
-        role,
+        role: UserRole.customer,
         isVerified: true,
       });
     } else {
@@ -90,15 +114,34 @@ export class AuthService {
           'Your account has been suspended. Please contact support.',
         );
       }
-      await this.usersService.update(user.id, { isVerified: true });
+      const phoneOwner = await this.usersService.findByPhone(phone);
+      if (phoneOwner && phoneOwner.id !== user.id) throw new BadRequestException('This mobile number is already connected to another account. Sign in to that account to link another method.');
+      user = await this.usersService.update(user.id, { phone, isVerified: true });
     }
-
+    await this.audit('otp_verified', true, user.id, this.contextHashes(context), { channel: challenge.channel });
     const tokens = this.generateTokens(user.id, user.role);
     return {
       user: this.decorateUser(user),
       isNewUser,
+      needsProfile: !user.firstName || !user.lastName || !user.password,
       ...tokens,
     };
+  }
+
+  async completeCustomerProfile(userId: string, data: { firstName: string; lastName: string; email?: string; password: string }) {
+    const firstName = data.firstName?.trim(); const lastName = data.lastName?.trim(); const email = data.email?.trim().toLowerCase() || undefined;
+    if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) throw new BadRequestException('First name and last name are required.');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('Enter a valid email address.');
+    if (!data.password || data.password.length < 8) throw new BadRequestException('Create a password with at least 8 characters.');
+    const existing = email ? await this.usersService.findByEmail(email) : null;
+    if (existing && existing.id !== userId) throw new BadRequestException('That email address is already in use.');
+    const user = await this.usersService.update(userId, { firstName, lastName, email, password: await bcrypt.hash(data.password, 12) });
+    await this.audit('profile_completed', true, userId);
+    return { user: this.decorateUser(user) };
+  }
+
+  private async audit(event: string, success: boolean, userId?: string, hashes: { ipHash?: string; deviceHash?: string } = {}, metadata?: Record<string, unknown>) {
+    try { await this.prisma.authAuditLog.create({ data: { id: randomUUID(), event, success, userId, ...hashes, metadata: metadata as any } }); } catch { /* Authentication must not fail because audit storage is temporarily unavailable. */ }
   }
 
   async register(data: {
@@ -195,9 +238,14 @@ export class AuthService {
       user = coordinator?.userId ? await this.prisma.user.findUnique({ where: { id: coordinator.userId } }) : null;
       if (user?.role !== UserRole.coordinator) user = null;
     } else {
-      user =
-        (await this.usersService.findByEmail(id.toLowerCase())) ??
-        (await this.usersService.findByPhone(id));
+      const looksLikePhone = /^\+?[\d\s()-]{10,}$/.test(id);
+      let normalizedPhone = id;
+      if (looksLikePhone) {
+        try { normalizedPhone = AuthService.normalizePhilippineMobile(id); } catch { throw new UnauthorizedException('Invalid credentials'); }
+      }
+      user = looksLikePhone
+        ? await this.usersService.findByPhone(normalizedPhone)
+        : (await this.usersService.findByEmail(id.toLowerCase())) ?? (await this.usersService.findByPhone(id));
     }
 
     if (!user || !user.password) {
@@ -315,6 +363,10 @@ export class AuthService {
     };
   }
 
+  createSession(user: any) {
+    return { user: this.decorateUser(user), needsMobileVerification: !user.isVerified || String(user.phone).startsWith('oauth:'), needsProfile: !user.firstName || !user.lastName || !user.password, ...this.generateTokens(user.id, user.role) };
+  }
+
   /** Expose the role as `userType` so the frontend role-gating works as-is. */
   decorateUser<T extends { role?: UserRole } | null>(user: T): T {
     if (!user) return user;
@@ -327,7 +379,8 @@ export class AuthService {
     try {
       const payload = this.jwtService.verify(refreshToken);
       const user = await this.usersService.findById(payload.sub);
-      return this.generateTokens(user.id, user.role);
+      if (!user.isActive) throw new UnauthorizedException('Account is inactive');
+      return this.createSession(user);
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }

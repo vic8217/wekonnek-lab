@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
+import { useEffect, useState } from 'react';
+import { getToken, getUser, useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API = '';
 
 interface AuthGateModalProps {
   open: boolean;
@@ -33,7 +33,7 @@ export default function AuthGateModal({
   title = 'Sign in to continue',
   subtitle = 'Your details are saved — just sign in to confirm.',
 }: AuthGateModalProps) {
-  const { refreshAuth } = useAuth();
+  const { user, refreshAuth } = useAuth();
   const [mode, setMode] = useState<'signin' | 'phone'>('signin');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -44,6 +44,14 @@ export default function AuthGateModal({
   const [phone, setPhone] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    const storedUser = getUser();
+    if ((user?.userType === 'customer' || storedUser?.userType === 'customer') && getToken()) {
+      onAuthenticated();
+    }
+  }, [open, user, onAuthenticated]);
 
   if (!open) return null;
 
@@ -59,7 +67,11 @@ export default function AuthGateModal({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || 'Invalid credentials');
-      setAuth(body.access_token, mapApiUser(body.user));
+      const authenticatedUser = mapApiUser(body.user);
+      if (authenticatedUser.userType !== 'customer') {
+        throw new Error('Bazaar posting requires a separate WeKonnek customer account.');
+      }
+      setAuth(body.access_token, authenticatedUser);
       await refreshAuth();
       toast.success('Signed in successfully!');
       onAuthenticated();
@@ -144,20 +156,7 @@ export default function AuthGateModal({
           <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
         </div>
 
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-5">
-          <button
-            onClick={() => { setMode('signin'); setAuthError(null); }}
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${mode === 'signin' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-          >
-            Email
-          </button>
-          <button
-            onClick={() => { setMode('phone'); setAuthError(null); }}
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${mode === 'phone' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-          >
-            Phone OTP
-          </button>
-        </div>
+        <div className="mb-5 rounded-xl bg-gray-100 px-4 py-3 text-center text-sm font-semibold text-gray-700">Sign in with email or mobile number and password</div>
 
         {authError && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">{authError}</div>
@@ -166,12 +165,12 @@ export default function AuthGateModal({
         {mode === 'signin' ? (
           <form onSubmit={handleEmailSignIn} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email or mobile number</label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                placeholder="you@example.com or 0917 123 4567"
                 required
                 className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#DB0002]/20 focus:border-[#DB0002] outline-none"
               />

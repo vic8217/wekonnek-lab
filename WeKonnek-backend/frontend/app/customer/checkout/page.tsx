@@ -14,7 +14,9 @@ import {
   type CartItem,
 } from '@/lib/cart';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// Authentication always uses the same-origin proxy so it shares the exact
+// customer session scope used by the main login page and navigation.
+const API = '';
 
 interface MerchantInfo {
   id: number;
@@ -151,8 +153,8 @@ function CheckoutAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) 
           <p className="text-sm text-gray-500 mt-1">Your cart items are saved and ready to checkout</p>
         </div>
 
-        {/* Mode Toggle */}
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-5">
+        {/* OTP is registration-only; checkout accepts the established account password. */}
+        <div className="hidden bg-gray-100 rounded-xl p-1 mb-5">
           <button
             onClick={() => { setMode('signin'); setAuthError(null); }}
             className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${mode === 'signin' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
@@ -550,7 +552,7 @@ export default function CheckoutPage() {
     );
   };
 
-  const isAuthenticated = !!authUser || !!getToken();
+  const isAuthenticated = authUser?.userType === 'customer' && Boolean(getToken());
 
   if (loading) {
     return (

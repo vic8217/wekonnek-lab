@@ -1,0 +1,8 @@
+'use client';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import PropertyCard from '@/components/PropertyCard';
+import { getToken } from '@/hooks/use-auth';
+import { propertyApi, type PropertyListing } from '@/lib/property';
+export default function MyPropertyListings(){const router=useRouter(),[items,setItems]=useState<PropertyListing[]>([]),[error,setError]=useState('');useEffect(()=>{if(!getToken()){router.replace('/auth/login?redirect=%2Fproperty%2Fmine');return;}propertyApi.mine().then(setItems).catch(e=>setError(e.message));},[router]);return <div className="mx-auto max-w-7xl px-4 py-8"><div className="flex items-center justify-between"><div><h1 className="text-3xl font-black">My Property Listings</h1><p className="text-slate-500">Manage availability, views, saves and viewing requests.</p></div><Link href="/property/post" className="rounded-xl bg-[#DB0002] px-4 py-3 font-black text-white">+ Post Property</Link></div>{error&&<p className="mt-5 rounded-xl bg-red-50 p-4 text-red-700">{error}</p>}<div className="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{items.map(item=><div key={item.id}><PropertyCard listing={item}/><div className="-mt-3 flex justify-between rounded-b-2xl border bg-slate-50 px-3 pb-3 pt-5 text-xs"><span className="font-black">{item.listingStatus}</span><span>{item.viewCount} views · {item._count?.savedBy||0} saves · {item._count?.viewingRequests||0} inquiries</span></div></div>)}</div>{!items.length&&!error&&<div className="py-20 text-center"><p className="text-lg font-black">No property listings yet</p><Link href="/property/post" className="mt-3 inline-block font-bold text-red-700">Post your first property →</Link></div>}</div>}

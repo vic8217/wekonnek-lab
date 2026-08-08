@@ -3,23 +3,50 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Bell, CalendarDays, ChevronDown, Heart, Home, LayoutGrid, MapPin, Mic, Package, Pill, QrCode, Search, ShoppingBag, SlidersHorizontal, Sparkles, Store, Tag, Tickets, Truck, UserRound, UtensilsCrossed, Wrench, X } from 'lucide-react';
+import { Bell, CalendarDays, ChevronDown, Heart, Home, LayoutGrid, MapPin, Mic, Package, Pill, QrCode, Search, ShoppingBag, SlidersHorizontal, Sparkles, Store, Tag, Tickets, Truck, UserRound, UtensilsCrossed, Wrench, X, type LucideIcon } from 'lucide-react';
 import { useUserLocation } from '@/hooks/use-geolocation';
+import { merchantCategoriesApi, type MerchantCategory } from '@/lib/api';
 
-const categories = [
-  { icon: UtensilsCrossed, name: 'Food', details: 'Restaurants · Cafes', stat: '324 nearby', href: '/customer/explore/food', gradient: 'from-orange-400 to-red-500', badge: 'Trending' },
-  { icon: Store, name: 'Restaurants', details: 'Asian · Italian · Seafood', stat: '128 available', href: '/customer/explore/restaurants', gradient: 'from-red-500 to-rose-600', badge: 'Popular' },
-  { icon: ShoppingBag, name: 'Groceries', details: 'Fresh · Pantry · Local', stat: '86 stores', href: '/customer/explore/groceries', gradient: 'from-emerald-400 to-green-600' },
-  { icon: Pill, name: 'Pharmacy', details: 'Medicine · Wellness', stat: '42 open now', href: '/customer/explore/pharmacy', gradient: 'from-green-400 to-teal-600' },
-  { icon: Wrench, name: 'Services', details: 'Home · Repair · Care', stat: '211 providers', href: '/customer/explore/services', gradient: 'from-blue-400 to-indigo-600', badge: 'New' },
-  { icon: Tag, name: 'Deals', details: 'Vouchers · Promos', stat: '35 on promo', href: '/customer/explore/deals', gradient: 'from-violet-500 to-purple-700', badge: 'VIP' },
-  { icon: CalendarDays, name: 'Events', details: 'Local · Tickets · Live', stat: '18 this week', href: '/customer/explore/events', gradient: 'from-pink-400 to-rose-600' },
-  { icon: Sparkles, name: 'Wellness', details: 'Spa · Fitness · Beauty', stat: '74 nearby', href: '/customer/explore/wellness', gradient: 'from-cyan-400 to-teal-600' },
-  { icon: Truck, name: 'Express', details: 'Pickup · Delivery · Courier', stat: 'Fast delivery', href: '/customer/explore/express', gradient: 'from-amber-400 to-orange-600' },
-  { icon: Tickets, name: 'Vouchers', details: 'Rewards · Savings · Passes', stat: '24 active', href: '/customer/explore/vouchers', gradient: 'from-fuchsia-400 to-purple-600' },
-  { icon: QrCode, name: 'Scan & Discover', details: 'Stores · Menus · Rewards', stat: 'Open scanner', href: '/customer/explore/scan-discover', gradient: 'from-sky-400 to-blue-600' },
-  { icon: LayoutGrid, name: 'Bazaar', details: 'Local · Handmade · Finds', stat: '96 listings', href: '/customer/explore/bazaar', gradient: 'from-slate-500 to-slate-700' },
+const categoryStyles: Array<{ icon: LucideIcon; gradient: string }> = [
+  { icon: UtensilsCrossed, gradient: 'from-orange-400 to-red-500' },
+  { icon: Store, gradient: 'from-red-500 to-rose-600' },
+  { icon: ShoppingBag, gradient: 'from-emerald-400 to-green-600' },
+  { icon: Pill, gradient: 'from-green-400 to-teal-600' },
+  { icon: Wrench, gradient: 'from-blue-400 to-indigo-600' },
+  { icon: Tag, gradient: 'from-violet-500 to-purple-700' },
+  { icon: CalendarDays, gradient: 'from-pink-400 to-rose-600' },
+  { icon: Sparkles, gradient: 'from-cyan-400 to-teal-600' },
+  { icon: Truck, gradient: 'from-amber-400 to-orange-600' },
+  { icon: Tickets, gradient: 'from-fuchsia-400 to-purple-600' },
+  { icon: QrCode, gradient: 'from-sky-400 to-blue-600' },
+  { icon: LayoutGrid, gradient: 'from-slate-500 to-slate-700' },
 ];
+
+type DisplayCategory = {
+  id: number;
+  icon: LucideIcon;
+  adminIcon?: string;
+  name: string;
+  details: string;
+  stat: string;
+  href: string;
+  gradient: string;
+};
+
+function toDisplayCategory(category: MerchantCategory, index: number): DisplayCategory {
+  const style = categoryStyles[index % categoryStyles.length];
+  const subCategories = category.subCategories || [];
+  return {
+    id: category.id,
+    icon: style.icon,
+    adminIcon: category.icon?.trim(),
+    name: category.name,
+    details: category.description?.trim() || subCategories.slice(0, 3).map(item => item.name).join(' · ') || 'Explore local listings',
+    stat: `${subCategories.length} ${subCategories.length === 1 ? 'subcategory' : 'subcategories'}`,
+    href: category.slug === 'property' ? '/property' : `/customer/explore/${category.slug}`,
+    gradient: style.gradient,
+  };
+}
 
 const partners = [
   { name: 'Green Market', kind: 'FRESH PRODUCE', meta: 'organic  •  0.5 km', rating: '4.6', image: '/images/partner-green-market.png' },
@@ -41,8 +68,15 @@ const nav = [
 export default function CustomerDesktopHome() {
   const { coords, status } = useUserLocation();
   const [deliveryLocation, setDeliveryLocation] = useState('Your City');
+  const [categories, setCategories] = useState<DisplayCategory[]>([]);
   const [showCategories, setShowCategories] = useState(false);
   const [showPartners, setShowPartners] = useState(false);
+
+  useEffect(() => {
+    merchantCategoriesApi.getAll()
+      .then((data) => setCategories((data || []).map(toDisplayCategory)))
+      .catch((error) => console.error('Failed to load managed categories:', error));
+  }, []);
 
   useEffect(() => {
     if (!coords) return;
@@ -96,8 +130,8 @@ export default function CustomerDesktopHome() {
 
         <div className="px-12 py-11">
           <div className="mb-4 flex justify-end"><button type="button" onClick={() => setShowCategories(true)} className="min-h-12 rounded-full border border-slate-300 px-5 py-2.5 text-sm font-bold text-red-600 transition hover:border-red-200 hover:bg-red-50">Show all categories</button></div>
-          <section className="grid grid-cols-4 gap-5 2xl:grid-cols-8">
-            {categories.slice(0, 8).map(({ icon: Icon, name, details, stat, href, gradient, badge }) => <Link key={name} href={href} className="group relative min-h-[218px] overflow-hidden rounded-[22px] border border-[#edf2f7] bg-white p-5 shadow-[0_10px_28px_rgba(15,23,42,.07)] transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_20px_42px_rgba(15,23,42,.14)] active:scale-[.98]"><span className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}><Icon size={28} strokeWidth={1.8} /></span>{badge && <span className="absolute right-3 top-3 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">{badge}</span>}<h3 className="mt-5 text-[17px] font-black">{name}</h3><p className="mt-1 min-h-9 text-xs leading-4 text-slate-500">{details}</p><p className="mt-4 text-sm font-bold text-blue-700">{stat}</p></Link>)}
+          <section aria-label="Category listings" className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5">
+            {categories.map(({ id, icon: Icon, adminIcon, name, details, stat, href, gradient }) => <Link key={id} href={href} className="group relative min-h-[218px] w-[176px] shrink-0 snap-start overflow-hidden rounded-[22px] border border-[#edf2f7] bg-white p-5 shadow-[0_10px_28px_rgba(15,23,42,.07)] transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_20px_42px_rgba(15,23,42,.14)] active:scale-[.98]"><span className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}>{adminIcon ? <span className="text-2xl" aria-hidden="true">{adminIcon}</span> : <Icon size={28} strokeWidth={1.8} />}</span><h3 className="mt-5 text-[17px] font-black">{name}</h3><p className="mt-1 min-h-9 line-clamp-2 text-xs leading-4 text-slate-500">{details}</p><p className="mt-4 text-sm font-bold text-blue-700">{stat}</p></Link>)}
           </section>
 
           <section className="mt-12"><div className="mb-5 flex items-center justify-between"><h2 className="text-2xl font-black">Featured Partners</h2><button type="button" onClick={() => setShowPartners(true)} className="min-h-12 px-2 font-bold text-red-600">See All ›</button></div><div className="grid grid-cols-4 gap-3">
@@ -108,7 +142,7 @@ export default function CustomerDesktopHome() {
         </div>
       </main>
 
-      {showCategories && <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCategories(false); }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"><section role="dialog" aria-modal="true" aria-labelledby="all-categories-title" className="max-h-[88vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-[#fafbfc] p-7 shadow-2xl sm:p-9"><div className="flex items-start justify-between gap-5"><div><p className="text-sm font-bold uppercase tracking-[.16em] text-blue-700">Explore WeKonnek</p><h2 id="all-categories-title" className="mt-1 text-3xl font-black">All categories</h2><p className="mt-2 text-sm text-slate-500">Discover nearby merchants, services, offers, and local experiences.</p></div><button type="button" onClick={() => setShowCategories(false)} aria-label="Close all categories" className="flex size-12 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"><X size={22} /></button></div><div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">{categories.map(({ icon: Icon, name, details, stat, href, gradient, badge }) => <Link key={name} href={href} onClick={() => setShowCategories(false)} className="group relative min-h-[205px] rounded-[22px] border border-[#edf2f7] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,.07)] transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_18px_38px_rgba(15,23,42,.14)]"><span className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}><Icon size={27} strokeWidth={1.8} /></span>{badge && <span className="absolute right-4 top-4 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-bold uppercase text-white">{badge}</span>}<h3 className="mt-5 text-[17px] font-black">{name}</h3><p className="mt-1 text-xs leading-5 text-slate-500">{details}</p><p className="mt-4 text-sm font-bold text-blue-700">{stat}</p></Link>)}</div></section></div>}
+      {showCategories && <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCategories(false); }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"><section role="dialog" aria-modal="true" aria-labelledby="all-categories-title" className="max-h-[88vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-[#fafbfc] p-7 shadow-2xl sm:p-9"><div className="flex items-start justify-between gap-5"><div><p className="text-sm font-bold uppercase tracking-[.16em] text-blue-700">Explore WeKonnek</p><h2 id="all-categories-title" className="mt-1 text-3xl font-black">All categories</h2><p className="mt-2 text-sm text-slate-500">Discover nearby merchants, services, offers, and local experiences.</p></div><button type="button" onClick={() => setShowCategories(false)} aria-label="Close all categories" className="flex size-12 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"><X size={22} /></button></div><div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">{categories.map(({ id, icon: Icon, adminIcon, name, details, stat, href, gradient }) => <Link key={id} href={href} onClick={() => setShowCategories(false)} className="group relative min-h-[205px] rounded-[22px] border border-[#edf2f7] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,.07)] transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_18px_38px_rgba(15,23,42,.14)]"><span className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}>{adminIcon ? <span className="text-2xl" aria-hidden="true">{adminIcon}</span> : <Icon size={27} strokeWidth={1.8} />}</span><h3 className="mt-5 text-[17px] font-black">{name}</h3><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{details}</p><p className="mt-4 text-sm font-bold text-blue-700">{stat}</p></Link>)}</div></section></div>}
       {showPartners && <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowPartners(false); }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"><section role="dialog" aria-modal="true" aria-labelledby="all-partners-title" className="max-h-[88vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-[#fafbfc] p-7 shadow-2xl sm:p-9"><div className="flex items-start justify-between gap-5"><div><p className="text-sm font-bold uppercase tracking-[.16em] text-red-600">Trusted local businesses</p><h2 id="all-partners-title" className="mt-1 text-3xl font-black">All featured partners</h2><p className="mt-2 text-sm text-slate-500">Explore standout merchants selected for quality, service, and community trust.</p></div><button type="button" onClick={() => setShowPartners(false)} aria-label="Close featured partners" className="flex size-12 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"><X size={22} /></button></div><div className="mt-8 grid grid-cols-2 gap-5 lg:grid-cols-4">{partners.map((partner) => <Link href="/merchants" key={partner.name} onClick={() => setShowPartners(false)} className="group overflow-hidden rounded-[22px] border border-[#edf2f7] bg-white shadow-[0_8px_24px_rgba(15,23,42,.07)] transition-all duration-200 hover:-translate-y-1.5 hover:shadow-xl"><div className="relative h-44 overflow-hidden"><Image src={partner.image} alt={partner.name} fill sizes="(max-width:1024px) 50vw, 25vw" className="object-cover transition duration-300 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent" /><span className="absolute left-3 top-3 rounded-full bg-[#ff0719] px-3 py-1.5 text-xs font-bold text-white">Featured</span><Heart className="absolute right-3 top-3 rounded-full bg-white p-2 text-red-600" size={42} /><p className="absolute bottom-4 left-4 text-xs font-bold text-white">{partner.kind}</p></div><div className="p-5"><h3 className="text-lg font-black">{partner.name}</h3><p className="mt-3 text-sm text-slate-500"><span className="text-amber-500">★</span> {partner.rating} &nbsp;•&nbsp; {partner.meta}</p><span className="mt-4 inline-flex rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600">15% OFF</span></div></Link>)}</div></section></div>}
     </div>
   );

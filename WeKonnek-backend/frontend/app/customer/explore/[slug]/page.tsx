@@ -1,10 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, CalendarDays, Heart, Home, LayoutGrid, Map, MapPin, Mic, Package, Pill, QrCode, Search, ShoppingBag, SlidersHorizontal, Sparkles, Store, Tag, Tickets, Truck, UserRound, UtensilsCrossed, Wrench, type LucideIcon } from 'lucide-react';
+import { merchantCategoriesApi, type MerchantCategory } from '@/lib/api';
+import BazaarSellerPromo from '@/components/BazaarSellerPromo';
 
 const configs: Record<string, { name: string; icon: string; description: string; specialties: string[]; merchants: string[] }> = {
   food: { name: 'Food', icon: '🍔', description: 'For ordering meals, drinks, and quick food discovery.', specialties: ['All', 'Filipino', 'Fast Food', 'Pizza', 'Asian', 'Desserts', 'Coffee', 'Healthy'], merchants: ['Brew & Beans', 'Kusina ni Juan', 'Burger Barn', 'Green Bites', 'Pizza House', 'Tokyo Bites', 'Sweet Delights', 'Pasta Express'] },
@@ -47,12 +49,28 @@ const sidebarNav = [
 
 export default function CategoryMarketplacePage() {
   const slug = String(useParams().slug || 'food');
-  const config = configs[slug] || configs.food;
+  const fallbackConfig = configs[slug] || { ...configs.food, name: slug.replaceAll('-', ' '), specialties: ['All'] };
+  const [managedCategory, setManagedCategory] = useState<MerchantCategory | null>(null);
+  const config = {
+    ...fallbackConfig,
+    name: managedCategory?.name || fallbackConfig.name,
+    icon: managedCategory?.icon || fallbackConfig.icon,
+    description: managedCategory?.description || fallbackConfig.description,
+    specialties: ['All', ...(managedCategory?.subCategories || []).map(item => item.name)],
+  };
   const categoryStyle = categoryIcons[slug] || categoryIcons.food;
   const CategoryIcon = categoryStyle.icon;
   const [specialty, setSpecialty] = useState('All');
   const [sort, setSort] = useState('Popular');
   const rows = useMemo(() => config.merchants.map((name, index) => ({ name, rating: (4.3 + (index % 6) / 10).toFixed(1), distance: `${(0.5 + index * .25).toFixed(1)} km`, offer: `${10 + (index % 4) * 5}% OFF`, image: photos[index % photos.length] })), [config]);
+
+  useEffect(() => {
+    setManagedCategory(null);
+    setSpecialty('All');
+    merchantCategoriesApi.getBySlug(slug)
+      .then(setManagedCategory)
+      .catch((error) => console.error(`Failed to load managed category ${slug}:`, error));
+  }, [slug]);
 
   return <div className="min-h-screen bg-white text-[#111827] xl:grid xl:grid-cols-[250px_minmax(0,1fr)]">
     <aside className="hidden min-h-screen border-r border-slate-200 bg-white p-5 xl:flex xl:flex-col"><Link href="/customer/dashboard" className="flex items-center gap-3"><Image src="/images/weKonnekLogov1.png" alt="WeKonnek" width={58} height={58} className="size-14 object-contain" /><div><b className="text-blue-700">WE<span className="text-red-600">KONNEK</span></b><p className="text-xs text-slate-500">Customer App</p></div></Link><div className="mt-10 rounded-2xl bg-red-50 p-4"><p className="text-xs font-bold text-red-600">BROWSING NEAR</p><p className="mt-2 font-black">Your City</p><p className="text-xs text-slate-500">Local shops and offers</p></div><nav className="mt-6 space-y-2">{sidebarNav.map(({ icon: Icon, label, href }) => <Link key={label} href={href} className="flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"><Icon size={19} />{label}</Link>)}</nav><Link href="/customer/scan" className="mt-auto flex min-h-12 items-center justify-center gap-3 rounded-xl bg-slate-950 text-sm font-bold text-white"><QrCode size={19} /> Scan QR</Link></aside>
@@ -61,7 +79,9 @@ export default function CategoryMarketplacePage() {
 
       <section className="border-b border-slate-200 bg-white px-4 py-3 lg:px-5"><div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">{config.specialties.map(item => <button key={item} onClick={() => setSpecialty(item)} className={`min-h-10 shrink-0 rounded-xl border px-4 text-sm font-semibold ${specialty === item ? 'border-red-200 bg-red-50 text-red-600' : 'border-slate-200 text-slate-600'}`}>{item}</button>)}</div><div className="mt-2 flex gap-2 overflow-x-auto no-scrollbar">{['Popular','Rating','Nearby','Offers','Open now'].map(item => <button key={item} onClick={() => setSort(item)} className={`min-h-9 shrink-0 rounded-full px-4 text-xs font-bold ${sort === item ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></section>
 
-      <div className="grid min-h-[calc(100vh-190px)] xl:grid-cols-[390px_minmax(0,1fr)]"><section className="border-r border-slate-200"><div className="flex items-center justify-between border-b border-slate-200 px-4 py-2"><div><b className="text-sm">{rows.length} merchants found</b><p className="text-[10px] font-semibold text-red-600">Shop discounts shown on every offer</p></div><SlidersHorizontal size={18} /></div>{rows.map((row) => <Link href={`/customer/explore/${slug}/${encodeURIComponent(row.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''))}`} key={row.name} className="flex gap-3 border-b border-slate-200 p-3 transition hover:bg-slate-50"><div className="relative size-24 shrink-0 overflow-hidden rounded-xl"><Image src={row.image} alt={row.name} fill sizes="96px" className="object-cover" /><span className="absolute left-1 top-1 rounded-md bg-red-600 px-2 py-1 text-[9px] font-bold text-white">{row.offer}</span></div><div className="min-w-0 flex-1"><div className="flex justify-between gap-2"><h2 className="truncate text-sm font-black">{row.name}</h2><Heart size={17} className="shrink-0 text-slate-400" /></div><p className="mt-1 text-xs text-slate-500">{specialty === 'All' ? config.specialties[1] : specialty} · Local</p><p className="mt-2 text-xs"><span className="text-amber-500">★</span> {row.rating} · {row.distance}</p><p className="mt-1 text-[11px]"><span className="font-bold text-emerald-600">Open</span> · 8:00 AM – 10:00 PM</p><span className="mt-2 inline-block rounded bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600">{row.offer} on selected items</span></div></Link>)}</section>
+      {slug === 'bazaar' && <BazaarSellerPromo />}
+
+      <div className="grid min-h-[calc(100vh-190px)] xl:grid-cols-[390px_minmax(0,1fr)]"><section className="border-r border-slate-200 md:grid md:grid-cols-3 md:content-start md:gap-4 md:bg-slate-50 md:p-4 xl:block xl:bg-white xl:p-0"><div className="flex items-center justify-between border-b border-slate-200 px-4 py-2 md:col-span-3 md:-mx-4 md:-mt-4 md:mb-0 md:bg-white md:px-4 md:py-3 xl:mx-0 xl:mt-0"><div><b className="text-sm">{rows.length} merchants found</b><p className="text-[10px] font-semibold text-red-600">Shop discounts shown on every offer</p></div><SlidersHorizontal size={18} /></div>{rows.map((row) => <Link href={`/customer/explore/${slug}/${encodeURIComponent(row.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''))}`} key={row.name} className="flex gap-3 border-b border-slate-200 p-3 transition hover:bg-slate-50 md:block md:overflow-hidden md:rounded-2xl md:border md:bg-white md:p-0 md:shadow-sm md:hover:shadow-md xl:flex xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-3 xl:shadow-none"><div className="relative size-24 shrink-0 overflow-hidden rounded-xl md:aspect-[4/3] md:h-auto md:w-full md:rounded-none xl:size-24 xl:rounded-xl"><Image src={row.image} alt={row.name} fill sizes="(min-width: 768px) and (max-width: 1279px) 33vw, 96px" className="object-cover" /><span className="absolute left-1 top-1 rounded-md bg-red-600 px-2 py-1 text-[9px] font-bold text-white">{row.offer}</span></div><div className="min-w-0 flex-1 md:p-3 xl:p-0"><div className="flex justify-between gap-2"><h2 className="truncate text-sm font-black">{row.name}</h2><Heart size={17} className="shrink-0 text-slate-400" /></div><p className="mt-1 truncate text-xs text-slate-500">{specialty === 'All' ? (config.specialties[1] || config.name) : specialty} · Local</p><p className="mt-2 text-xs"><span className="text-amber-500">★</span> {row.rating} · {row.distance}</p><p className="mt-1 text-[11px]"><span className="font-bold text-emerald-600">Open</span> · 8:00 AM – 10:00 PM</p><span className="mt-2 inline-block rounded bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600">{row.offer} on selected items</span></div></Link>)}</section>
 
         <section className="relative hidden overflow-hidden bg-[#e7f4ec] xl:block"><div className="absolute inset-0 opacity-30 [background-image:linear-gradient(35deg,transparent_45%,#93c5fd_46%,#93c5fd_49%,transparent_50%)] [background-size:140px_90px]" /><button className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-white px-5 py-3 text-xs font-bold shadow-lg">Search this area</button>{rows.slice(0,7).map((row,index) => <div key={row.name} className="absolute z-10 -translate-x-1/2" style={{ left: `${20 + (index * 13) % 70}%`, top: `${22 + (index * 17) % 60}%` }}><span className="mx-auto flex size-9 items-center justify-center rounded-full border-4 border-white bg-[#ff0719] text-sm text-white shadow-lg">{config.icon}</span><span className="mt-1 block whitespace-nowrap rounded-full bg-white px-2 py-1 text-[9px] font-bold shadow">{row.name}</span></div>)}<MapPin className="absolute left-1/2 top-1/2 text-blue-600" size={25} /><div className="absolute inset-x-4 bottom-4 rounded-2xl bg-white p-4 shadow-xl"><b className="text-sm">{config.name} specialties</b><p className="mt-2 text-xs text-slate-500">{config.specialties.slice(1).join('  ·  ')}</p></div><div className="absolute bottom-24 right-5 overflow-hidden rounded-xl bg-white shadow-lg"><button className="block size-11 text-xl font-bold">+</button><button className="block size-11 border-t text-xl font-bold">−</button></div></section>
       </div>

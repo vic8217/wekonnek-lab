@@ -30,6 +30,9 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { BranchesModule } from './branches/branches.module';
 import { MerchantStaffModule } from './merchant-staff/merchant-staff.module';
 import { FloorTablesModule } from './floor-tables/floor-tables.module';
+import { BazaarPromosModule } from './bazaar-promos/bazaar-promos.module';
+import { BazaarListingsModule } from './bazaar-listings/bazaar-listings.module';
+import { PropertyModule } from './property/property.module';
 
 // ─── WeKonnek Core Modules (merged from standalone backend) ─
 import { AuthModule } from './modules/auth/auth.module';
@@ -88,6 +91,9 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     BranchesModule,
     MerchantStaffModule,
     FloorTablesModule,
+    BazaarPromosModule,
+    BazaarListingsModule,
+    PropertyModule,
 
     // ─── WeKonnek Core ────────────────────────────
     AuthModule,

@@ -53,6 +53,30 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+              function isInjectedWalletError(value) {
+                var message = String((value && value.message) || value || '');
+                var stack = String((value && value.stack) || '');
+                return /Failed to connect to MetaMask/i.test(message) ||
+                  (/chrome-extension:\/\//i.test(stack) && /MetaMask|Object\.connect|inpage\.js/i.test(message + stack));
+              }
+              window.addEventListener('unhandledrejection', function(event) {
+                if (isInjectedWalletError(event.reason)) {
+                  event.preventDefault();
+                  event.stopImmediatePropagation();
+                }
+              }, true);
+              window.addEventListener('error', function(event) {
+                if (isInjectedWalletError(event.error || event.message)) {
+                  event.preventDefault();
+                  event.stopImmediatePropagation();
+                }
+              }, true);
+            })();`,
+          }}
+        />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

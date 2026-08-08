@@ -72,6 +72,26 @@ export default function AdminSidebar({
           </span>
         </Link>
 
+        <Link
+          href="/admin/bazaar-listings"
+          className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+            isActive('/admin/bazaar-listings') ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <span className="flex w-5 justify-center text-lg">🛡️</span>
+          <span className="font-medium">Bazaar Management</span>
+        </Link>
+
+        <Link
+          href="/admin/property"
+          className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+            isActive('/admin/property') ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <span className="flex w-5 justify-center text-lg">🏠</span>
+          <span className="font-medium">Property Management</span>
+        </Link>
+
         {/* Admin-only menu items */}
         {userType === 'admin' ? (
           <>
@@ -171,6 +191,16 @@ export default function AdminSidebar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
               <span className="font-medium">Category Management</span>
+            </Link>
+
+            <Link
+              href="/admin/bazaar-promos"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/admin/bazaar-promos') ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <span className="flex w-5 justify-center text-lg">📢</span>
+              <span className="font-medium">Bazaar Promo Cards</span>
             </Link>
 
             <Link

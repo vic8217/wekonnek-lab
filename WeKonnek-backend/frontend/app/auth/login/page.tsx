@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AuthNavigation from '@/components/AuthNavigation';
 import Image from 'next/image';
-import { useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
+import { getToken, getUser, useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 
 // Keep backend addresses server-side so a bad build-time environment value
@@ -28,35 +28,59 @@ function LoginForm() {
     password: '',
   });
 
-  // Register Form State
-  const [registerData, setRegisterData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-  });
+  const [registerStep, setRegisterStep] = useState<'method' | 'otp' | 'profile'>('method');
+  const [mobile, setMobile] = useState('');
+  const [challengeId, setChallengeId] = useState('');
+  const [maskedPhone, setMaskedPhone] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [deliveryStatus, setDeliveryStatus] = useState<'sent' | 'unavailable'>('sent');
+  const [cooldown, setCooldown] = useState(0);
+  const [profile, setProfile] = useState({ firstName: '', lastName: '', email: '', password: '', confirmPassword: '' });
+  const [pendingToken, setPendingToken] = useState('');
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [registerData, setRegisterData] = useState({ firstName: '', lastName: '', email: '', password: '', confirmPassword: '' });
 
   const handleSignInChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setSignInData(prev => ({ ...prev, [name]: value }));
   };
+  const handleRegisterChange = (e: React.ChangeEvent<HTMLInputElement>) => setRegisterData(previous => ({ ...previous, [e.target.name]: e.target.value }));
+  const handleRegister = (e: React.FormEvent) => e.preventDefault();
 
-  const handleRegisterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setRegisterData(prev => ({ ...prev, [name]: value }));
+  const deviceHeaders = () => {
+    let id = localStorage.getItem('wekonnek_device_id');
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('wekonnek_device_id', id); }
+    return { 'Content-Type': 'application/json', 'X-Device-Id': id };
   };
 
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveSession = async (body: any) => {
+    const apiUser = body.user;
+    const authUser: AuthUser = { id: apiUser.id, email: apiUser.email ?? undefined, phone: apiUser.phone ?? undefined, firstName: apiUser.firstName ?? null, lastName: apiUser.lastName ?? null, role: apiUser.role ?? 'customer', userType: apiUser.role ?? 'customer' };
+    setAuth(body.access_token ?? body.accessToken, authUser); await refreshAuth();
+  };
+
+  useEffect(() => {
+    const oauthCode = searchParams.get('oauth_code');
+    if (!oauthCode) return;
+    setActiveTab('register'); setLoading(true);
+    fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
+      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(redirectTo || '/customer/dashboard'); })
+      .catch(error => setError(error.message)).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => { if (!cooldown) return; const timer = window.setInterval(() => setCooldown(value => Math.max(0, value - 1)), 1000); return () => clearInterval(timer); }, [cooldown]);
+
+  const performPasswordSignIn = async (identifier: string, password: string) => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: signInData.email,
-          password: signInData.password,
+          identifier,
+          password,
         }),
       });
 
@@ -67,6 +91,7 @@ function LoginForm() {
       }
 
       const { access_token, user: apiUser } = body;
+      if (!access_token || !apiUser) throw new Error('Sign-in response was incomplete. Please try again.');
       const authUser: AuthUser = {
         id: apiUser.id,
         email: apiUser.email ?? undefined,
@@ -77,7 +102,16 @@ function LoginForm() {
         userType: (apiUser.role ?? apiUser.user_type ?? 'customer') as any,
       };
 
+      // Verify the issued token before persisting or navigating. A failure is
+      // shown here instead of allowing a protected-route redirect loop.
+      const verification = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${access_token}` }, cache: 'no-store' });
+      if (!verification.ok) throw new Error('Your credentials were accepted, but the session could not be verified. Restart the backend and try again.');
+
       setAuth(access_token, authUser);
+      const persistedUser = getUser();
+      if (!getToken() || persistedUser?.id !== authUser.id) {
+        throw new Error('The browser blocked the customer session from being saved. Allow site storage and try again.');
+      }
 
       const userType = authUser.role;
       const portalDestination =
@@ -90,19 +124,25 @@ function LoginForm() {
       // Privileged sessions use portal-specific storage. A full navigation
       // initializes AuthProvider against the destination portal's namespace.
       if (portalDestination) {
-        window.location.assign(redirectTo || portalDestination);
+        // Never allow a redirect captured from one portal to send a
+        // privileged session into another portal's route guard.
+        window.location.assign(portalDestination);
         return;
       }
 
-      await refreshAuth();
-
-      if (redirectTo) {
-        router.replace(redirectTo);
-      } else if (userType === 'merchant') {
-        router.replace('/merchant/dashboard');
-      } else {
-        router.replace('/customer/dashboard');
+      if (userType === 'merchant') {
+        window.location.assign('/merchant/dashboard');
+        return;
       }
+
+      // Normal customer sign-in always opens Home. Bazaar posting is the one
+      // intentional resume-after-login workflow and returns to its form.
+      const safeCustomerRedirect = redirectTo === '/bazaar/post'
+        ? '/bazaar/post'
+        : '/customer/dashboard';
+      // A full navigation starts the destination with the already persisted
+      // customer session and avoids a race with the login page's AuthProvider.
+      window.location.replace(safeCustomerRedirect);
     } catch (error: any) {
       console.error('Sign in error:', error);
       const errorMessage = error.message || 'Failed to sign in. Please try again.';
@@ -114,66 +154,48 @@ function LoginForm() {
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (registerData.password !== registerData.confirmPassword) {
-      setError('Passwords do not match');
-      setTimeout(() => setError(null), 5000);
-      return;
-    }
-
-    if (registerData.password.length < 6) {
-      setError('Password must be at least 6 characters long');
-      setTimeout(() => setError(null), 5000);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: registerData.email,
-          password: registerData.password,
-          firstName: registerData.firstName,
-          lastName: registerData.lastName,
-          role: 'customer',
-        }),
-      });
-
-      const body = await res.json();
-
-      if (!res.ok) {
-        throw new Error(body.message || 'Failed to register');
-      }
-
-      const { access_token, user: apiUser } = body;
-      const authUser: AuthUser = {
-        id: apiUser.id,
-        email: apiUser.email ?? undefined,
-        phone: apiUser.phone ?? undefined,
-        firstName: apiUser.firstName ?? apiUser.first_name ?? null,
-        lastName: apiUser.lastName ?? apiUser.last_name ?? null,
-        role: apiUser.role ?? apiUser.user_type ?? 'customer',
-        userType: (apiUser.role ?? apiUser.user_type ?? 'customer') as any,
-      };
-
-      setAuth(access_token, authUser);
-      await refreshAuth();
-
-      router.replace('/customer/dashboard');
-    } catch (error: any) {
-      console.error('Register error:', error);
-      const errorMessage = error.message || 'Failed to register. Please try again.';
-      setError(errorMessage);
-      toast.error(errorMessage);
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setLoading(false);
-    }
+    await performPasswordSignIn(signInData.email, signInData.password);
   };
+
+  const beginSocial = async (provider: 'google' | 'facebook' | 'apple') => {
+    setLoading(true); setError(null);
+    try { const response = await fetch(`/api/auth/oauth/${provider}/start`); const body = await response.json(); if (!response.ok) throw new Error(body.message || `${provider} sign-in is unavailable.`); window.location.assign(body.authorizationUrl); }
+    catch (error: any) { setError(error.message); setLoading(false); }
+  };
+
+  const requestOtp = async (channel?: 'sms' | 'whatsapp') => {
+    setLoading(true); setError(null);
+    try {
+      const url = channel ? `/api/auth/otp/${challengeId}/send` : pendingToken ? '/api/auth/mobile/start' : '/api/auth/send-otp';
+      const response = await fetch(url, { method: 'POST', headers: { ...deviceHeaders(), ...(pendingToken ? { Authorization: `Bearer ${pendingToken}` } : {}) }, body: JSON.stringify(channel ? { channel } : { phone: `+63${mobile.replace(/\D/g, '').replace(/^0/, '')}` }) });
+      const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Could not send a verification code.');
+      setChallengeId(body.challengeId); setMaskedPhone(body.maskedPhone); setDeliveryStatus(body.deliveryStatus); setRegisterStep('otp'); setOtp(['', '', '', '', '', '']); setCooldown(body.deliveryStatus === 'unavailable' ? 0 : 60);
+      if (body.devOtp) toast.success(`Development OTP: ${body.devOtp}`); else toast.success(body.message);
+    } catch (error: any) { setError(error.message); } finally { setLoading(false); }
+  };
+
+  const verifyCode = async (e: React.FormEvent) => {
+    e.preventDefault(); setLoading(true); setError(null);
+    try { const response = await fetch('/api/auth/verify-otp', { method: 'POST', headers: deviceHeaders(), body: JSON.stringify({ challengeId, code: otp.join('') }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Verification failed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); if (body.needsProfile) setRegisterStep('profile'); else router.replace(redirectTo || '/customer/dashboard'); }
+    catch (error: any) { setError(error.message); } finally { setLoading(false); }
+  };
+
+  const completeProfile = async (e: React.FormEvent) => {
+    e.preventDefault(); setError(null);
+    if (profile.password.length < 8) { setError('Create a password with at least 8 characters.'); return; }
+    if (profile.password !== profile.confirmPassword) { setError('Passwords do not match.'); return; }
+    setLoading(true);
+    try { const response = await fetch('/api/auth/complete-profile', { method: 'POST', headers: { ...deviceHeaders(), Authorization: `Bearer ${pendingToken}` }, body: JSON.stringify({ firstName: profile.firstName, lastName: profile.lastName, email: profile.email, password: profile.password }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Could not save your profile.'); router.replace(redirectTo || '/customer/dashboard'); }
+    catch (error: any) { setError(error.message); } finally { setLoading(false); }
+  };
+
+  const updateOtp = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, '').slice(-1); const next = [...otp]; next[index] = digit; setOtp(next); if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+  };
+
+  const pasteOtp = (event: React.ClipboardEvent) => { const digits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6); if (digits.length === 6) { event.preventDefault(); setOtp(digits.split('')); otpRefs.current[5]?.focus(); } };
 
   return (
     <div className="min-h-screen bg-[#F5F5F0]">
@@ -244,18 +266,48 @@ function LoginForm() {
                     )}
                   </div>
                 )}
+                <div className="space-y-3">
+                  {(['google', 'facebook', 'apple'] as const).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => beginSocial(provider)}
+                      className="w-full min-h-12 rounded-lg border border-gray-300 bg-white font-semibold text-gray-800 capitalize transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                    >
+                      Continue with {provider}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span className="h-px flex-1 bg-gray-200" />
+                  <span>or sign in with password</span>
+                  <span className="h-px flex-1 bg-gray-200" />
+                </div>
+                {process.env.NODE_ENV !== 'production' && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void performPasswordSignIn('09175403565', '0000')}
+                    className="w-full rounded-lg border border-dashed border-blue-300 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-800 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  >
+                    {loading ? 'Signing in test customer…' : 'Sign in as temporary test customer'}
+                  </button>
+                )}
                 <div>
                   <label htmlFor="signin-email" className="block text-sm font-medium text-gray-700 mb-2">
-                    Email Address
+                    Email or mobile number
                   </label>
                   <input
-                    type="email"
+                    type="text"
                     id="signin-email"
                     name="email"
                     value={signInData.email}
                     onChange={handleSignInChange}
                     required
-                    placeholder="juan@example.com"
+                    inputMode="text"
+                    autoComplete="username"
+                    placeholder="juan@example.com or 0917 123 4567"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   />
                 </div>
@@ -313,8 +365,37 @@ function LoginForm() {
               </form>
             )}
 
-            {/* Register Form */}
-            {activeTab === 'register' && (
+            {activeTab === 'register' && <div className="space-y-4">
+              {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
+              {registerStep === 'method' && <>
+                <p className="text-center text-sm text-gray-600">Create your customer account in just a few steps.</p>
+                {(['google', 'facebook', 'apple'] as const).map(provider => <button key={provider} type="button" disabled={loading} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize">Continue with {provider}</button>)}
+                <div className="flex items-center gap-3 text-xs text-gray-500"><span className="h-px flex-1 bg-gray-200"/><span>or continue with mobile</span><span className="h-px flex-1 bg-gray-200"/></div>
+                <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number</label>
+                <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-red-500"><span className="px-4 py-3 bg-gray-50 rounded-l-lg font-medium">+63</span><input id="mobile" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="tel" autoComplete="tel-national" placeholder="917 123 4567" className="min-w-0 flex-1 px-4 py-3 rounded-r-lg outline-none"/></div>
+                <button type="button" onClick={() => requestOtp()} disabled={loading || mobile.replace(/\D/g, '').replace(/^0/, '').length !== 10} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50">{loading ? 'Please wait…' : 'Continue'}</button>
+              </>}
+              {registerStep === 'otp' && <form onSubmit={verifyCode} className="space-y-4">
+                <div className="text-center"><h2 className="text-xl font-bold text-gray-900">Verify your mobile</h2><p className="mt-1 text-sm text-gray-600">Enter the code sent to {maskedPhone}</p></div>
+                {deliveryStatus === 'unavailable' && <p className="text-sm text-amber-700 bg-amber-50 p-3 rounded-lg">Viber is currently unavailable. Choose SMS or WhatsApp below.</p>}
+                <div className="flex justify-center gap-2" onPaste={pasteOtp}>{otp.map((digit, index) => <input key={index} ref={element => { otpRefs.current[index] = element; }} aria-label={`OTP digit ${index + 1}`} value={digit} onChange={e => updateOtp(index, e.target.value)} onKeyDown={e => { if (e.key === 'Backspace' && !digit && index) otpRefs.current[index - 1]?.focus(); }} inputMode="numeric" pattern="[0-9]*" autoComplete={index === 0 ? 'one-time-code' : 'off'} maxLength={1} className="h-12 w-11 rounded-lg border border-gray-300 text-center text-xl font-bold focus:ring-2 focus:ring-red-500 outline-none"/>)}</div>
+                <button type="submit" disabled={loading || otp.some(value => !value)} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold disabled:opacity-50">{loading ? 'Verifying…' : 'Verify & Continue'}</button>
+                <div className="flex justify-center gap-4 text-sm"><button type="button" disabled={loading || cooldown > 0} onClick={() => requestOtp('sms')} className="text-red-600 disabled:text-gray-400">Send via SMS{cooldown ? ` (${cooldown}s)` : ''}</button><button type="button" disabled={loading || cooldown > 0} onClick={() => requestOtp('whatsapp')} className="text-green-700 disabled:text-gray-400">Send via WhatsApp</button></div>
+                <button type="button" onClick={() => setRegisterStep('method')} className="w-full text-sm text-gray-600">Use a different number</button>
+              </form>}
+              {registerStep === 'profile' && <form onSubmit={completeProfile} className="space-y-4">
+                <div><h2 className="text-xl font-bold">Complete your account</h2><p className="text-sm text-gray-600">Add your details and create a password for future sign-ins.</p></div>
+                <input required aria-label="First name" placeholder="First name" value={profile.firstName} onChange={e => setProfile({...profile, firstName: e.target.value})} className="w-full px-4 py-3 border rounded-lg"/>
+                <input required aria-label="Last name" placeholder="Last name" value={profile.lastName} onChange={e => setProfile({...profile, lastName: e.target.value})} className="w-full px-4 py-3 border rounded-lg"/>
+                <input type="email" aria-label="Email (optional)" placeholder="Email (optional)" value={profile.email} onChange={e => setProfile({...profile, email: e.target.value})} className="w-full px-4 py-3 border rounded-lg"/>
+                <input required type="password" autoComplete="new-password" minLength={8} aria-label="Create password" placeholder="Create password (at least 8 characters)" value={profile.password} onChange={e => setProfile({...profile, password: e.target.value})} className="w-full px-4 py-3 border rounded-lg"/>
+                <input required type="password" autoComplete="new-password" minLength={8} aria-label="Confirm password" placeholder="Confirm password" value={profile.confirmPassword} onChange={e => setProfile({...profile, confirmPassword: e.target.value})} className="w-full px-4 py-3 border rounded-lg"/>
+                <button disabled={loading} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold">{loading ? 'Saving…' : 'Finish registration'}</button>
+              </form>}
+            </div>}
+
+            {/* Retained only as unreachable markup during migration; existing password sign-in remains above. */}
+            {false && activeTab === 'register' && (
               <form onSubmit={handleRegister} className="space-y-4">
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">

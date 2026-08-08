@@ -1,0 +1,12 @@
+CREATE TABLE "auth_identities" ("id" UUID PRIMARY KEY, "user_id" UUID NOT NULL REFERENCES "users"("id") ON DELETE CASCADE, "provider" TEXT NOT NULL, "provider_user_id" TEXT NOT NULL, "email" TEXT, "profile" JSONB, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX "auth_identities_provider_provider_user_id_key" ON "auth_identities"("provider", "provider_user_id");
+CREATE UNIQUE INDEX "auth_identities_user_id_provider_key" ON "auth_identities"("user_id", "provider");
+CREATE TABLE "otp_challenges" ("id" UUID PRIMARY KEY, "phone" TEXT NOT NULL, "code_hash" TEXT NOT NULL, "channel" TEXT NOT NULL, "purpose" TEXT NOT NULL DEFAULT 'customer_auth', "attempts" INTEGER NOT NULL DEFAULT 0, "max_attempts" INTEGER NOT NULL DEFAULT 5, "resend_count" INTEGER NOT NULL DEFAULT 0, "device_hash" TEXT, "ip_hash" TEXT, "expires_at" TIMESTAMP(3) NOT NULL, "cooldown_until" TIMESTAMP(3) NOT NULL, "consumed_at" TIMESTAMP(3), "invalidated_at" TIMESTAMP(3), "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX "otp_challenges_phone_created_at_idx" ON "otp_challenges"("phone", "created_at");
+ALTER TABLE "otp_challenges" ADD COLUMN "target_user_id" UUID;
+CREATE INDEX "otp_challenges_ip_hash_created_at_idx" ON "otp_challenges"("ip_hash", "created_at");
+CREATE TABLE "auth_oauth_states" ("id" UUID PRIMARY KEY, "provider" TEXT NOT NULL, "state_hash" TEXT NOT NULL, "verifier" TEXT NOT NULL, "nonce" TEXT NOT NULL, "redirect_uri" TEXT NOT NULL, "link_user_id" UUID, "exchange_code_hash" TEXT, "completed_user_id" UUID, "expires_at" TIMESTAMP(3) NOT NULL, "consumed_at" TIMESTAMP(3), "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX "auth_oauth_states_state_hash_key" ON "auth_oauth_states"("state_hash");
+CREATE UNIQUE INDEX "auth_oauth_states_exchange_code_hash_key" ON "auth_oauth_states"("exchange_code_hash");
+CREATE TABLE "auth_audit_logs" ("id" UUID PRIMARY KEY, "user_id" UUID REFERENCES "users"("id") ON DELETE SET NULL, "event" TEXT NOT NULL, "success" BOOLEAN NOT NULL, "ip_hash" TEXT, "device_hash" TEXT, "metadata" JSONB, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX "auth_audit_logs_event_created_at_idx" ON "auth_audit_logs"("event", "created_at");

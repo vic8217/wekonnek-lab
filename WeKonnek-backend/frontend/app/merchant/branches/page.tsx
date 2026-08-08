@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -448,6 +449,18 @@ export default function MerchantBranchesPage() {
               </div>
 
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+                <Link
+                  href={`/merchant/branches/${branch.id}/products`}
+                  className="flex-1 px-3 py-2 text-center bg-blue-50 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-100 transition-colors"
+                >
+                  Products
+                </Link>
+                <Link
+                  href={`/merchant/inventory-summary?shopId=${branch.id}`}
+                  className="flex-1 px-3 py-2 text-center bg-emerald-50 text-emerald-700 rounded-lg text-xs font-semibold hover:bg-emerald-100 transition-colors"
+                >
+                  Inventory
+                </Link>
                 <button
                   onClick={() => openEditModal(branch)}
                   className="flex-1 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200 transition-colors"

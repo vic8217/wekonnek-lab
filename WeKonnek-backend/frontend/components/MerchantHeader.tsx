@@ -15,6 +15,7 @@ interface MerchantInfo {
   logo_url: string | null;
   category_id: number | null;
   category?: { name?: string | null } | null;
+  subCategory?: { name?: string | null } | null;
 }
 
 interface ActiveShop {
@@ -87,6 +88,7 @@ export default function MerchantHeader() {
   const fullName = authUser ? `${authUser.firstName || ''} ${authUser.lastName || ''}`.trim() || 'User' : 'User';
   const userType = authUser?.role || 'Merchant';
   const categoryLabel = merchant?.category?.name?.trim() || 'Uncategorized';
+  const subcategoryLabel = merchant?.subCategory?.name?.trim();
   const displayName = isShopPortal ? activeShop?.branch_name || activeShop?.name || fullName : fullName;
   const displayRole = isShopPortal
     ? `Shop${activeShop?.merchant_name || merchant?.name ? ` · ${activeShop?.merchant_name || merchant?.name}` : ''}`
@@ -114,7 +116,7 @@ export default function MerchantHeader() {
 
           {/* Center: Business Type Badge */}
           <div className="bg-white/20 rounded-full px-3 py-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider">{categoryLabel}</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider">{categoryLabel}{subcategoryLabel ? ` · ${subcategoryLabel}` : ''}</span>
           </div>
 
           {/* Right: Store name + Actions */}
@@ -168,6 +170,12 @@ export default function MerchantHeader() {
         <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1.5">
           <span className="text-sm font-medium text-gray-600">Category:</span>
           <span className="text-sm font-bold text-gray-900">{categoryLabel}</span>
+          {subcategoryLabel && (
+            <>
+              <span className="text-gray-400" aria-hidden="true">·</span>
+              <span className="text-sm font-bold text-gray-900">{subcategoryLabel}</span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center space-x-4">

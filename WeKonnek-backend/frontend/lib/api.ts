@@ -349,9 +349,21 @@ export interface ShopProductAssignment {
   inventory: ShopInventoryBalance[];
 }
 
+export interface MerchantInventoryRow {
+  id: number; shopId: number; productId: number; variantId?: number | null; productName: string;
+  variantName: string; sku?: string; unit?: string; categoryName?: string; quantity: number;
+  reservedQuantity: number; availableQuantity: number; reorderLevel: number;
+  stockStatus: 'In Stock' | 'Low Stock' | 'Out of Stock'; unitCost: number; inventoryValue: number;
+}
+export interface MerchantInventorySummary {
+  totals: { shops: number; items: number; quantity: number; reserved: number; available: number; inventoryValue: number; lowStockItems: number; outOfStockItems: number; shopsNeedingRestock: number };
+  shops: Array<{ id: number; name: string; shopId?: string; isActive: boolean; isDefault: boolean; itemCount: number; totalQuantity: number; inventoryValue: number; lowStockCount: number; outOfStockCount: number; inventory: MerchantInventoryRow[] }>;
+}
+
 export const inventoryApi = {
+  getMerchantSummary: async (): Promise<MerchantInventorySummary> => (await apiClient.get('/backend/inventory/summary')).data,
   getShopInventory: async (): Promise<ShopProductAssignment[]> => (await apiClient.get('/backend/inventory')).data,
-  getShopProducts: async (): Promise<Array<{ product: Product; assignment: Omit<ShopProductAssignment, 'product' | 'inventory' | 'effectivePrice'> | null }>> => (await apiClient.get('/backend/inventory/products')).data,
+  getShopProducts: async (shopId?: number): Promise<Array<{ product: Product; assignment: Omit<ShopProductAssignment, 'product' | 'inventory' | 'effectivePrice'> | null }>> => (await apiClient.get('/backend/inventory/products', { params: shopId ? { shopId } : undefined })).data,
   assignProduct: async (productId: number, data: { isEnabled: boolean; priceOverride?: number | null }) => (await apiClient.patch(`/backend/inventory/products/${productId}`, data)).data,
   setReorderLevel: async (data: { productId: number; variantId?: number | null; reorderLevel: number }) => (await apiClient.patch('/backend/inventory/reorder-level', data)).data,
   recordMovement: async (data: { productId: number; variantId?: number | null; type: 'receipt' | 'sale' | 'return' | 'adjustment'; quantity: number; notes?: string }) => (await apiClient.post('/backend/inventory/movements', data)).data,

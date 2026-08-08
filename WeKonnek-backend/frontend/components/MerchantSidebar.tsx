@@ -12,7 +12,7 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
     return paths.some((path) => pathname === path || pathname?.startsWith(path + '/'));
   };
 
-  const merchantMenuItems = [
+  const merchantMenuItems: Array<{ href: string; label: string; icon: string; platinumOnly?: boolean; matches?: string[] }> = [
     { href: '/merchant/dashboard', label: 'Dashboard', icon: 'grid' },
     { href: '/merchant/analytics', label: 'Analytics', icon: 'graph' },
     { href: '/merchant/orders', label: 'In-Store Orders', icon: 'orders', platinumOnly: true },
@@ -22,7 +22,8 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
     { href: '/merchant/shop', label: 'My Shop', icon: 'cart' },
     { href: '/merchant/branches', label: 'Shops', icon: 'building' },
     { href: '/merchant/staff', label: 'Staff', icon: 'users' },
-    { href: '/merchant/inventory', label: 'Products', icon: 'box', matches: ['/merchant/products'] },
+    { href: '/merchant/products', label: 'Products', icon: 'box' },
+    { href: '/merchant/inventory-summary', label: 'Inventory', icon: 'inventory' },
     { href: '/merchant/promotions', label: 'Promotions', icon: 'megaphone' },
     { href: '/merchant/invoices', label: 'E-Invoices', icon: 'receipt' },
     { href: '/merchant/reviews', label: 'Reviews', icon: 'graph' },
@@ -38,7 +39,7 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
     'Reservations',
     'My Shop',
   ]);
-  const shopHiddenItems = new Set(['Shops', 'Staff', 'Products', 'Profile', 'Settings']);
+  const shopHiddenItems = new Set(['Shops', 'Staff', 'Products', 'Inventory', 'Profile', 'Settings']);
   const menuItems = merchantMenuItems
     .filter(item => basePath === '/shop'
       ? !shopHiddenItems.has(item.label)

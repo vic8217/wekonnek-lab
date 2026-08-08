@@ -45,7 +45,7 @@ export default function CustomerLayout({
 
   useEffect(() => {
     if (loading) return;
-    if (user) return;
+    if (user?.userType === 'customer') return;
 
     const cachedUser = getUser();
     const token = getToken();
@@ -56,7 +56,8 @@ export default function CustomerLayout({
     }
   }, [loading, user, pathname, router]);
 
-  const isGuest = !user && !getToken();
+  const customerUser = user?.userType === 'customer' ? user : undefined;
+  const isGuest = !customerUser && !getToken();
   const onPublicRoute = isPublicRoute(pathname);
   const isDashboard = pathname === '/customer/dashboard';
   const isMap = pathname === '/customer/map';

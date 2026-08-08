@@ -11,6 +11,7 @@ import {
   QrCode,
   Ticket,
   LayoutGrid,
+  House,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -39,6 +40,7 @@ const SERVICES: Service[] = [
   { name: 'Vouchers', icon: Ticket, href: '/customer/explore/vouchers', bg: 'bg-gradient-to-br from-pink-400 to-rose-600', color: 'text-white', details: 'Save as you shop', stat: '24 active' },
   { name: 'Scan', icon: QrCode, href: '/customer/explore/scan-discover', bg: 'bg-gradient-to-br from-cyan-400 to-teal-600', color: 'text-white', details: 'Scan store codes', stat: 'Open scanner' },
   { name: 'Bazaar', icon: LayoutGrid, href: '/customer/explore/bazaar', bg: 'bg-gradient-to-br from-slate-500 to-slate-700', color: 'text-white', details: 'Explore local finds', stat: '96 listings' },
+  { name: 'Property', icon: House, href: '/property', bg: 'bg-gradient-to-br from-blue-500 to-indigo-700', color: 'text-white', details: 'Homes · Condos · Lots', stat: 'Near you', badge: 'New' },
 ];
 
 const notifyComingSoon = (name: string) => toast(`${name} is coming soon!`, { icon: '🚧' });

@@ -87,7 +87,7 @@ export default function CustomerCategoriesPage() {
           {categories.map((cat) => (
             <Link
               key={cat.id}
-              href={`/customer/categories/${cat.slug}`}
+              href={cat.slug === 'property' ? '/property' : `/customer/categories/${cat.slug}`}
               className="flex items-center bg-white rounded-2xl p-3.5 shadow-sm border border-gray-100 active:scale-[0.98] transition-all duration-150"
             >
               {/* Icon circle */}
@@ -145,7 +145,7 @@ export default function CustomerCategoriesPage() {
             {categories.map((cat) => (
               <Link
                 key={cat.id}
-                href={`/customer/categories/${cat.slug}`}
+                href={cat.slug === 'property' ? '/property' : `/customer/categories/${cat.slug}`}
                 className="group relative overflow-hidden rounded-xl bg-white p-6 shadow-sm transition-all hover:shadow-md border border-gray-100"
               >
                 <div className="flex items-start justify-between">

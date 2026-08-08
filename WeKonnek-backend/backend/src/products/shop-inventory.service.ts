@@ -52,6 +52,59 @@ export class ShopInventoryService {
     }));
   }
 
+  async merchantSummary(merchantId: number) {
+    const [shops, balances] = await Promise.all([
+      this.prisma.branch.findMany({ where: { merchantId }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }] }),
+      this.prisma.shopInventory.findMany({
+        where: { merchantId },
+        include: {
+          product: { include: { category: true, variants: { include: { optionValues: { include: { optionValue: true } } } } } },
+        },
+        orderBy: [{ shopId: 'asc' }, { product: { name: 'asc' } }],
+      }),
+    ]);
+    const rows = balances.map(balance => {
+      const availableQuantity = Math.max(0, balance.quantity - balance.reservedQuantity);
+      const stockStatus = availableQuantity <= 0 ? 'Out of Stock' : availableQuantity <= balance.reorderLevel ? 'Low Stock' : 'In Stock';
+      const variant = balance.variantId ? balance.product.variants.find(item => item.id === balance.variantId) : null;
+      return {
+        id: balance.id, shopId: balance.shopId, productId: balance.productId, variantId: balance.variantId,
+        productName: balance.product.name,
+        variantName: variant?.optionValues.map(link => link.optionValue.value).join(' / ') || (variant ? variant.sku : 'Standard'),
+        sku: variant?.sku || balance.product.baseSku || balance.product.sku,
+        unit: balance.product.unit,
+        categoryName: balance.product.category?.name,
+        quantity: balance.quantity, reservedQuantity: balance.reservedQuantity, availableQuantity,
+        reorderLevel: balance.reorderLevel, stockStatus,
+        unitCost: Number(balance.product.costPrice || 0), inventoryValue: balance.quantity * Number(balance.product.costPrice || 0),
+      };
+    });
+    const shopSummaries = shops.map(shop => {
+      const inventory = rows.filter(row => row.shopId === shop.id);
+      return {
+        id: shop.id, name: shop.name, shopId: shop.shopId, isActive: shop.isActive, isDefault: shop.isDefault,
+        itemCount: inventory.length, totalQuantity: inventory.reduce((sum, row) => sum + row.quantity, 0),
+        inventoryValue: inventory.reduce((sum, row) => sum + row.inventoryValue, 0),
+        lowStockCount: inventory.filter(row => row.stockStatus === 'Low Stock').length,
+        outOfStockCount: inventory.filter(row => row.stockStatus === 'Out of Stock').length,
+        inventory,
+      };
+    });
+    return {
+      totals: {
+        shops: shopSummaries.length, items: rows.length,
+        quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+        reserved: rows.reduce((sum, row) => sum + row.reservedQuantity, 0),
+        available: rows.reduce((sum, row) => sum + row.availableQuantity, 0),
+        inventoryValue: rows.reduce((sum, row) => sum + row.inventoryValue, 0),
+        lowStockItems: rows.filter(row => row.stockStatus === 'Low Stock').length,
+        outOfStockItems: rows.filter(row => row.stockStatus === 'Out of Stock').length,
+        shopsNeedingRestock: shopSummaries.filter(shop => shop.lowStockCount + shop.outOfStockCount > 0).length,
+      },
+      shops: shopSummaries,
+    };
+  }
+
   async shopProducts(merchantId: number, shopId: number) {
     await this.assertShop(merchantId, shopId);
     const [products, assignments] = await Promise.all([

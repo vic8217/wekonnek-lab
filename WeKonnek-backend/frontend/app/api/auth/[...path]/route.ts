@@ -18,6 +18,9 @@ async function proxyAuth(request: NextRequest, context: { params: Promise<{ path
         accept: 'application/json',
         ...(request.headers.get('content-type') ? { 'content-type': request.headers.get('content-type')! } : {}),
         ...(request.headers.get('authorization') ? { authorization: request.headers.get('authorization')! } : {}),
+        ...(request.headers.get('x-device-id') ? { 'x-device-id': request.headers.get('x-device-id')! } : {}),
+        ...(request.headers.get('user-agent') ? { 'user-agent': request.headers.get('user-agent')! } : {}),
+        ...(request.headers.get('cookie') ? { cookie: request.headers.get('cookie')! } : {}),
       },
       body,
       cache: 'no-store',
@@ -34,7 +37,10 @@ async function proxyAuth(request: NextRequest, context: { params: Promise<{ path
     }
 
     try {
-      return NextResponse.json(JSON.parse(text), { status: response.status });
+      const nextResponse = NextResponse.json(JSON.parse(text), { status: response.status });
+      const setCookie = response.headers.get('set-cookie');
+      if (setCookie) nextResponse.headers.set('set-cookie', setCookie);
+      return nextResponse;
     } catch {
       return NextResponse.json({ message: 'Authentication service returned an invalid response.' }, { status: 502 });
     }
