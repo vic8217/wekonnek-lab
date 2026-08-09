@@ -33,6 +33,7 @@ export default function EditProfilePage() {
     phone: "",
     avatarUrl: "",
   });
+  const [initialForm, setInitialForm] = useState<ProfileForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -60,15 +61,18 @@ export default function EditProfilePage() {
 
       const data = await res.json();
       const profile = data.data || data;
-      setForm({
+      const loadedProfile = {
         firstName: profile.firstName || profile.first_name || "",
         lastName: profile.lastName || profile.last_name || "",
         email: profile.email || "",
         phone: profile.phone || "",
         avatarUrl: profile.avatarUrl || profile.avatar_url || "",
-      });
+      };
+      setForm(loadedProfile);
+      setInitialForm(loadedProfile);
     } catch {
       setForm(MOCK_PROFILE);
+      setInitialForm(MOCK_PROFILE);
     } finally {
       setLoading(false);
     }
@@ -76,6 +80,10 @@ export default function EditProfilePage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isDirty) {
+      router.push("/customer/profile");
+      return;
+    }
     setSaving(true);
     try {
       const token = getToken();
@@ -93,6 +101,7 @@ export default function EditProfilePage() {
       });
       if (!res.ok) throw new Error("Failed");
       await refreshAuth();
+      setInitialForm(form);
       setToast("Profile updated successfully!");
     } catch {
       setToast("Failed to save. Please try again.");
@@ -107,6 +116,9 @@ export default function EditProfilePage() {
 
   const initials =
     (form.firstName?.[0] || "") + (form.lastName?.[0] || "") || "?";
+  const isDirty =
+    initialForm !== null &&
+    JSON.stringify(form) !== JSON.stringify(initialForm);
 
   if (loading) {
     return (
@@ -276,8 +288,10 @@ export default function EditProfilePage() {
               </svg>
               Saving...
             </span>
-          ) : (
+          ) : isDirty ? (
             "Save Changes"
+          ) : (
+            "Close"
           )}
         </button>
       </form>

@@ -9,6 +9,7 @@ node_modules/
 out/
 build/
 dist/
+dist-dev/
 *.tsbuildinfo
 
 # ─── Testing / Coverage ───────────────────────────────────
