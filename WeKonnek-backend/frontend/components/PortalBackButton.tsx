@@ -89,7 +89,6 @@ const CONFIG: Record<string, PortalBackConfig> = {
       '/customer/categories',
       '/customer/promotions',
       '/customer/reviews',
-      '/customer/menu',
       '/customer/vouchers',
       '/customer/addresses',
       '/customer/scan',

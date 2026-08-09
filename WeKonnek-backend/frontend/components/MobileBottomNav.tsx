@@ -10,6 +10,7 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
   const { user: authUser } = useAuth();
   const [hasStoredCustomerSession, setHasStoredCustomerSession] = useState(false);
+  const [openOrderCount, setOpenOrderCount] = useState(0);
 
   useEffect(() => {
     const syncSession = () => {
@@ -26,6 +27,25 @@ export default function MobileBottomNav() {
   }, []);
 
   const isCustomerSignedIn = authUser?.userType === 'customer' || hasStoredCustomerSession;
+
+  useEffect(() => {
+    if (!isCustomerSignedIn) { setOpenOrderCount(0); return; }
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const token = getToken();
+        const response = await fetch('/api/backend/orders', { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: 'no-store' });
+        if (!response.ok) return;
+        const body = await response.json();
+        const rows = Array.isArray(body) ? body : body.data || [];
+        const terminal = new Set(['completed', 'delivered', 'cancelled']);
+        setOpenOrderCount(rows.filter((order: { status?: string }) => !terminal.has(String(order.status || '').toLowerCase())).length);
+      } catch { /* Keep navigation usable when orders are unavailable. */ }
+    };
+    load();
+    window.addEventListener('focus', load);
+    return () => { controller.abort(); window.removeEventListener('focus', load); };
+  }, [isCustomerSignedIn, pathname]);
 
   const isActive = (path: string) => {
     if (path === '/customer/dashboard') {
@@ -73,7 +93,7 @@ export default function MobileBottomNav() {
           href={ordersHref}
           className="flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200"
         >
-          <svg
+          <span className="relative"><svg
             className={`w-6 h-6 transition-colors duration-200 ${isActive('/customer/orders') ? 'text-[#DB0002]' : 'text-gray-400'}`}
             fill="none"
             stroke="currentColor"
@@ -85,7 +105,7 @@ export default function MobileBottomNav() {
               strokeWidth={1.8}
               d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
             />
-          </svg>
+          </svg>{openOrderCount > 0 && <span className="absolute -right-2 -top-2 grid min-h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-white bg-[#DB0002] px-1 text-[9px] font-black text-white">{openOrderCount > 99 ? '99+' : openOrderCount}</span>}</span>
           <span className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive('/customer/orders') ? 'text-[#DB0002]' : 'text-gray-400'}`}>
             Orders
           </span>
@@ -132,7 +152,7 @@ export default function MobileBottomNav() {
           className="flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200"
         >
           <svg
-            className={`w-6 h-6 transition-colors duration-200 ${isActive('/customer/profile') || isActive('/customer/menu') ? 'text-[#DB0002]' : 'text-gray-400'}`}
+            className={`w-6 h-6 transition-colors duration-200 ${isActive('/customer/profile') ? 'text-[#DB0002]' : 'text-gray-400'}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -144,7 +164,7 @@ export default function MobileBottomNav() {
               d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
             />
           </svg>
-          <span className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive('/customer/profile') || isActive('/customer/menu') ? 'text-[#DB0002]' : 'text-gray-400'}`}>
+          <span className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive('/customer/profile') ? 'text-[#DB0002]' : 'text-gray-400'}`}>
             {isCustomerSignedIn ? 'Profile' : 'Sign In'}
           </span>
         </Link>

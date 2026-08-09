@@ -9,7 +9,9 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000, // 10 second timeout
+  // Development route compilation can briefly exceed ten seconds. Keep a
+  // finite timeout without treating normal cold compilation as an API fault.
+  timeout: 30000,
 });
 
 // Attach the JWT (when present) so authenticated proxy routes can forward it.
@@ -229,12 +231,12 @@ export interface CreateMerchantData {
 }
 
 export const merchantsApi = {
-  getAll: async (): Promise<Merchant[]> => {
-    const response = await apiClient.get('/merchants');
+  getAll: async (signal?: AbortSignal): Promise<Merchant[]> => {
+    const response = await apiClient.get('/merchants', { signal });
     return response.data;
   },
-  search: async (params: SearchMerchantsParams): Promise<PaginatedResponse<Merchant>> => {
-    const response = await apiClient.get('/merchants/search', { params });
+  search: async (params: SearchMerchantsParams, signal?: AbortSignal): Promise<PaginatedResponse<Merchant>> => {
+    const response = await apiClient.get('/merchants/search', { params, signal });
     return response.data;
   },
   getById: async (id: number): Promise<Merchant> => {

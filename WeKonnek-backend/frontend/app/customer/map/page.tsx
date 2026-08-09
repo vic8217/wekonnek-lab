@@ -2,7 +2,9 @@
 
 import { type FormEvent, useCallback, useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { merchantsApi, Merchant } from '@/lib/api';
 import type L from 'leaflet';
 
@@ -104,6 +106,7 @@ const distanceInKm = (from: [number, number], to: [number, number]) => {
 };
 
 export default function CustomerMapPage() {
+  const router = useRouter();
   const [selectedCategory, setSelectedCategory] = useState('');
   const selectedCategoryLabel = selectedCategory ? categoryLabel(selectedCategory) : '';
   const [merchants, setMerchants] = useState<Merchant[]>([]);
@@ -307,8 +310,16 @@ export default function CustomerMapPage() {
     <div className="relative">
       {/* Mobile Map View */}
       <div className="px-0 md:px-6 xl:hidden">
+        <button
+          type="button"
+          onClick={() => window.history.length > 1 ? router.back() : router.push('/customer/dashboard')}
+          aria-label="Go back"
+          className="absolute left-3 top-2 z-[1001] grid size-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg md:left-9"
+        >
+          <ArrowLeft size={20} />
+        </button>
         {/* Search overlay */}
-        <div className="absolute left-3 right-3 top-2 z-[1000] md:left-9 md:right-9">
+        <div className="absolute left-16 right-3 top-2 z-[1000] md:left-[5.5rem] md:right-9">
           <form onSubmit={searchAddress} className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

@@ -1,0 +1,2 @@
+import PropertyListingForm from '@/components/listings/PropertyListingForm';
+export default async function EditPropertyListingPage({params,searchParams}:{params:Promise<{listingId:string}>;searchParams:Promise<{mode?:string}>}){const [{listingId},query]=await Promise.all([params,searchParams]);return <PropertyListingForm mode="edit" listingId={listingId} displayMode={query.mode==='embedded'?'embedded':'pwa'}/>;}

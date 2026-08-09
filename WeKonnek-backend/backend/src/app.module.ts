@@ -32,6 +32,7 @@ import { MerchantStaffModule } from './merchant-staff/merchant-staff.module';
 import { FloorTablesModule } from './floor-tables/floor-tables.module';
 import { BazaarPromosModule } from './bazaar-promos/bazaar-promos.module';
 import { BazaarListingsModule } from './bazaar-listings/bazaar-listings.module';
+import { ListingInquiriesModule } from './listing-inquiries/listing-inquiries.module';
 import { PropertyModule } from './property/property.module';
 
 // ─── WeKonnek Core Modules (merged from standalone backend) ─
@@ -63,7 +64,10 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
       fallbackLanguage: 'en',
       loaderOptions: {
         path: path.join(__dirname, '..', 'i18n'),
-        watch: true,
+        // Nest already copies and watches these assets (see nest-cli.json).
+        // A second watcher races with deleteOutDir during rebuilds and repeatedly
+        // scans dist/i18n while that directory is temporarily absent.
+        watch: false,
       },
       resolvers: [
         new HeaderResolver(['x-lang']),
@@ -93,6 +97,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     FloorTablesModule,
     BazaarPromosModule,
     BazaarListingsModule,
+    ListingInquiriesModule,
     PropertyModule,
 
     // ─── WeKonnek Core ────────────────────────────

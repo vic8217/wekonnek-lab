@@ -11,14 +11,15 @@ import { getTotalCartCount, getActiveCartMerchantIds, onCartChange } from '@/lib
 
 export default function CustomerHeader({
   hideMobileSearch = false,
+  showCart = false,
 }: {
   hideMobileSearch?: boolean;
+  showCart?: boolean;
 }) {
   const router = useRouter();
   const { user: authUser, signOut } = useAuth();
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-  const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [cartCount, setCartCount] = useState(0);
   const [hasCartItems, setHasCartItems] = useState(false);
@@ -77,14 +78,7 @@ export default function CustomerHeader({
               </span>
             </Link>
             <div className="flex items-center">
-              {!hideMobileSearch && (
-                <button className="p-2" title="Search" onClick={() => setShowMobileSearch(!showMobileSearch)}>
-                  <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </button>
-              )}
-              <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
+              {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
                 <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
                 </svg>
@@ -93,7 +87,7 @@ export default function CustomerHeader({
                     {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}
-              </button>
+              </button>}
             </div>
           </div>
         </div>
@@ -137,24 +131,6 @@ export default function CustomerHeader({
           </form>
         </div>}
 
-        {/* Expandable Mobile Search */}
-        {!hideMobileSearch && showMobileSearch && (
-          <div className="px-4 pb-3">
-            <form onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim()) { router.push(`/customer/search?q=${searchQuery}`); setShowMobileSearch(false); } }} className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search for food, services..."
-                className="w-full pl-4 pr-12 py-3 rounded-xl bg-gray-100 text-sm text-gray-700 placeholder-gray-400 outline-none focus:ring-2 focus:ring-[#DB0002]/20 border border-gray-200"
-                autoFocus
-              />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <VoiceSearchButton onResult={(text) => setSearchQuery(text)} />
-              </div>
-            </form>
-          </div>
-        )}
       </header>
 
       {/* ========== DESKTOP HEADER ========== */}
@@ -219,7 +195,7 @@ export default function CustomerHeader({
               </>
             ) : (
               <div className="flex items-center space-x-3">
-                <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
+                {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
                   <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
                   </svg>
@@ -228,7 +204,7 @@ export default function CustomerHeader({
                       {cartCount > 99 ? '99+' : cartCount}
                     </span>
                   )}
-                </button>
+                </button>}
                 <Link
                   href="/auth/login"
                   className="px-4 py-2 bg-[#DB0002] text-white text-sm font-semibold rounded-lg hover:bg-[#B80002] transition-colors"

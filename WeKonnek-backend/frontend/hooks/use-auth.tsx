@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useCallback,
   type ReactNode,
@@ -184,9 +185,10 @@ const AuthContext = createContext<AuthState>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null | undefined>(null);
   const [loading, setLoading] = useState(true);
+  const authRequestRef = useRef<Promise<void> | null>(null);
   const router = useRouter();
 
-  const loadUser = useCallback(async () => {
+  const performLoadUser = useCallback(async () => {
     try {
       let token = getToken();
       if (!token) {
@@ -278,6 +280,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  // Auth is consumed by the root provider, route guards, layouts and modals.
+  // Collapse simultaneous refreshes into one request so a slow/unavailable API
+  // cannot exhaust the browser's connection pool with duplicate `/auth/me` calls.
+  const loadUser = useCallback(() => {
+    if (authRequestRef.current) return authRequestRef.current;
+
+    const request = performLoadUser().finally(() => {
+      if (authRequestRef.current === request) authRequestRef.current = null;
+    });
+    authRequestRef.current = request;
+    return request;
+  }, [performLoadUser]);
 
   const refreshAuth = useCallback(async () => {
     const cached = getUser();

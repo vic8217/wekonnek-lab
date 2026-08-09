@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/hooks/use-auth';
 import AdminSidebar from '@/components/AdminSidebar';
@@ -20,12 +20,8 @@ export default function AdminLayout({
 }
 
 function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, refreshAuth } = useRequireAuth(['admin', 'staff'], '/admin/login');
+  const { user, loading } = useRequireAuth(['admin', 'staff'], '/admin/login');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    if (!loading && !user) refreshAuth();
-  }, [loading, user, refreshAuth]);
 
   if (loading || !user) {
     return (

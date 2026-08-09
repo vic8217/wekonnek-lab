@@ -18,13 +18,17 @@ interface Order {
   created_at: string;
 }
 
+type OrderFilter = 'open' | 'pending' | 'completed';
+const PENDING_STATUSES = new Set(['pending']);
+const COMPLETED_STATUSES = new Set(['completed', 'delivered', 'cancelled']);
+
 export default function CustomerOrdersPage() {
   const { user: authUser } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'orders' | 'reservations'>('orders');
-  const [orderFilter, setOrderFilter] = useState<'active' | 'past'>('active');
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('open');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,11 +36,12 @@ export default function CustomerOrdersPage() {
   }, [authUser]);
 
   useEffect(() => {
-    if (orderFilter === 'active') {
-      setOrders(allOrders.filter(o => ['pending', 'processing', 'preparing', 'ready', 'out_for_delivery', 'bill_out'].includes(o.status)));
-    } else {
-      setOrders(allOrders.filter(o => ['completed', 'cancelled'].includes(o.status)));
-    }
+    setOrders(allOrders.filter(order => {
+      const status = String(order.status).toLowerCase();
+      if (orderFilter === 'pending') return PENDING_STATUSES.has(status);
+      if (orderFilter === 'completed') return COMPLETED_STATUSES.has(status);
+      return !PENDING_STATUSES.has(status) && !COMPLETED_STATUSES.has(status);
+    }));
   }, [orderFilter, allOrders]);
 
   const fetchOrders = async () => {
@@ -120,8 +125,9 @@ export default function CustomerOrdersPage() {
     return new Date(dateStr).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
   };
 
-  const activeCount = allOrders.filter(o => ['pending', 'processing', 'preparing', 'ready', 'out_for_delivery', 'bill_out'].includes(o.status)).length;
-  const pastCount = allOrders.filter(o => ['completed', 'cancelled'].includes(o.status)).length;
+  const pendingCount = allOrders.filter(order => PENDING_STATUSES.has(String(order.status).toLowerCase())).length;
+  const completedCount = allOrders.filter(order => COMPLETED_STATUSES.has(String(order.status).toLowerCase())).length;
+  const openCount = allOrders.length - pendingCount - completedCount;
 
   if (loading) {
     return (
@@ -172,24 +178,30 @@ export default function CustomerOrdersPage() {
           {activeTab === 'orders' && (
             <div className="flex gap-2 px-4 py-2.5 border-b border-gray-100">
               <button
-                onClick={() => setOrderFilter('active')}
+                onClick={() => setOrderFilter('open')}
                 className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                  orderFilter === 'active'
+                  orderFilter === 'open'
                     ? 'bg-[#DB0002] text-white shadow-sm'
                     : 'bg-gray-100 text-gray-500'
                 }`}
               >
-                Active ({activeCount})
+                Open ({openCount})
               </button>
               <button
-                onClick={() => setOrderFilter('past')}
+                onClick={() => setOrderFilter('pending')}
                 className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                  orderFilter === 'past'
+                  orderFilter === 'pending'
                     ? 'bg-[#DB0002] text-white shadow-sm'
                     : 'bg-gray-100 text-gray-500'
                 }`}
               >
-                History ({pastCount})
+                Pending ({pendingCount})
+              </button>
+              <button
+                onClick={() => setOrderFilter('completed')}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${orderFilter === 'completed' ? 'bg-[#DB0002] text-white shadow-sm' : 'bg-gray-100 text-gray-500'}`}
+              >
+                Completed ({completedCount})
               </button>
             </div>
           )}
@@ -343,20 +355,26 @@ export default function CustomerOrdersPage() {
         <>
           <div className="flex space-x-2">
             <button
-              onClick={() => setOrderFilter('active')}
+              onClick={() => setOrderFilter('open')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  orderFilter === 'active' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  orderFilter === 'open' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-                Active ({activeCount})
+                Open ({openCount})
             </button>
             <button
-              onClick={() => setOrderFilter('past')}
+              onClick={() => setOrderFilter('pending')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  orderFilter === 'past' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  orderFilter === 'pending' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-                Past ({pastCount})
+                Pending ({pendingCount})
+            </button>
+            <button
+              onClick={() => setOrderFilter('completed')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${orderFilter === 'completed' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            >
+                Completed ({completedCount})
             </button>
           </div>
           <div className="space-y-4">

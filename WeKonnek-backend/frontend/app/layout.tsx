@@ -1,16 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import 'leaflet/dist/leaflet.css';
-import RegisterSW from './register-sw';
-import OfflineIndicator from '@/components/OfflineIndicator';
-import PWAInstallPrompt from '@/components/PWAInstallPrompt';
-import ConditionalFooter from '@/components/ConditionalFooter';
-import { Providers } from './providers';
-import { Toaster } from 'react-hot-toast';
+import "leaflet/dist/leaflet.css";
+import RegisterSW from "./register-sw";
+import OfflineIndicator from "@/components/OfflineIndicator";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
+import ConditionalFooter from "@/components/ConditionalFooter";
+import { Providers } from "./providers";
+import { Toaster } from "react-hot-toast";
 
 export const metadata: Metadata = {
   title: "WeKonnek - Local Discovery App",
-  description: "Your trusted community trading system connecting local services and products",
+  description:
+    "Your trusted community trading system connecting local services and products",
   manifest: "/manifest.json",
   icons: {
     icon: "/favicon.ico",
@@ -28,12 +29,14 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "WeKonnek",
     title: "WeKonnek - Local Discovery App",
-    description: "Your trusted community trading system connecting local services and products",
+    description:
+      "Your trusted community trading system connecting local services and products",
   },
   twitter: {
     card: "summary",
     title: "WeKonnek - Local Discovery App",
-    description: "Your trusted community trading system connecting local services and products",
+    description:
+      "Your trusted community trading system connecting local services and products",
   },
 };
 
@@ -60,7 +63,7 @@ export default function RootLayout({
                 var message = String((value && value.message) || value || '');
                 var stack = String((value && value.stack) || '');
                 return /Failed to connect to MetaMask/i.test(message) ||
-                  (/chrome-extension:\/\//i.test(stack) && /MetaMask|Object\.connect|inpage\.js/i.test(message + stack));
+                  (stack.indexOf('chrome-extension://') !== -1 && /MetaMask|Object\.connect|inpage\.js/i.test(message + stack));
               }
               window.addEventListener('unhandledrejection', function(event) {
                 if (isInjectedWalletError(event.reason)) {
@@ -88,9 +91,13 @@ export default function RootLayout({
             position="top-center"
             toastOptions={{
               duration: 3000,
-              style: { borderRadius: '12px', padding: '12px 16px', fontSize: '14px' },
-              success: { iconTheme: { primary: '#16a34a', secondary: '#fff' } },
-              error: { iconTheme: { primary: '#DB0002', secondary: '#fff' } },
+              style: {
+                borderRadius: "12px",
+                padding: "12px 16px",
+                fontSize: "14px",
+              },
+              success: { iconTheme: { primary: "#16a34a", secondary: "#fff" } },
+              error: { iconTheme: { primary: "#DB0002", secondary: "#fff" } },
             }}
           />
           <RegisterSW />

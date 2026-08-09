@@ -1,0 +1,2 @@
+import BazaarListingForm from '@/components/listings/BazaarListingForm';
+export default async function EditBazaarListingPage({params,searchParams}:{params:Promise<{listingId:string}>;searchParams:Promise<{mode?:string}>}){const [{listingId},query]=await Promise.all([params,searchParams]);return <BazaarListingForm mode="edit" listingId={listingId} displayMode={query.mode==='embedded'?'embedded':'pwa'}/>;}

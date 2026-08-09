@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
@@ -11,6 +11,7 @@ export class MerchantCategoriesController {
   constructor(private readonly service: MerchantCategoriesService) {}
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'List merchant business categories and subcategories' })
   findAll() { return this.service.findAll(); }
 
@@ -30,9 +31,11 @@ export class MerchantCategoriesController {
   ) { return this.service.createSubCategory(categoryId, body); }
 
   @Get('slug/:slug')
+  @Header('Cache-Control', 'no-store')
   findBySlug(@Param('slug') slug: string) { return this.service.findBySlug(slug); }
 
   @Get(':categoryId/sub-categories')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'List business subcategories for a merchant category' })
   findSubCategories(@Param('categoryId', ParseIntPipe) categoryId: number) { return this.service.findSubCategories(categoryId); }
 }

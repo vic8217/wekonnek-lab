@@ -1,15 +1,15 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Home, Map, Package, QrCode, Tag, UserRound } from 'lucide-react';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Home, Map, Package, QrCode, Tag, UserRound } from "lucide-react";
 
 const navItems = [
-  { href: '/customer/dashboard', label: 'Home', icon: Home },
-  { href: '/customer/map', label: 'Explore Map', icon: Map },
-  { href: '/customer/deals', label: 'Vouchers & Deals', icon: Tag },
-  { href: '/customer/orders', label: 'My Orders', icon: Package },
-  { href: '/customer/menu', label: 'More', icon: UserRound },
+  { href: "/customer/dashboard", label: "Home", icon: Home },
+  { href: "/customer/map", label: "Explore Map", icon: Map },
+  { href: "/customer/deals", label: "Vouchers & Deals", icon: Tag },
+  { href: "/customer/orders", label: "My Orders", icon: Package },
+  { href: "/customer/profile", label: "Profile", icon: UserRound },
 ];
 
 export default function CustomerSidebar() {
@@ -26,8 +26,8 @@ export default function CustomerSidebar() {
               href={href}
               className={`flex min-h-12 items-center gap-3 rounded-xl px-4 text-sm font-semibold transition-colors ${
                 active
-                  ? 'bg-[#ff0719] text-white shadow-lg shadow-red-200'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  ? "bg-[#ff0719] text-white shadow-lg shadow-red-200"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}
             >
               <Icon size={19} strokeWidth={1.9} />

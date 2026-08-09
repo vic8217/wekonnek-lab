@@ -745,22 +745,24 @@ model User {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
 
-  preferredZone      Zone?                    @relation("RiderPreferredZone", fields: [preferredZoneId], references: [id])
-  zones              RiderZone[]              @relation("RiderZones")
-  addresses          Address[]
-  wallet             Wallet?
-  loyaltyAccount     LoyaltyAccount?
-  customerOrders     Order[]                  @relation("OrderCustomer")
-  riderOrders        Order[]                  @relation("OrderRider")
-  voucherRedemptions VoucherRedemption[]
-  merchantStaff      MerchantStaff[]
-  bazaarListings     BazaarListing[]
-  authIdentities     AuthIdentity[]
-  authAuditLogs      AuthAuditLog[]
-  propertyListings   PropertyListing[]        @relation("PropertyOwner")
-  savedProperties    SavedProperty[]
-  propertyViewings   PropertyViewingRequest[] @relation("PropertyRequester")
-  propertyReports    PropertyReport[]         @relation("PropertyReporter")
+  preferredZone            Zone?                    @relation("RiderPreferredZone", fields: [preferredZoneId], references: [id])
+  zones                    RiderZone[]              @relation("RiderZones")
+  addresses                Address[]
+  wallet                   Wallet?
+  loyaltyAccount           LoyaltyAccount?
+  customerOrders           Order[]                  @relation("OrderCustomer")
+  riderOrders              Order[]                  @relation("OrderRider")
+  voucherRedemptions       VoucherRedemption[]
+  merchantStaff            MerchantStaff[]
+  bazaarListings           BazaarListing[]
+  authIdentities           AuthIdentity[]
+  authAuditLogs            AuthAuditLog[]
+  propertyListings         PropertyListing[]        @relation("PropertyOwner")
+  savedProperties          SavedProperty[]
+  propertyViewings         PropertyViewingRequest[] @relation("PropertyRequester")
+  propertyReports          PropertyReport[]         @relation("PropertyReporter")
+  listingInquiriesReceived ListingInquiry[]         @relation("ListingInquiryOwner")
+  listingInquiriesSent     ListingInquiry[]         @relation("ListingInquirySender")
 
   @@map("users")
 }
@@ -970,6 +972,37 @@ model BazaarListing {
   @@map("bazaar_listings")
 }
 
+enum ListingInquiryType {
+  BAZAAR
+  PROPERTY
+}
+
+enum ListingInquiryStatus {
+  OPEN
+  RESPONDED
+  CLOSED
+}
+
+model ListingInquiry {
+  id             String               @id @default(uuid()) @db.Uuid
+  listingId      String               @map("listing_id") @db.Uuid
+  listingType    ListingInquiryType   @map("listing_type")
+  listingOwnerId String               @map("listing_owner_id") @db.Uuid
+  inquirerId     String               @map("inquirer_id") @db.Uuid
+  message        String               @db.Text
+  status         ListingInquiryStatus @default(OPEN)
+  readAt         DateTime?            @map("read_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  listingOwner   User                 @relation("ListingInquiryOwner", fields: [listingOwnerId], references: [id], onDelete: Cascade)
+  inquirer       User                 @relation("ListingInquirySender", fields: [inquirerId], references: [id], onDelete: Cascade)
+
+  @@index([listingOwnerId, listingType, readAt])
+  @@index([listingId, listingType, createdAt])
+  @@index([inquirerId, createdAt])
+  @@map("listing_inquiries")
+}
+
 enum PropertyTransactionType {
   FOR_SALE
   FOR_RENT
@@ -997,7 +1030,9 @@ enum PropertyListingStatus {
 
 enum PropertySellerType {
   OWNER
+  AUTHORIZED_REPRESENTATIVE
   BROKER
+  SALESPERSON
   DEVELOPER
 }
 
@@ -1040,49 +1075,62 @@ model PropertyListingPlan {
 }
 
 model PropertyListing {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  ownerId             String                  @map("owner_id") @db.Uuid
-  propertyTypeId      String                  @map("property_type_id") @db.Uuid
-  planId              String?                 @map("plan_id") @db.Uuid
-  title               String
-  slug                String                  @unique
-  description         String                  @db.Text
-  transactionType     PropertyTransactionType @map("transaction_type")
-  price               Decimal                 @db.Decimal(14, 2)
-  currency            String                  @default("PHP")
-  pricePeriod         PropertyPricePeriod     @default(NONE) @map("price_period")
-  bedrooms            Int?
-  bathrooms           Decimal?                @db.Decimal(4, 1)
-  parkingSpaces       Int?                    @map("parking_spaces")
-  floorArea           Decimal?                @map("floor_area") @db.Decimal(12, 2)
-  lotArea             Decimal?                @map("lot_area") @db.Decimal(12, 2)
-  furnishedStatus     String?                 @map("furnished_status")
-  addressLine         String?                 @map("address_line")
-  barangay            String?
-  city                String
-  province            String
-  postalCode          String?                 @map("postal_code")
-  latitude            Decimal?                @db.Decimal(10, 7)
-  longitude           Decimal?                @db.Decimal(10, 7)
-  showExactLocation   Boolean                 @default(false) @map("show_exact_location")
-  contactName         String?                 @map("contact_name")
-  contactPhone        String?                 @map("contact_phone")
-  contactEmail        String?                 @map("contact_email")
-  sellerType          PropertySellerType      @default(OWNER) @map("seller_type")
-  agencyName          String?                 @map("agency_name")
-  prcLicenseNumber    String?                 @map("prc_license_number")
-  isVerified          Boolean                 @default(false) @map("is_verified")
-  isFeatured          Boolean                 @default(false) @map("is_featured")
-  featuredUntil       DateTime?               @map("featured_until")
-  listingStatus       PropertyListingStatus   @default(DRAFT) @map("listing_status")
-  statusBeforeSuspend PropertyListingStatus?  @map("status_before_suspend")
-  moderationReason    String?                 @map("moderation_reason")
-  availableFrom       DateTime?               @map("available_from") @db.Date
-  publishedAt         DateTime?               @map("published_at")
-  expiresAt           DateTime?               @map("expires_at")
-  viewCount           Int                     @default(0) @map("view_count")
-  createdAt           DateTime                @default(now()) @map("created_at")
-  updatedAt           DateTime                @updatedAt @map("updated_at")
+  id                      String                  @id @default(uuid()) @db.Uuid
+  ownerId                 String                  @map("owner_id") @db.Uuid
+  propertyTypeId          String                  @map("property_type_id") @db.Uuid
+  planId                  String?                 @map("plan_id") @db.Uuid
+  listingFee              Decimal                 @default(0) @map("listing_fee") @db.Decimal(12, 2)
+  paymentStatus           String                  @default("unpaid") @map("payment_status")
+  paymentGateway          String?                 @map("payment_gateway")
+  paymentMethod           String?                 @map("payment_method")
+  paymentRef              String?                 @map("payment_ref")
+  paymentUrl              String?                 @map("payment_url")
+  title                   String
+  slug                    String                  @unique
+  description             String                  @db.Text
+  transactionType         PropertyTransactionType @map("transaction_type")
+  price                   Decimal                 @db.Decimal(14, 2)
+  currency                String                  @default("PHP")
+  pricePeriod             PropertyPricePeriod     @default(NONE) @map("price_period")
+  bedrooms                Int?
+  bathrooms               Decimal?                @db.Decimal(4, 1)
+  parkingSpaces           Int?                    @map("parking_spaces")
+  floorArea               Decimal?                @map("floor_area") @db.Decimal(12, 2)
+  lotArea                 Decimal?                @map("lot_area") @db.Decimal(12, 2)
+  furnishedStatus         String?                 @map("furnished_status")
+  addressLine             String?                 @map("address_line")
+  barangay                String?
+  city                    String
+  province                String
+  postalCode              String?                 @map("postal_code")
+  latitude                Decimal?                @db.Decimal(10, 7)
+  longitude               Decimal?                @db.Decimal(10, 7)
+  showExactLocation       Boolean                 @default(false) @map("show_exact_location")
+  contactName             String?                 @map("contact_name")
+  contactPhone            String?                 @map("contact_phone")
+  contactEmail            String?                 @map("contact_email")
+  sellerType              PropertySellerType      @default(OWNER) @map("seller_type")
+  agencyName              String?                 @map("agency_name")
+  prcLicenseNumber        String?                 @map("prc_license_number")
+  isVerified              Boolean                 @default(false) @map("is_verified")
+  isFeatured              Boolean                 @default(false) @map("is_featured")
+  featuredUntil           DateTime?               @map("featured_until")
+  listingStatus           PropertyListingStatus   @default(DRAFT) @map("listing_status")
+  statusBeforeSuspend     PropertyListingStatus?  @map("status_before_suspend")
+  moderationReason        String?                 @map("moderation_reason")
+  availableFrom           DateTime?               @map("available_from") @db.Date
+  negotiable              Boolean                 @default(false)
+  minimumLeaseTermMonths  Int?                    @map("minimum_lease_term_months")
+  securityDepositMonths   Int?                    @map("security_deposit_months")
+  advanceRentMonths       Int?                    @map("advance_rent_months")
+  associationDuesIncluded Boolean?                @map("association_dues_included")
+  utilitiesIncluded       Boolean?                @map("utilities_included")
+  propertyDetails         Json?                   @map("property_details")
+  publishedAt             DateTime?               @map("published_at")
+  expiresAt               DateTime?               @map("expires_at")
+  viewCount               Int                     @default(0) @map("view_count")
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
 
   owner           User                     @relation("PropertyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   propertyType    PropertyType             @relation(fields: [propertyTypeId], references: [id])
@@ -1099,6 +1147,7 @@ model PropertyListing {
   @@index([latitude, longitude])
   @@index([listingStatus, isFeatured, createdAt])
   @@index([ownerId, listingStatus])
+  @@index([paymentStatus])
   @@map("property_listings")
 }
 

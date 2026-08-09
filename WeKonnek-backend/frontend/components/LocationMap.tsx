@@ -52,9 +52,12 @@ export default function LocationMap({
     map.on('click', event => callbacksRef.current.onMapClick(event.latlng.lat, event.latlng.lng));
     mapRef.current = map;
 
-    const resizeTimer = window.setTimeout(() => map.invalidateSize(), 0);
+    const resizeTimers = [0, 150, 500].map(delay => window.setTimeout(() => map.invalidateSize(), delay));
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
+    resizeObserver.observe(container);
     return () => {
-      window.clearTimeout(resizeTimer);
+      resizeTimers.forEach(window.clearTimeout);
+      resizeObserver.disconnect();
       markerRef.current = null;
       mapRef.current = null;
       map.remove();
@@ -83,5 +86,5 @@ export default function LocationMap({
     map.setView(selectedLocation, selectedZoom, { animate: true });
   }, [selectedLocation, selectedZoom]);
 
-  return <div ref={containerRef} className="h-full w-full" aria-label="Select coverage location on map" />;
+  return <div ref={containerRef} className="h-full w-full" role="application" aria-label="Select a location by dropping or dragging the map pin" />;
 }

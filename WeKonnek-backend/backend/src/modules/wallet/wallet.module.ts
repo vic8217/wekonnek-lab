@@ -8,6 +8,6 @@ import { PaymentGatewayService } from './payment-gateway.service';
   imports: [ConfigModule],
   controllers: [WalletController],
   providers: [WalletService, PaymentGatewayService],
-  exports: [WalletService],
+  exports: [WalletService, PaymentGatewayService],
 })
 export class WalletModule {}

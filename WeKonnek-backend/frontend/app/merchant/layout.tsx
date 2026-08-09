@@ -21,7 +21,7 @@ export default function MerchantLayout({
 }
 
 function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, refreshAuth } = useRequireAuth(['merchant'], '/merchant');
+  const { user, loading } = useRequireAuth(['merchant'], '/merchant');
   const pathname = usePathname();
   const router = useRouter();
   const [subscriptionTier, setSubscriptionTier] = useState<string | null>(null);
@@ -31,10 +31,6 @@ function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
     pathname?.startsWith('/merchant/qr-codes/') ||
     pathname === '/merchant/reservations' ||
     pathname?.startsWith('/merchant/reservations/');
-
-  useEffect(() => {
-    if (!loading && !user) refreshAuth();
-  }, [loading, user, refreshAuth]);
 
   useEffect(() => {
     if (!loading && user?.mustChangePassword && pathname !== '/merchant/settings/security') {

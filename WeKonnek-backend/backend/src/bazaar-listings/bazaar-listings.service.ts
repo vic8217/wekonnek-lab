@@ -20,6 +20,38 @@ export class BazaarListingsService {
     return this.prisma.bazaarListing.create({ data: { id: randomUUID(), sellerId: userId, subCategoryId: subcategory.id, title: body.title.trim(), description: body.description.trim(), price, imageUrls: images } });
   }
 
+  async mine(userId: string) {
+    await this.expire();
+    const rows = await this.prisma.bazaarListing.findMany({ where: { sellerId: userId }, orderBy: { updatedAt: 'desc' } });
+    return this.withSubcategories(rows);
+  }
+
+  async ownedDetail(userId: string, id: string) {
+    const listing = await this.owned(userId, id);
+    const [row] = await this.withSubcategories([listing]);
+    return row;
+  }
+
+  async publicDetail(id: string) {
+    await this.expire();
+    const listing = await this.prisma.bazaarListing.findFirst({ where: { id, status: 'active' } });
+    if (!listing) throw new NotFoundException('Bazaar listing not found');
+    const [row] = await this.withSubcategories([listing]);
+    return row;
+  }
+
+  async update(userId: string, id: string, body: any) {
+    const listing = await this.owned(userId, id);
+    if (!['draft', 'payment_failed'].includes(listing.status)) throw new BadRequestException('Only unpaid draft listings can be edited');
+    const subcategory = await this.prisma.merchantSubCategory.findFirst({ where: { id: Number(body.subCategoryId), isActive: true, category: { slug: 'bazaar', isActive: true } } });
+    if (!subcategory) throw new BadRequestException('Select a valid active Bazaar subcategory');
+    const images = Array.isArray(body.imageUrls) ? body.imageUrls.filter((url: unknown) => typeof url === 'string').slice(0, 5) : [];
+    const price = Number(body.price);
+    if (!images.length) throw new BadRequestException('At least one product photo is required');
+    if (!body.title?.trim() || !body.description?.trim() || !Number.isFinite(price) || price < 0) throw new BadRequestException('Complete all listing details');
+    return this.prisma.bazaarListing.update({ where: { id }, data: { subCategoryId: subcategory.id, title: body.title.trim(), description: body.description.trim(), price, imageUrls: images } });
+  }
+
   async startCheckout(userId: string, id: string, body: any) {
     const listing = await this.owned(userId, id);
     if (!['draft', 'payment_failed'].includes(listing.status)) throw new BadRequestException('This listing is already awaiting or has completed payment');
@@ -108,6 +140,17 @@ export class BazaarListingsService {
     if (status === 'payment_pending') return 'pending';
     if (status === 'payment_failed') return 'failed';
     return 'unpaid';
+  }
+
+  private async expire() {
+    await this.prisma.bazaarListing.updateMany({ where: { status: 'active', expiresAt: { lte: new Date() } }, data: { status: 'expired' } });
+  }
+
+  private async withSubcategories<T extends { subCategoryId: number }>(rows: T[]) {
+    const ids = [...new Set(rows.map(row => row.subCategoryId))];
+    const categories = await this.prisma.merchantSubCategory.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    const names = new Map(categories.map(item => [item.id, item.name]));
+    return rows.map(row => ({ ...row, subCategoryName: names.get(row.subCategoryId) || 'Unknown' }));
   }
 
   private async owned(userId: string, id: string) {
