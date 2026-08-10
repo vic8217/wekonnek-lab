@@ -152,19 +152,31 @@ export class OrdersService {
     const shop = await this.prisma.branch.findFirst({ where: { id: Number(requestedShopId), merchantId: Number(merchantId), isActive: true } });
     if (!shop) throw new BadRequestException('The selected shop is unavailable');
 
-    const items = input.items.map((it) => {
+    const items = await Promise.all(input.items.map(async (it) => {
       const quantity = Number(it.quantity) || 1;
-      const price = Number(it.price) || 0;
-      const subtotal = it.subtotal != null ? Number(it.subtotal) : price * quantity;
+      const productId = it.product_id ?? it.productId ?? null;
+      const variantId = it.variant_id ?? it.variantId ?? null;
+      const product = productId ? await this.prisma.product.findFirst({
+        where: { id: Number(productId), merchantId: Number(merchantId) },
+        include: { variants: { where: { id: variantId ? Number(variantId) : -1, isActive: true } } },
+      }) : null;
+      if (productId && !product) throw new BadRequestException('A selected product is unavailable');
+      if (product?.hasVariants && !variantId) throw new BadRequestException(`Select a variant for ${product.name}`);
+      const variant = variantId ? product?.variants?.[0] : undefined;
+      if (variantId && !variant) throw new BadRequestException(`The selected variant for ${product?.name || 'this product'} is unavailable`);
+      const price = product
+        ? Number(variant?.price ?? product.discountPrice ?? product.sellingPrice ?? product.price)
+        : Number(it.price) || 0;
+      const subtotal = price * quantity;
       return {
-        productId: it.product_id ?? it.productId ?? null,
-        productName: it.product_name ?? it.productName ?? 'Item',
-        variantId: it.variant_id ?? it.variantId ?? null,
+        productId,
+        productName: product?.name ?? it.product_name ?? it.productName ?? 'Item',
+        variantId,
         quantity,
         price,
         subtotal,
       };
-    });
+    }));
 
     const itemsSubtotal = items.reduce((s, it) => s + it.subtotal, 0);
     const deliveryFee = Number(input.delivery_fee) || 0;

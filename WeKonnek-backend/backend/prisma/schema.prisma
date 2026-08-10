@@ -79,6 +79,9 @@ model Merchant {
   latitude               Decimal?  @db.Decimal(10, 8)
   longitude              Decimal?  @db.Decimal(11, 8)
   city                   String?   @db.VarChar(100)
+  region                 String?   @db.VarChar(100)
+  councilDistrict        String?   @map("council_district") @db.VarChar(100)
+  geographicArea         String?   @map("geographic_area") @db.VarChar(150)
   state                  String?   @db.VarChar(100)
   zipCode                String?   @map("zip_code") @db.VarChar(20)
   country                String    @default("Philippines") @db.VarChar(100)
@@ -237,6 +240,7 @@ model CoordinatorApplication {
   region                       String    @db.VarChar(100)
   provinceDistrict             String    @map("province_district") @db.VarChar(100)
   cityMunicipality             String    @map("city_municipality") @db.VarChar(100)
+  councilDistrict              String?   @map("council_district") @db.VarChar(100)
   barangay                     String?   @db.VarChar(150)
   preferredCoverageArea        String?   @map("preferred_coverage_area") @db.Text
   latitude                     Decimal   @db.Decimal(10, 7)
@@ -335,6 +339,7 @@ model Product {
   merchantId         Int      @map("merchant_id")
   name               String   @db.VarChar(255)
   description        String?  @db.Text
+  notes              Json     @default("[]")
   productCode        String?  @map("product_code") @db.VarChar(100)
   sku                String?  @db.VarChar(100)
   price              Decimal? @db.Decimal(10, 2)
@@ -1693,6 +1698,9 @@ model Branch {
   name                   String    @db.VarChar(255)
   address                String?   @db.Text
   city                   String?   @db.VarChar(100)
+  region                 String?   @db.VarChar(100)
+  councilDistrict        String?   @map("council_district") @db.VarChar(100)
+  geographicArea         String?   @map("geographic_area") @db.VarChar(150)
   state                  String?   @db.VarChar(100)
   zipCode                String?   @map("zip_code") @db.VarChar(20)
   latitude               Decimal?  @db.Decimal(10, 8)

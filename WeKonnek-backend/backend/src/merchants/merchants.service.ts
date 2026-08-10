@@ -48,6 +48,8 @@ function serializeMerchant<T extends Record<string, any> | null>(merchant: T): T
     logo_url: merchant.logoUrl,
     cover_image_url: merchant.coverImageUrl,
     zip_code: merchant.zipCode,
+    council_district: merchant.councilDistrict,
+    geographic_area: merchant.geographicArea,
     subscription_tier: merchant.subscriptionTier,
     subscription_plan: merchant.subscriptionPlan,
     subscription_amount: merchant.subscriptionAmount,

@@ -87,6 +87,10 @@ export class CreateMerchantDto {
   @IsOptional()
   city?: string;
 
+  @IsString() @IsOptional() region?: string;
+  @IsString() @IsOptional() councilDistrict?: string;
+  @IsString() @IsOptional() geographicArea?: string;
+
   @ApiPropertyOptional({ example: 'Metro Manila' })
   @IsString()
   @IsOptional()

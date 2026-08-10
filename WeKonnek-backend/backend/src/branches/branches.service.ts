@@ -188,6 +188,11 @@ export class BranchesService {
 
     if (input.address !== undefined) data.address = input.address;
     if (input.city !== undefined) data.city = input.city;
+    if (input.region !== undefined) data.region = input.region;
+    if (input.council_district !== undefined || input.councilDistrict !== undefined)
+      data.councilDistrict = input.council_district ?? input.councilDistrict;
+    if (input.geographic_area !== undefined || input.geographicArea !== undefined)
+      data.geographicArea = input.geographic_area ?? input.geographicArea;
     if (input.state !== undefined) data.state = input.state;
     if (input.zip_code ?? input.zipCode) data.zipCode = input.zip_code ?? input.zipCode;
     if (input.latitude !== undefined) data.latitude = input.latitude;

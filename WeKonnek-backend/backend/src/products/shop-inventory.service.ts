@@ -117,7 +117,10 @@ export class ShopInventoryService {
 
   async assign(merchantId: number, shopId: number, productId: number, isEnabled: boolean, priceOverride?: number | null) {
     await this.assertShop(merchantId, shopId);
-    const product = await this.assertProduct(merchantId, productId);
+    // A shop assignment enables the complete product and all its variants.
+    // Variant selection is required only for variant-level stock operations.
+    const product = await this.prisma.product.findFirst({ where: { id: productId, merchantId } });
+    if (!product) throw new NotFoundException('Product not found in the merchant catalogue');
     const assignment = await this.prisma.shopProduct.upsert({
       where: { shopId_productId: { shopId, productId } },
       create: { merchantId, shopId, productId, isEnabled, priceOverride },

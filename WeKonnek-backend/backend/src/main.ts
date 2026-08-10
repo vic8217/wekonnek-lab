@@ -18,8 +18,10 @@ async function bootstrap() {
   });
 
   // Serve static files from uploads directory
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
-    prefix: '/uploads',
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    // UploadService returns /api/uploads URLs, so the public static route must
+    // use the same prefix (static middleware is not affected by setGlobalPrefix).
+    prefix: '/api/uploads',
   });
 
   // Global exception filter — consistent JSON error responses

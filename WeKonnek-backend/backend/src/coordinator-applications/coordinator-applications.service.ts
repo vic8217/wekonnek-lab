@@ -20,6 +20,7 @@ export class CoordinatorApplicationsService {
         whatsappNumber: input.whatsappNumber ? String(input.whatsappNumber) : null,
         email: String(input.email).trim().toLowerCase(),
         region: String(input.region), provinceDistrict: String(input.provinceDistrict), cityMunicipality: String(input.cityMunicipality),
+        councilDistrict: input.councilDistrict ? String(input.councilDistrict) : null,
         barangay: input.barangay ? String(input.barangay) : null,
         preferredCoverageArea: input.preferredCoverageArea ? String(input.preferredCoverageArea) : null,
         latitude: Number(input.latitude), longitude: Number(input.longitude),

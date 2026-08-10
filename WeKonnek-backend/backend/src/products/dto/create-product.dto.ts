@@ -20,9 +20,16 @@ export class ProductVariantInput {
   @IsOptional() optionValues?: Record<string, string>;
 }
 
+export class ProductNoteInput {
+  @IsString() title: string;
+  @IsOptional() @IsString() text?: string;
+  @IsOptional() @IsString() iconUrl?: string;
+}
+
 export class CreateProductDto {
   @ApiProperty({ example: 'Polo Shirt' }) @IsString() name: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ProductNoteInput) notes?: ProductNoteInput[];
   @ApiPropertyOptional({ enum: PRODUCT_TYPES }) @IsOptional() @IsIn(PRODUCT_TYPES) productType?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() brand?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() categoryId?: number;

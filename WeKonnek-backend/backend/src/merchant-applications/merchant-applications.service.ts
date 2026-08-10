@@ -141,12 +141,12 @@ export class MerchantApplicationsService {
   async coordinatorCoverageOptions(user: { id: string; email?: string | null }) {
     const coordinator = await this.approvedCoordinator(user);
     type Area = { code: string; name: string };
-    type District = { name: string; areas: Area[] };
+    type District = { name: string; localCouncilDistrict: string; areas: Area[] };
     const cities = new Map<string, { code: string; name: string; districts: District[] }>();
     coordinator.managementZone!.coverages.forEach(item => {
       const city = cities.get(item.cityMunicipalityCode) || { code: item.cityMunicipalityCode, name: item.cityMunicipalityName, districts: [] };
       let district = city.districts.find(entry => entry.name === item.congressionalDistrict);
-      if (!district) { district = { name: item.congressionalDistrict, areas: [] }; city.districts.push(district); }
+      if (!district) { district = { name: item.congressionalDistrict, localCouncilDistrict: item.congressionalDistrict, areas: [] }; city.districts.push(district); }
       if (Array.isArray(item.areas)) item.areas.forEach(value => {
         if (!value || typeof value !== 'object' || !('code' in value) || !('name' in value)) return;
         const area = { code: String(value.code), name: String(value.name) };
@@ -296,17 +296,17 @@ export class MerchantApplicationsService {
   async coverageOptions() {
     const coverages = await this.prisma.managementZoneCoverage.findMany({
       where: { zone: { isActive: true } },
-      select: { cityMunicipalityCode: true, cityMunicipalityName: true, congressionalDistrict: true, areas: true },
+      select: { regionName: true, provinceName: true, cityMunicipalityCode: true, cityMunicipalityName: true, congressionalDistrict: true, areas: true },
       orderBy: [{ cityMunicipalityName: 'asc' }, { congressionalDistrict: 'asc' }],
     });
     type Area = { code: string; name: string };
-    type District = { name: string; areas: Area[] };
-    const cities = new Map<string, { code: string; name: string; districts: District[] }>();
+    type District = { name: string; localCouncilDistrict: string; areas: Area[] };
+    const cities = new Map<string, { code: string; name: string; regionName: string; provinceName: string | null; districts: District[] }>();
     coverages.forEach(item => {
-      const city = cities.get(item.cityMunicipalityCode) || { code: item.cityMunicipalityCode, name: item.cityMunicipalityName, districts: [] };
+      const city = cities.get(item.cityMunicipalityCode) || { code: item.cityMunicipalityCode, name: item.cityMunicipalityName, regionName: item.regionName, provinceName: item.provinceName, districts: [] };
       let district = city.districts.find(entry => entry.name === item.congressionalDistrict);
       if (!district) {
-        district = { name: item.congressionalDistrict, areas: [] };
+        district = { name: item.congressionalDistrict, localCouncilDistrict: item.congressionalDistrict, areas: [] };
         city.districts.push(district);
       }
       if (Array.isArray(item.areas)) {
@@ -758,6 +758,11 @@ export class MerchantApplicationsService {
   }
 
   private async provisionMerchant(application: any) {
+    const activeCoverages = await this.prisma.managementZoneCoverage.findMany({
+      where: { zone: { isActive: true } },
+      select: { regionName: true, cityMunicipalityName: true, congressionalDistrict: true, areas: true },
+    });
+    const applicationCoverage = activeCoverages.find(coverage => coverageMatchesApplication(coverage, application));
     const applicationCategory = String(application.categoryName || '').trim();
     const category = applicationCategory
       ? await this.prisma.merchantCategory.findFirst({
@@ -822,6 +827,10 @@ export class MerchantApplicationsService {
         email: application.email,
         phone: application.phone,
         address: application.address,
+        region: applicationCoverage?.regionName ?? null,
+        city: applicationCoverage?.cityMunicipalityName ?? application.cityMunicipality ?? null,
+        councilDistrict: applicationCoverage?.congressionalDistrict ?? application.councilDistrict ?? null,
+        geographicArea: application.geographicArea ?? application.barangay ?? null,
         businessType: 'storefront',
         subscriptionTier: application.subscriptionTier,
         subscriptionPlan: application.subscriptionPlan,
