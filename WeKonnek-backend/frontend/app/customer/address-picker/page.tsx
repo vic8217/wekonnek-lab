@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { DragEndEvent } from "leaflet";
 import { getToken } from "@/hooks/use-auth";
 import toast from "react-hot-toast";
+import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
 
 const LocationMap = dynamic(() => import("@/components/LocationMap"), {
   ssr: false,
@@ -13,6 +14,8 @@ const LocationMap = dynamic(() => import("@/components/LocationMap"), {
 const EMPTY = {
   label: "Home",
   addressLine: "",
+  region: "",
+  district: "",
   barangay: "",
   city: "",
   province: "",
@@ -28,12 +31,17 @@ export default function AddressPickerPage() {
   const [saving, setSaving] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [zoneCities, setZoneCities] = useState<ZoneCityOption[]>([]);
+  const selectedCity = findZoneCity(zoneCities, form.city);
+  const selectedDistrict = findZoneDistrict(selectedCity, form.district);
   const query = useMemo(
     () =>
       [
         form.addressLine,
         form.barangay,
+        form.district,
         form.city,
+        form.region,
         form.province,
         form.postalCode,
       ]
@@ -41,6 +49,24 @@ export default function AddressPickerPage() {
         .join(", "),
     [form],
   );
+
+  useEffect(() => {
+    loadAdminZoneAddresses()
+      .then(setZoneCities)
+      .catch(() => setZoneCities([]));
+  }, []);
+
+  useEffect(() => {
+    if (!zoneCities.length || !form.city) return;
+    const city = findZoneCity(zoneCities, form.city);
+    if (!city) return;
+    const district = findZoneDistrict(city, form.district);
+    const area = findZoneArea(district, form.barangay);
+    setForm(current => {
+      const next = { ...current, region: city.regionName || current.region, city: city.name, province: city.provinceName || current.province || 'Metro Manila', district: district?.name || current.district, barangay: area?.name || current.barangay };
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [form.barangay, form.city, form.district, zoneCities]);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("edit");
@@ -71,6 +97,8 @@ export default function AddressPickerPage() {
         setForm({
           label: item.label || "Home",
           addressLine: details.addressLine || item.address || "",
+          region: details.region || "",
+          district: details.district || "",
           barangay: details.barangay || "",
           city: details.city || "",
           province: details.province || "",
@@ -142,6 +170,7 @@ export default function AddressPickerPage() {
             address: query,
             details: JSON.stringify({
               addressLine: form.addressLine,
+              district: form.district,
               barangay: form.barangay,
               city: form.city,
               province: form.province,
@@ -198,26 +227,44 @@ export default function AddressPickerPage() {
           className="mt-1 w-full rounded-xl border bg-white p-3 font-normal"
         />
       </label>
+      <label className="text-sm font-semibold">
+        Region
+        <select required value={form.region} onChange={(event) => setForm(current => ({ ...current, region: event.target.value, city: '', district: '', barangay: '' }))} className="mt-1 w-full rounded-xl border bg-white p-3 font-normal">
+          <option value="">Select region</option>{zoneRegions(zoneCities).map(region => <option key={region} value={region}>{region}</option>)}
+        </select>
+      </label>
       <div className="grid grid-cols-2 gap-3">
         <label className="text-sm font-semibold">
-          Barangay
-          <input
-            value={form.barangay}
-            onChange={(event) => update("barangay", event.target.value)}
-            className="mt-1 w-full rounded-xl border bg-white p-3 font-normal"
-          />
-        </label>
-        <label className="text-sm font-semibold">
           City / municipality
-          <input
+          <select
             required
             value={form.city}
-            onChange={(event) => update("city", event.target.value)}
+            onChange={(event) => setForm(current => ({ ...current, city: event.target.value, district: '', barangay: '', province: findZoneCity(zoneCities, event.target.value)?.provinceName || 'Metro Manila' }))}
             className="mt-1 w-full rounded-xl border bg-white p-3 font-normal"
-          />
+          ><option value="">Select city</option>{citiesInZoneRegion(zoneCities, form.region).map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
+        </label>
+        <label className="text-sm font-semibold">
+          Local council district
+          <select
+            required
+            value={form.district}
+            onChange={(event) => setForm(current => ({ ...current, district: event.target.value, barangay: '' }))}
+            disabled={!selectedCity}
+            className="mt-1 w-full rounded-xl border bg-white p-3 font-normal disabled:bg-slate-100"
+          ><option value="">Select district</option>{selectedCity?.districts.map(item => <option key={item.name}>{item.name}</option>)}</select>
         </label>
       </div>
       <div className="grid grid-cols-2 gap-3">
+        <label className="text-sm font-semibold">
+          Barangay / area
+          <select
+            required={Boolean(selectedDistrict?.areas.length)}
+            value={form.barangay}
+            onChange={(event) => update("barangay", event.target.value)}
+            disabled={!selectedDistrict}
+            className="mt-1 w-full rounded-xl border bg-white p-3 font-normal disabled:bg-slate-100"
+          ><option value="">Select barangay / area</option>{selectedDistrict?.areas.map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
+        </label>
         <label className="text-sm font-semibold">
           Province
           <input

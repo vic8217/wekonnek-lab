@@ -259,6 +259,7 @@ export interface Product {
   merchantId: number;
   name: string;
   description?: string;
+  notes?: Array<{ title: string; text?: string; iconUrl?: string }>;
   productCode?: string;
   sku?: string;
   price: number;
@@ -291,6 +292,7 @@ export interface CreateProductData {
   name: string;
   productType?: string;
   description?: string;
+  notes?: Array<{ title: string; text?: string; iconUrl?: string }>;
   brand?: string;
   unit: string;
   baseSku?: string;
@@ -447,7 +449,8 @@ export const uploadApi = {
     formData.append('file', file);
     formData.append('type', type);
     
-    const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
+    const uploadUrl = typeof window !== 'undefined' ? '/api/backend/upload' : `${API_BASE_URL}/upload`;
+    const response = await axios.post(uploadUrl, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -461,7 +464,8 @@ export const uploadApi = {
     });
     formData.append('type', type);
     
-    const response = await axios.post(`${API_BASE_URL}/upload/multiple`, formData, {
+    const uploadUrl = typeof window !== 'undefined' ? '/api/backend/upload/multiple' : `${API_BASE_URL}/upload/multiple`;
+    const response = await axios.post(uploadUrl, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },

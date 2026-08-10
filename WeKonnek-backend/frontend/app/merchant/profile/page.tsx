@@ -3,10 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth, getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, loadZoneCityAreas, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 import dynamic from 'next/dynamic';
-import { useMapEvents } from 'react-leaflet';
+import { useMap, useMapEvents } from 'react-leaflet';
 
 // Dynamically import MapContainer to avoid SSR issues
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), {
@@ -26,6 +28,12 @@ function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number
       onMapClick(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+}
+
+function MapViewUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => { map.setView(center, zoom); }, [center, map, zoom]);
   return null;
 }
 
@@ -55,6 +63,9 @@ interface MerchantProfile {
   latitude?: number;
   longitude?: number;
   city?: string;
+  region?: string;
+  councilDistrict?: string;
+  geographicArea?: string;
   state?: string;
   zipCode?: string;
   tin?: string;
@@ -118,9 +129,21 @@ interface OperatingHours {
 }
 
 export default function MerchantProfilePage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//') ? requestedReturnTo : null;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [merchant, setMerchant] = useState<MerchantProfile | null>(null);
+  const [profileBranchId, setProfileBranchId] = useState<number | null>(null);
+  const [storeDetailsConfirmed, setStoreDetailsConfirmed] = useState(false);
+  const [coverageOptions, setCoverageOptions] = useState<ZoneCityOption[]>([]);
+  const [selectedRegion, setSelectedRegion] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [selectedDistrict, setSelectedDistrict] = useState('');
+  const [selectedArea, setSelectedArea] = useState('');
+  const [geocodingAddress, setGeocodingAddress] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([14.5995, 120.9842]); // Default to Manila
   const [mapZoom, setMapZoom] = useState(13);
   const bannerInputRef = useRef<HTMLInputElement>(null);
@@ -153,9 +176,90 @@ export default function MerchantProfilePage() {
 
   useEffect(() => {
     fetchMerchantProfile();
+    loadAdminZoneAddresses()
+      .then(setCoverageOptions)
+      .catch(() => setCoverageOptions([]));
   }, []);
 
+  useEffect(() => {
+    if (!coverageOptions.length || !selectedCity) return;
+    const city = findZoneCity(coverageOptions, selectedCity);
+    if (!city) return;
+    if (city.regionName && city.regionName !== selectedRegion) setSelectedRegion(city.regionName);
+    if (city.name !== selectedCity) setSelectedCity(city.name);
+    const district = findZoneDistrict(city, selectedDistrict);
+    if (district && district.name !== selectedDistrict) setSelectedDistrict(district.name);
+    const area = findZoneArea(district, selectedArea);
+    if (area && area.name !== selectedArea) setSelectedArea(area.name);
+  }, [coverageOptions, selectedArea, selectedCity, selectedDistrict, selectedRegion]);
+
+  useEffect(() => {
+    const city = findZoneCity(coverageOptions, selectedCity);
+    if (!city || city.districts.some(district => district.areas.length)) return;
+    const controller = new AbortController();
+    loadZoneCityAreas(city, controller.signal).then(areas => {
+      if (!areas.length) return;
+      setCoverageOptions(current => current.map(item => item.code === city.code
+        ? { ...item, districts: item.districts.map(district => ({ ...district, areas })) }
+        : item));
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [coverageOptions, selectedCity]);
+
+  useEffect(() => {
+    if (!selectedCity) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setGeocodingAddress(true);
+      try {
+        const lookup = async (parts: string[]) => {
+          const query = [...parts.filter(Boolean), selectedCity, 'Philippines'].join(', ');
+          const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+          const body = response.ok ? await response.json() : null;
+          const point = body?.status === 'ok' ? body.results?.[0]?.location : null;
+          const lat = Number(point?.lat), lng = Number(point?.lng);
+          return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+        };
+        let point: { lat: number; lng: number } | null = null;
+        let zoom = 12;
+        if (selectedArea) {
+          point = await lookup([selectedArea]);
+          zoom = 16;
+        } else if (selectedDistrict) {
+          const district = findZoneDistrict(findZoneCity(coverageOptions, selectedCity), selectedDistrict);
+          const anchors = district?.areas.length
+            ? [district.areas[0], district.areas[Math.floor(district.areas.length / 2)], district.areas[district.areas.length - 1]]
+            : [];
+          const points = (await Promise.all(anchors.map(area => lookup([area.name])))).filter((item): item is { lat: number; lng: number } => Boolean(item));
+          if (points.length) point = { lat: points.reduce((sum, item) => sum + item.lat, 0) / points.length, lng: points.reduce((sum, item) => sum + item.lng, 0) / points.length };
+          if (!point) point = await lookup([selectedDistrict]);
+          zoom = 13;
+        }
+        if (!point && formData.address.trim()) {
+          point = await lookup([formData.address.trim()]);
+          zoom = 16;
+        }
+        if (!point) point = await lookup([]);
+        const lat = Number(point?.lat), lng = Number(point?.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setMapCenter([lat, lng]);
+          setMapZoom(zoom);
+          setStoreDetailsConfirmed(false);
+        }
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) toast.error('Unable to locate that address');
+      } finally {
+        if (!controller.signal.aborted) setGeocodingAddress(false);
+      }
+    }, formData.address.trim() ? 600 : 150);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  // Keep this dependency signature stable for Next.js Fast Refresh. Zone options
+  // are loaded before a user can select the dependent district/area fields.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.address, selectedArea, selectedCity, selectedDistrict]);
+
   const fetchMerchantProfile = async () => {
+    setStoreDetailsConfirmed(false);
     try {
       const token = getToken();
       if (!token) return;
@@ -180,6 +284,9 @@ export default function MerchantProfilePage() {
           latitude: merchantData.latitude,
           longitude: merchantData.longitude,
           city: merchantData.city,
+          region: merchantData.region,
+          councilDistrict: merchantData.councilDistrict || merchantData.council_district,
+          geographicArea: merchantData.geographicArea || merchantData.geographic_area,
           state: merchantData.state,
           zipCode: merchantData.zipCode || merchantData.zip_code,
           tin: merchantData.tin,
@@ -204,11 +311,27 @@ export default function MerchantProfilePage() {
           tin: merchantProfile.tin || '',
           registeredBusinessName: merchantProfile.registeredBusinessName || merchantProfile.name,
         });
+        setSelectedCity(merchantProfile.city || '');
+        setSelectedRegion(merchantProfile.region || '');
+        setSelectedDistrict(merchantProfile.councilDistrict || '');
+        setSelectedArea(merchantProfile.geographicArea || '');
         
         if (merchantProfile.coverImageUrl) setBannerPreview(merchantProfile.coverImageUrl);
         if (merchantProfile.logoUrl) setLogoPreview(merchantProfile.logoUrl);
         if (merchantProfile.latitude && merchantProfile.longitude) {
           setMapCenter([Number(merchantProfile.latitude), Number(merchantProfile.longitude)]);
+        }
+        const branchesResponse = await fetch(`${API}/api/merchants/${merchantData.id}/branches`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (branchesResponse.ok) {
+          const branches = await branchesResponse.json();
+          const branch = Array.isArray(branches) ? branches.find(item => item.isDefault || item.is_default) || branches[0] : null;
+          if (branch) {
+            setProfileBranchId(branch.id);
+            const savedHours = branch.operatingHours || branch.operating_hours;
+            if (savedHours && typeof savedHours === 'object') setOperatingHours(current => ({ ...current, ...savedHours }));
+          }
         }
       }
     } catch (error) {
@@ -221,9 +344,11 @@ export default function MerchantProfilePage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    if (name === 'address') setStoreDetailsConfirmed(false);
   };
 
   const handleHoursChange = (day: keyof OperatingHours, field: 'open' | 'close', value: string) => {
+    setStoreDetailsConfirmed(false);
     setOperatingHours(prev => ({
       ...prev,
       [day]: { ...prev[day], [field]: value },
@@ -236,7 +361,7 @@ export default function MerchantProfilePage() {
       formData.append('file', file);
       formData.append('type', type === 'banner' ? 'establishment' : 'establishment');
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/api/backend/upload', {
         method: 'POST',
         body: formData,
       });
@@ -260,12 +385,17 @@ export default function MerchantProfilePage() {
   };
 
   const handleMapClick = (lat: number, lng: number) => {
+    setStoreDetailsConfirmed(false);
     setMapCenter([lat, lng]);
     setMapZoom(15);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!storeDetailsConfirmed) {
+      toast.error('Confirm the operating hours and map location before saving.');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -276,12 +406,23 @@ export default function MerchantProfilePage() {
       }
 
       const updateData: any = {
-        ...formData,
+        name: formData.name,
+        description: formData.description,
+        phone: formData.phone,
+        address: formData.address,
+        city: selectedCity || undefined,
+        region: selectedRegion || undefined,
+        councilDistrict: selectedDistrict || undefined,
+        geographicArea: selectedArea || undefined,
+        taxClassification: formData.taxClassification,
+        tin: formData.tin,
+        registeredBusinessName: formData.registeredBusinessName,
+        ...(formData.email.trim() ? { email: formData.email.trim() } : {}),
+        ...(formData.website.trim() ? { website: formData.website.trim() } : {}),
         coverImageUrl: bannerPreview || merchant?.coverImageUrl,
         logoUrl: logoPreview || merchant?.logoUrl,
         latitude: mapCenter[0],
         longitude: mapCenter[1],
-        operatingHours,
       };
 
       if (merchant?.id) {
@@ -296,7 +437,35 @@ export default function MerchantProfilePage() {
         }
       }
 
+      if (profileBranchId) {
+        const branchRes = await fetch(`${API}/api/branches/${profileBranchId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            address: formData.address,
+            city: selectedCity || undefined,
+            region: selectedRegion || undefined,
+            councilDistrict: selectedDistrict || undefined,
+            geographicArea: selectedArea || undefined,
+            latitude: mapCenter[0],
+            longitude: mapCenter[1],
+            operatingHours,
+            taxClassification: formData.taxClassification,
+            tin: formData.tin,
+            registeredBusinessName: formData.registeredBusinessName,
+          }),
+        });
+        if (!branchRes.ok) {
+          const err = await branchRes.json().catch(() => ({}));
+          throw new Error(Array.isArray(err.message) ? err.message.join(', ') : err.message || 'Failed to update store hours');
+        }
+      }
+
       toast.success('Profile updated successfully!');
+      if (returnTo) {
+        router.push(returnTo);
+        return;
+      }
       fetchMerchantProfile();
     } catch (error: any) {
       console.error('Error updating profile:', error);
@@ -374,7 +543,7 @@ export default function MerchantProfilePage() {
 
             <div>
               <label htmlFor="website" className="block text-sm font-medium text-gray-700 mb-2">
-                Website
+                Website <span className="font-normal text-gray-500">(optional)</span>
               </label>
               <input
                 type="url"
@@ -623,19 +792,39 @@ export default function MerchantProfilePage() {
 
           <div className="space-y-6">
             {/* Store Address */}
-            <div>
-              <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-2">
-                Store Address
+            <div className="space-y-3">
+              <label htmlFor="address" className="block text-sm font-medium text-gray-700">
+                Street / Store Address
               </label>
               <input
                 type="text"
                 id="address"
                 name="address"
+                required
                 value={formData.address}
                 onChange={handleInputChange}
                 placeholder="123 Main Street, Manila, Philippines"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#DB0002] focus:border-[#DB0002] outline-none"
               />
+              <select required value={selectedRegion} onChange={event => { setSelectedRegion(event.target.value); setSelectedCity(''); setSelectedDistrict(''); setSelectedArea(''); setStoreDetailsConfirmed(false); }} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100">
+                <option value="">Region</option>
+                {zoneRegions(coverageOptions).map(region => <option key={region} value={region}>{region}</option>)}
+              </select>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <select required value={selectedCity} onChange={event => { setSelectedCity(event.target.value); setSelectedDistrict(''); setSelectedArea(''); setStoreDetailsConfirmed(false); }} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100">
+                  <option value="">City / Municipality</option>
+                  {citiesInZoneRegion(coverageOptions, selectedRegion).map(city => <option key={city.code || city.name} value={city.name}>{city.name}</option>)}
+                </select>
+                <select required value={selectedDistrict} onChange={event => { setSelectedDistrict(event.target.value); setSelectedArea(''); setStoreDetailsConfirmed(false); }} disabled={!selectedCity} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100 disabled:bg-gray-100">
+                  <option value="">City Council District</option>
+                  {findZoneCity(coverageOptions, selectedCity)?.districts.map(district => <option key={district.name} value={district.name}>{district.name}</option>)}
+                </select>
+              </div>
+              <select required={Boolean(findZoneDistrict(findZoneCity(coverageOptions, selectedCity), selectedDistrict)?.areas.length)} value={selectedArea} onChange={event => { setSelectedArea(event.target.value); setStoreDetailsConfirmed(false); }} disabled={!selectedDistrict} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 outline-none focus:border-[#DB0002] focus:ring-2 focus:ring-red-100 disabled:bg-gray-100">
+                <option value="">Barangay / Area</option>
+                {findZoneDistrict(findZoneCity(coverageOptions, selectedCity), selectedDistrict)?.areas.map(area => <option key={area.code || area.name} value={area.name}>{area.name}</option>)}
+              </select>
+              {geocodingAddress && <p className="text-xs font-medium text-blue-600">Finding this address and updating the map…</p>}
             </div>
 
             {/* Operating Hours */}
@@ -749,6 +938,7 @@ export default function MerchantProfilePage() {
                     style={{ height: '100%', width: '100%' }}
                     scrollWheelZoom={true}
                   >
+                    <MapViewUpdater center={mapCenter} zoom={mapZoom} />
                     <TileLayer
                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
                       url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -772,6 +962,7 @@ export default function MerchantProfilePage() {
                   if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
                       (position) => {
+                        setStoreDetailsConfirmed(false);
                         setMapCenter([position.coords.latitude, position.coords.longitude]);
                         setMapZoom(15);
                       },
@@ -786,6 +977,19 @@ export default function MerchantProfilePage() {
                 Update Location
               </button>
             </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <input
+                type="checkbox"
+                checked={storeDetailsConfirmed}
+                onChange={event => setStoreDetailsConfirmed(event.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[#DB0002]"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-gray-900">I confirm these operating hours and map location are correct.</span>
+                <span className="mt-1 block text-xs text-gray-600">This information will be shown to customers and used for store availability and location services.</span>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -800,7 +1004,7 @@ export default function MerchantProfilePage() {
           </button>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || !storeDetailsConfirmed}
             className="px-6 py-3 bg-[#DB0002] text-white rounded-lg hover:bg-[#B80002] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? 'Saving...' : 'Save Changes'}

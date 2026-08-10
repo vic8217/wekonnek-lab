@@ -47,12 +47,22 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
     .map(item => ({
       ...item,
       href: item.href.replace('/merchant', basePath),
+      label: basePath === '/shop' && item.label === 'In-Store Orders'
+        ? 'All Orders'
+        : basePath === '/shop' && item.label === 'Products'
+          ? 'Catalogue Setup'
+          : item.label,
       matches: item.matches?.map(path => path.replace('/merchant', basePath)),
     }));
   if (basePath === '/shop') {
     const position = Math.min(2, menuItems.length);
+    const existingMyShopIndex = menuItems.findIndex(item => item.href === '/shop/shop');
+    const myShopItem = existingMyShopIndex >= 0
+      ? menuItems.splice(existingMyShopIndex, 1)[0]
+      : { href: '/shop/shop', label: 'My Shop', icon: 'cart', platinumOnly: false, matches: undefined };
     menuItems.splice(position, 0,
-      { href: '/shop/products', label: 'Products', icon: 'box', platinumOnly: false, matches: undefined },
+      myShopItem,
+      { href: '/shop/products', label: 'Catalogue Setup', icon: 'box', platinumOnly: false, matches: undefined },
       { href: '/shop/inventory', label: 'Inventory', icon: 'inventory', platinumOnly: false, matches: undefined },
     );
   }
@@ -173,7 +183,7 @@ export default function MerchantSidebar({ subscriptionTier, basePath = '/merchan
         {menuItems.map((item) => {
           const active = isActive(item);
           const locked = item.platinumOnly && !hasPlatinum;
-          return (<div key={item.href}>{basePath === '/shop' && item.label === 'Products' && <p className="mb-2 mt-5 px-4 text-xs font-bold uppercase tracking-wider text-gray-400">My Shop</p>}
+          return (<div key={item.href}>{basePath === '/shop' && item.label === 'My Shop' && <p className="mb-2 mt-5 px-4 text-xs font-bold uppercase tracking-wider text-gray-400">My Shop</p>}
             <Link
               href={locked ? `${basePath}/subscription/upgrade?required=platinum` : item.href}
               title={locked ? `${item.label} is available on the Platinum plan` : undefined}

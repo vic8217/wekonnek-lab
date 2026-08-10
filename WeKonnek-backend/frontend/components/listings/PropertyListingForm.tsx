@@ -17,6 +17,7 @@ import {
 } from "@/lib/property-classification";
 import dynamic from "next/dynamic";
 import type { DragEndEvent } from "leaflet";
+import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
 
 const LocationMap = dynamic(() => import("@/components/LocationMap"), {
   ssr: false,
@@ -71,9 +72,12 @@ export default function PropertyListingForm({
     [propertyGroup, setPropertyGroup] = useState("Residential"),
     [selectedPropertyTypeId, setSelectedPropertyTypeId] = useState(""),
     [addressLine, setAddressLine] = useState(""),
+    [district, setDistrict] = useState(""),
     [barangay, setBarangay] = useState(""),
     [city, setCity] = useState(""),
+    [region, setRegion] = useState(""),
     [province, setProvince] = useState(""),
+    [zoneCities, setZoneCities] = useState<ZoneCityOption[]>([]),
     [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(
       null,
     ),
@@ -81,6 +85,30 @@ export default function PropertyListingForm({
     [geocoding, setGeocoding] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const selectedZoneCity = findZoneCity(zoneCities, city);
+  const selectedZoneDistrict = findZoneDistrict(selectedZoneCity, district);
+  useEffect(() => {
+    loadAdminZoneAddresses()
+      .then(setZoneCities)
+      .catch(() => setZoneCities([]));
+  }, []);
+  useEffect(() => {
+    if (!zoneCities.length || !city) return;
+    const cityMatch = findZoneCity(zoneCities, city);
+    if (!cityMatch) return;
+    if (cityMatch.regionName && cityMatch.regionName !== region) setRegion(cityMatch.regionName);
+    const districtMatch = findZoneDistrict(cityMatch, district);
+    const areaMatch = findZoneArea(districtMatch, barangay);
+    if (cityMatch.name !== city) setCity(cityMatch.name);
+    if (districtMatch && districtMatch.name !== district) setDistrict(districtMatch.name);
+    if (areaMatch && areaMatch.name !== barangay) setBarangay(areaMatch.name);
+    if (!province && cityMatch.provinceName) setProvince(cityMatch.provinceName);
+  }, [barangay, city, district, province, region, zoneCities]);
+  useEffect(() => {
+    if (!city || !barangay || district || !zoneCities.length) return;
+    const match = findZoneCity(zoneCities, city)?.districts.find(item => Boolean(findZoneArea(item, barangay)));
+    if (match) setDistrict(match.name);
+  }, [barangay, city, district, zoneCities]);
   useEffect(() => {
     const token = getToken(),
       destination =
@@ -131,7 +159,7 @@ export default function PropertyListingForm({
       setGeocoding(true);
       setLocationError("");
       try {
-        const query = [city.trim(), province.trim(), "Philippines"]
+        const query = [addressLine.trim(), barangay, district, city.trim(), province.trim(), "Philippines"]
           .filter(Boolean)
           .join(", ");
         const response = await fetch(
@@ -163,7 +191,7 @@ export default function PropertyListingForm({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [city, province]);
+  }, [addressLine, barangay, city, district, province]);
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId);
   const selectedPropertyType = types.find(
     (type) => type.id === selectedPropertyTypeId,
@@ -610,22 +638,21 @@ export default function PropertyListingForm({
             placeholder="Street / building (kept private by default)"
             className="rounded-xl border p-3"
           />
-          <input
-            name="barangay"
-            value={barangay}
-            onChange={(event) => setBarangay(event.target.value)}
-            placeholder="Barangay"
-            className="rounded-xl border p-3"
-          />
+          <select required value={region} onChange={(event) => { setRegion(event.target.value); setCity(''); setDistrict(''); setBarangay(''); }} className="rounded-xl border p-3">
+            <option value="">Region</option>{zoneRegions(zoneCities).map(item => <option key={item} value={item}>{item}</option>)}
+          </select>
           <div className="grid grid-cols-2 gap-3">
-            <input
+            <select
               name="city"
               required
               value={city}
-              onChange={(event) => setCity(event.target.value)}
-              placeholder="City / municipality"
+              onChange={(event) => { const value = event.target.value; setCity(value); setDistrict(''); setBarangay(''); setProvince(findZoneCity(zoneCities, value)?.provinceName || 'Metro Manila'); }}
               className="rounded-xl border p-3"
-            />
+            ><option value="">City / municipality</option>{citiesInZoneRegion(zoneCities, region).map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
+            <select required value={district} onChange={(event) => { setDistrict(event.target.value); setBarangay(''); }} disabled={!selectedZoneCity} className="rounded-xl border p-3 disabled:bg-slate-100"><option value="">Local council district</option>{selectedZoneCity?.districts.map(item => <option key={item.name}>{item.name}</option>)}</select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <select name="barangay" required={Boolean(selectedZoneDistrict?.areas.length)} value={barangay} onChange={(event) => setBarangay(event.target.value)} disabled={!selectedZoneDistrict} className="rounded-xl border p-3 disabled:bg-slate-100"><option value="">Barangay / area</option>{selectedZoneDistrict?.areas.map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
             <input
               name="province"
               required

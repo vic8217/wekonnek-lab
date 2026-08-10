@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { categoriesApi, subCategoriesApi } from '@/lib/api';
 import Link from 'next/link';
+import { citiesInZoneRegion, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
 
 interface Category {
   id: number;
@@ -22,6 +23,8 @@ export default function PostAdPage() {
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
+  const [zoneCities, setZoneCities] = useState<ZoneCityOption[]>([]);
+  const [selectedRegion, setSelectedRegion] = useState('');
   const [formData, setFormData] = useState({
     adType: 'items' as 'items' | 'services' | 'labor',
     title: '',
@@ -31,6 +34,7 @@ export default function PostAdPage() {
     minPrice: '500',
     maxPrice: '2000',
     barangay: '',
+    district: '',
     city: '',
     preferredDate: '',
     contactMethod: 'in-app',
@@ -39,7 +43,10 @@ export default function PostAdPage() {
 
   useEffect(() => {
     fetchCategories();
+    loadAdminZoneAddresses().then(setZoneCities).catch(() => setZoneCities([]));
   }, []);
+  const selectedCity = findZoneCity(zoneCities, formData.city);
+  const selectedDistrict = findZoneDistrict(selectedCity, formData.district);
 
   useEffect(() => {
     if (formData.categoryId) {
@@ -252,30 +259,25 @@ export default function PostAdPage() {
           <p className="text-gray-600 mb-4">Where do you need this service or item?</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Barangay</label>
-              <input
-                type="text"
-                name="barangay"
-                value={formData.barangay}
-                onChange={handleInputChange}
-                placeholder="e.g. Poblacion"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-2">Region <span className="text-red-600">*</span></label>
+              <select value={selectedRegion} onChange={event => { setSelectedRegion(event.target.value); setFormData(current => ({ ...current, city: '', district: '', barangay: '' })); }} required className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                <option value="">Select region</option>{zoneRegions(zoneCities).map(region => <option key={region} value={region}>{region}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 City <span className="text-red-600">*</span>
               </label>
-              <input
-                type="text"
+              <select
                 name="city"
                 value={formData.city}
-                onChange={handleInputChange}
-                placeholder="e.g. Manila"
+                onChange={event => setFormData(current => ({ ...current, city: event.target.value, district: '', barangay: '' }))}
                 required
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
+              ><option value="">Select city</option>{citiesInZoneRegion(zoneCities, selectedRegion).map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
             </div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-2">Local Council District <span className="text-red-600">*</span></label><select name="district" value={formData.district} onChange={event => setFormData(current => ({ ...current, district: event.target.value, barangay: '' }))} required disabled={!selectedCity} className="w-full px-4 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"><option value="">Select district</option>{selectedCity?.districts.map(item => <option key={item.name}>{item.name}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-2">Barangay / Area</label><select name="barangay" value={formData.barangay} onChange={handleInputChange} disabled={!selectedDistrict} required={Boolean(selectedDistrict?.areas.length)} className="w-full px-4 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"><option value="">Select barangay / area</option>{selectedDistrict?.areas.map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select></div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Date / Deadline</label>
               <div className="relative">

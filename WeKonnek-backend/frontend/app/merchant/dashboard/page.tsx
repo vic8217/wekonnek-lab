@@ -27,6 +27,10 @@ interface MerchantData {
   daily_subscription_fee?: number;
   funded_days?: number;
   active_through?: string | null;
+  rating?: number;
+  followers?: number;
+  response_rate?: number;
+  total_sales?: number;
 }
 
 interface MerchantOrder {
@@ -124,6 +128,7 @@ export default function MerchantDashboardPage() {
   const [reloading, setReloading] = useState(false);
   const [listingCount, setListingCount] = useState(0);
   const [monthlyOrderCount, setMonthlyOrderCount] = useState(0);
+  const [totalOrderCount, setTotalOrderCount] = useState(0);
   const [activeShop, setActiveShop] = useState<ActiveShop | null>(null);
   const [merchantShops, setMerchantShops] = useState<ActiveShop[]>([]);
   const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlertSummary | null>(null);
@@ -181,6 +186,7 @@ export default function MerchantDashboardPage() {
             : Array.isArray(ordersData?.data)
               ? ordersData.data
               : [];
+          setTotalOrderCount(orders.length);
           const orderType = (order: MerchantOrder) =>
             order.order_type ||
             (order.delivery_address ? 'delivery' : order.table_number ? 'in_store' : 'pickup');
@@ -372,8 +378,21 @@ export default function MerchantDashboardPage() {
         </div>
       </div>
 
-      {/* Shop operations summary */}
-      <section>
+      {isShopPortal && <section>
+        <div className="mb-4"><h2 className="text-xl font-bold text-gray-900">Shop Performance</h2><p className="text-sm text-gray-600">Catalogue and customer activity for this shop.</p></div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          {[
+            { label: 'Total Products', value: listingCount, icon: '📦' },
+            { label: 'Total Sales', value: Number(merchant?.total_sales ?? totalOrderCount).toLocaleString(), icon: '🛒' },
+            { label: 'Shop Rating', value: Number(merchant?.rating ?? 0).toFixed(1), icon: '⭐' },
+            { label: 'Response Rate', value: `${Number(merchant?.response_rate ?? 0)}%`, icon: '💬' },
+            { label: 'Followers', value: Number(merchant?.followers ?? 0).toLocaleString(), icon: '👥' },
+          ].map(stat => <article key={stat.label} className="rounded-xl border border-gray-200 bg-white p-4 text-center shadow-sm"><p className="text-2xl">{stat.icon}</p><p className="mt-1 text-2xl font-black text-gray-900">{stat.value}</p><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{stat.label}</p></article>)}
+        </div>
+      </section>}
+
+      {/* Merchant-wide operations summary. Branch operations live in My Shop. */}
+      {!isShopPortal && <section>
         <div className="mb-4">
           <h2 className="text-xl font-bold text-gray-900">Shop(s) Operation Summary</h2>
           <p className="text-sm text-gray-600">Monitor orders across all of your shops.</p>
@@ -401,7 +420,7 @@ export default function MerchantDashboardPage() {
             </article>
           ))}
         </div>
-      </section>
+      </section>}
 
       {!isShopPortal && inventoryAlerts && <Link href="/merchant/inventory-summary" className={`block rounded-xl border p-5 shadow-sm transition hover:shadow-md ${inventoryAlerts.totals.shopsNeedingRestock ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><p className={`text-sm font-bold uppercase tracking-wide ${inventoryAlerts.totals.shopsNeedingRestock ? 'text-amber-700' : 'text-emerald-700'}`}>Inventory Health</p><h2 className="mt-1 text-xl font-black text-gray-900">{inventoryAlerts.totals.shopsNeedingRestock ? `${inventoryAlerts.totals.shopsNeedingRestock} shop${inventoryAlerts.totals.shopsNeedingRestock === 1 ? '' : 's'} need restocking` : 'All shops are sufficiently stocked'}</h2><p className="mt-1 text-sm text-gray-600">{inventoryAlerts.totals.lowStockItems} low-stock item{inventoryAlerts.totals.lowStockItems === 1 ? '' : 's'} · {inventoryAlerts.totals.outOfStockItems} out-of-stock item{inventoryAlerts.totals.outOfStockItems === 1 ? '' : 's'}</p></div><div className="flex flex-wrap gap-2">{inventoryAlerts.shops.filter(shop => shop.lowStockCount + shop.outOfStockCount > 0).slice(0, 4).map(shop => <span key={shop.id} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-amber-800 shadow-sm">{shop.name}: {shop.lowStockCount + shop.outOfStockCount}</span>)}<span className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-bold text-white">View Inventory →</span></div></div></Link>}
 

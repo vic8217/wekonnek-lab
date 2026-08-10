@@ -40,13 +40,14 @@ interface Product {
   merchant_id: number;
   name: string;
   description: string | null;
+  notes?: Array<{ title: string; text?: string; iconUrl?: string }>;
   price: number;
   image_url: string | null;
   is_available: boolean;
   quantity: number | null;
   availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable';
   hasVariants?: boolean;
-  variants?: Array<{ id: number; sku: string; availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable'; optionValues?: Array<{ optionValue: { value: string } }> }>;
+  variants?: Array<{ id: number; sku: string; price?: number | null; availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable'; optionValues?: Array<{ optionValue: { value: string } }> }>;
   category_id: number | null;
   sub_category_id: number | null;
 }
@@ -209,7 +210,7 @@ export default function CustomerMerchantDetailPage() {
     cartAdd(merchant.id, {
       product_id: product.id,
       product_name: product.name,
-      price: product.price,
+      price: Number(variant?.price ?? product.price),
       image_url: product.image_url || undefined,
       merchant_id: merchant.id,
       shop_id: selectedShopId || undefined,
@@ -560,9 +561,10 @@ export default function CustomerMerchantDetailPage() {
                         {product.description}
                       </p>
                     )}
+                    {product.notes?.length ? <div className="mt-2 space-y-1">{product.notes.map((note, noteIndex) => <div key={`${note.title}-${noteIndex}`} className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-900">{note.iconUrl ? <img src={note.iconUrl} alt="" className="h-5 w-5 rounded object-cover" /> : <span>📝</span>}<span><strong>{note.title}</strong>{note.text ? ` — ${note.text}` : ''}</span></div>)}</div> : null}
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-base font-black text-[#DB0002]">
-                        ₱{Number(product.price).toFixed(2)}
+                        ₱{Number(selectedVariant?.price ?? product.price).toFixed(2)}
                       </span>
                       {product.quantity != null && product.quantity > 0 && (
                         <span className="text-[10px] text-gray-400">
@@ -571,7 +573,7 @@ export default function CustomerMerchantDetailPage() {
                       )}
                     </div>
                     <div className="mt-3">
-                      {product.hasVariants && product.variants?.length ? <select value={selectedVariants[product.id] || ''} onChange={event => setSelectedVariants(current => ({ ...current, [product.id]: Number(event.target.value) }))} disabled={inCart > 0} className="mb-2 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs"><option value="">Select variant</option>{product.variants.map(variant => <option key={variant.id} value={variant.id} disabled={variant.availabilityStatus !== 'Available'}>{variant.optionValues?.map(link => link.optionValue.value).join(' / ') || variant.sku}{variant.availabilityStatus !== 'Available' ? ' — Out of Stock' : ''}</option>)}</select> : null}
+                      {product.hasVariants && product.variants?.length ? <select value={selectedVariants[product.id] || ''} onChange={event => setSelectedVariants(current => ({ ...current, [product.id]: Number(event.target.value) }))} disabled={inCart > 0} className="mb-2 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs"><option value="">Select variant</option>{product.variants.map(variant => <option key={variant.id} value={variant.id} disabled={variant.availabilityStatus !== 'Available'}>{variant.optionValues?.map(link => link.optionValue.value).join(' / ') || variant.sku} — ₱{Number(variant.price ?? product.price).toFixed(2)}{variant.availabilityStatus !== 'Available' ? ' — Out of Stock' : ''}</option>)}</select> : null}
                       {inCart === 0 ? (
                         <button
                           onClick={() => handleAdd(product)}

@@ -17,11 +17,13 @@ const VARIANT_EXAMPLES = [
 ];
 type OptionRow = { name: string; values: string };
 type VariantRow = { sku: string; barcode: string; price: string; imageUrl: string; isActive: boolean; optionValues: Record<string, string> };
+type NoteRow = { title: string; text: string; iconUrl: string; iconFile?: File };
 
 export default function ProductCatalogueForm({ productId }: { productId?: number }) {
   const router = useRouter();
   const pathname = usePathname();
   const basePath = pathname.startsWith('/shop') ? '/shop' : '/merchant';
+  const draftKey = `wk_product_draft:${pathname}`;
   const fileRef = useRef<HTMLInputElement>(null);
   const [categories, setCategories] = useState<Array<{ id: number; name: string }>>([]);
   const [subcategories, setSubcategories] = useState<Array<{ id: number; name: string }>>([]);
@@ -31,9 +33,29 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   const [categoryName, setCategoryName] = useState('');
   const [savingCategory, setSavingCategory] = useState(false);
   const [loading, setLoading] = useState(Boolean(productId));
+  const [customUnit, setCustomUnit] = useState(false);
   const [options, setOptions] = useState<OptionRow[]>([]);
   const [variants, setVariants] = useState<VariantRow[]>([]);
+  const [notes, setNotes] = useState<NoteRow[]>([]);
   const [form, setForm] = useState({ name: '', description: '', brand: '', categoryId: '', subCategoryId: '', unit: 'Piece', sellingPrice: '', costPrice: '', discountPrice: '', baseSku: '', barcode: '', hasVariants: false, trackInventory: false, availabilityStatus: 'Available' });
+
+  useEffect(() => {
+    if (productId) return;
+    const saved = sessionStorage.getItem(draftKey);
+    if (!saved) return;
+    try {
+      const draft = JSON.parse(saved);
+      if (draft.form) setForm(current => ({ ...current, ...draft.form }));
+      if (Array.isArray(draft.options)) setOptions(draft.options);
+      if (Array.isArray(draft.variants)) setVariants(draft.variants);
+      if (Array.isArray(draft.notes)) setNotes(draft.notes);
+      if (typeof draft.preview === 'string') setPreview(draft.preview);
+      setCustomUnit(Boolean(draft.customUnit));
+      toast.success('Your product setup has been restored');
+    } catch {
+      sessionStorage.removeItem(draftKey);
+    }
+  }, [draftKey, productId]);
 
   useEffect(() => { categoriesApi.getMine().then(data => setCategories(data || [])).catch(() => toast.error('Unable to load categories')); }, []);
   useEffect(() => {
@@ -43,16 +65,20 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   useEffect(() => {
     if (!productId) return;
     productsApi.getById(productId).then((product: Product) => {
+      setCustomUnit(Boolean(product.unit && !UNITS.includes(product.unit)));
       setForm({
         name: product.name || '', description: product.description || '', brand: product.brand || '', categoryId: String(product.categoryId || ''), subCategoryId: String(product.subCategoryId || ''), unit: product.unit || 'Piece', sellingPrice: String(product.sellingPrice ?? product.price ?? ''), costPrice: String(product.costPrice ?? ''), discountPrice: String(product.discountPrice ?? ''), baseSku: product.baseSku || product.sku || product.productCode || '', barcode: product.barcode || '', hasVariants: Boolean(product.hasVariants), trackInventory: Boolean(product.trackInventory), availabilityStatus: product.availabilityStatus || (product.isAvailable ? 'Available' : 'Unavailable'),
       });
       setPreview(product.imageUrl || null);
       setOptions((product.options || []).map(option => ({ name: option.name, values: option.values.map(value => value.value).join(', ') })));
       setVariants((product.variants || []).map(variant => ({ sku: variant.sku, barcode: variant.barcode || '', price: String(variant.price ?? ''), imageUrl: variant.imageUrl || '', isActive: variant.isActive, optionValues: Object.fromEntries((variant.optionValues || []).map(link => [link.optionValue.option.name, link.optionValue.value])) })));
+      setNotes((product.notes || []).map(note => ({ title: note.title, text: note.text || '', iconUrl: note.iconUrl || '' })));
     }).catch(() => toast.error('Unable to load product')).finally(() => setLoading(false));
   }, [productId]);
 
   const optionValues = (option: OptionRow) => option.values.split(',').map(value => value.trim()).filter(Boolean);
+  const allVariantsPriced = form.hasVariants && variants.length > 0 && variants.every(variant => variant.price.trim() !== '');
+  const needsBasePrice = !allVariantsPriced;
   const update = (name: string, value: string | boolean) => setForm(current => ({ ...current, [name]: value }));
   const openCategoryDialog = (type: 'category' | 'subcategory') => { setCategoryName(''); setCategoryDialog(type); };
   const createCategoryOption = async (event: React.FormEvent) => {
@@ -82,23 +108,46 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
     event.preventDefault();
     if (form.hasVariants && (!options.length || !variants.length)) return toast.error('Add at least one option and variant.');
     if (form.hasVariants && variants.some(variant => !variant.sku.trim())) return toast.error('Every variant needs a unique SKU.');
+    if (needsBasePrice && !form.sellingPrice.trim()) return toast.error('Enter a selling price because one or more variants use the base price.');
     setSaving(true);
+    let draftPreview = preview;
     try {
       let imageUrl = preview || undefined;
-      if (fileRef.current?.files?.[0]) imageUrl = await uploadApi.uploadFile(fileRef.current.files[0], 'establishment');
+      if (fileRef.current?.files?.[0]) {
+        imageUrl = await uploadApi.uploadFile(fileRef.current.files[0], 'establishment');
+        draftPreview = imageUrl;
+        setPreview(imageUrl);
+      }
+      const savedNotes = await Promise.all(notes.filter(note => note.title.trim() || note.text.trim()).map(async note => ({
+        title: note.title.trim(),
+        text: note.text.trim() || undefined,
+        iconUrl: note.iconFile ? await uploadApi.uploadFile(note.iconFile, 'establishment') : note.iconUrl || undefined,
+      })));
       const payload: CreateProductData = {
-        name: form.name, description: form.description || undefined, brand: form.brand || undefined,
+        name: form.name, description: form.description || undefined, notes: savedNotes, brand: form.brand || undefined,
         categoryId: form.categoryId ? Number(form.categoryId) : undefined, subCategoryId: form.subCategoryId ? Number(form.subCategoryId) : undefined,
-        unit: form.unit, sellingPrice: Number(form.sellingPrice), costPrice: form.costPrice ? Number(form.costPrice) : undefined, discountPrice: form.discountPrice ? Number(form.discountPrice) : undefined,
+        unit: form.unit, sellingPrice: needsBasePrice ? Number(form.sellingPrice) : 0, costPrice: form.costPrice ? Number(form.costPrice) : undefined, discountPrice: needsBasePrice && form.discountPrice ? Number(form.discountPrice) : undefined,
         baseSku: form.baseSku || undefined, barcode: form.barcode || undefined, imageUrl, hasVariants: form.hasVariants, trackInventory: form.trackInventory, availabilityStatus: form.availabilityStatus,
         options: form.hasVariants ? options.filter(option => option.name.trim()).map(option => ({ name: option.name.trim(), values: optionValues(option) })) : [],
         variants: form.hasVariants ? variants.map(variant => ({ sku: variant.sku.trim(), barcode: variant.barcode || undefined, price: variant.price ? Number(variant.price) : undefined, imageUrl: variant.imageUrl || undefined, isActive: variant.isActive, optionValues: variant.optionValues })) : [],
       };
       const saved = productId ? await productsApi.update(productId, payload) : await productsApi.create(payload);
       if (form.categoryId) await syncProductCategories(Number(saved.id), [{ categoryId: Number(form.categoryId), subCategoryId: form.subCategoryId ? Number(form.subCategoryId) : null, isPrimary: true }]);
+      sessionStorage.removeItem(draftKey);
       toast.success(productId ? 'Product updated' : 'Product added');
       router.push(`${basePath}/inventory`);
-    } catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to save product'); }
+    } catch (error: any) {
+      const responseMessage = error?.response?.data?.message;
+      const message = Array.isArray(responseMessage)
+        ? responseMessage.join(', ')
+        : responseMessage || (error instanceof Error ? error.message : 'Unable to save product');
+      toast.dismiss();
+      if (message.toLowerCase().includes('tax classification')) {
+        toast.custom(t => <div role="alert" className="w-full max-w-md rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-xl"><p className="font-semibold text-amber-950">Merchant information required</p><p className="mt-1 text-sm text-amber-900">{message}</p><div className="mt-3 flex items-center gap-3"><button type="button" onClick={() => { sessionStorage.setItem(draftKey, JSON.stringify({ form, options, variants, preview: draftPreview, customUnit })); toast.dismiss(t.id); router.push(`${basePath}/profile?returnTo=${encodeURIComponent(pathname)}`); }} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">Complete Merchant Profile</button><button type="button" onClick={() => toast.dismiss(t.id)} className="text-sm font-semibold text-amber-800">Close</button></div></div>, { id: 'product-save-error', duration: 10000 });
+      } else {
+        toast.error(message, { id: 'product-save-error', duration: 6000 });
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -106,15 +155,24 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   return <div className="space-y-6"><div><h1 className="text-3xl font-bold text-gray-900">{productId ? 'Edit' : 'Add'} Product / Service</h1><p className="mt-1 text-gray-600">Build an industry-neutral catalogue item.</p></div>
     <form onSubmit={submit} className="space-y-6">
       <Section title="Basic Information"><div className="grid gap-4 md:grid-cols-2">
+        <Field label="Category" required><div className="flex gap-2"><select required autoFocus value={form.categoryId} onChange={e => { update('categoryId', e.target.value); update('subCategoryId', ''); }} className="input"><option value="" disabled>{categories.length ? 'Select a category' : 'Create a category first'}</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" onClick={() => openCategoryDialog('category')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50">+ Create</button></div></Field>
+        <Field label="Subcategory (optional)"><div className="flex gap-2"><select value={form.subCategoryId} onChange={e => update('subCategoryId', e.target.value)} className="input" disabled={!form.categoryId}><option value="">{form.categoryId ? 'None' : 'Select a category first'}</option>{subcategories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" disabled={!form.categoryId} onClick={() => openCategoryDialog('subcategory')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400">+ Create</button></div></Field>
         <Field label="Product Name" required><input required value={form.name} onChange={e => update('name', e.target.value)} className="input" /></Field>
         <Field label="Brand (optional)"><input value={form.brand} onChange={e => update('brand', e.target.value)} className="input" /></Field>
-        <Field label="Unit" required><select required value={form.unit} onChange={e => update('unit', e.target.value)} className="input">{UNITS.map(value => <option key={value}>{value}</option>)}</select></Field>
-        <Field label="Category"><div className="flex gap-2"><select value={form.categoryId} onChange={e => { update('categoryId', e.target.value); update('subCategoryId', ''); }} className="input"><option value="" disabled>{categories.length ? 'Select a category' : 'Create a category first'}</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" onClick={() => openCategoryDialog('category')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50">+ Create</button></div></Field>
-        <Field label="Subcategory (optional)"><div className="flex gap-2"><select value={form.subCategoryId} onChange={e => update('subCategoryId', e.target.value)} className="input" disabled={!form.categoryId}><option value="">{form.categoryId ? 'None' : 'Select a category first'}</option>{subcategories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" disabled={!form.categoryId} onClick={() => openCategoryDialog('subcategory')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400">+ Create</button></div></Field>
-        <div className="md:col-span-2"><Field label="Description"><textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} className="input" /></Field></div>
+        <Field label="Unit" required>{customUnit ? <div className="flex gap-2"><input required autoFocus value={form.unit} onChange={e => update('unit', e.target.value)} className="input" placeholder="Enter your unit, e.g. Tray" /><button type="button" onClick={() => { setCustomUnit(false); update('unit', 'Piece'); }} className="shrink-0 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">Use supplied units</button></div> : <select required value={form.unit} onChange={e => { if (e.target.value === '__custom__') { setCustomUnit(true); update('unit', ''); } else update('unit', e.target.value); }} className="input">{UNITS.map(value => <option key={value}>{value}</option>)}<option value="__custom__">+ Add custom unit</option></select>}</Field>
+          <div className="md:col-span-2"><Field label="Description"><textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} className="input" /></Field></div>
+          <div className="md:col-span-2 rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-gray-900">Product Notes</h3><p className="text-xs text-gray-500">Add multiple details such as Chef Recommendation, Spice Level, allergens, or preparation notes.</p></div><button type="button" onClick={() => setNotes(current => [...current, { title: '', text: '', iconUrl: '' }])} className="rounded-lg border border-red-600 px-4 py-2 text-sm font-semibold text-red-600">+ Add Note</button></div>
+            <div className="mt-4 space-y-3">{notes.map((note, index) => <div key={index} className="grid gap-3 rounded-lg border border-gray-200 p-3 md:grid-cols-[72px_1fr_1.5fr_auto]">
+              <label className="relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-gray-50 text-2xl text-gray-400" title="Add note icon or image">{note.iconUrl ? <Image src={note.iconUrl} alt="" fill unoptimized className="object-cover" /> : <span>🖼️</span>}<input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) setNotes(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, iconFile: file, iconUrl: URL.createObjectURL(file) } : item)); }} /></label>
+              <input value={note.title} onChange={event => setNotes(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} placeholder="Note label, e.g. Chef Recommendation" className="input" />
+              <input value={note.text} onChange={event => setNotes(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} placeholder="Note details, e.g. Best served spicy" className="input" />
+              <button type="button" onClick={() => setNotes(current => current.filter((_, itemIndex) => itemIndex !== index))} className="font-semibold text-red-600">Remove</button>
+            </div>)}</div>
+          </div>
       </div></Section>
       <Section title="Pricing and Identification"><div className="grid gap-4 md:grid-cols-3">
-        <Field label="Selling Price" required><input required type="number" min="0" step="0.01" value={form.sellingPrice} onChange={e => update('sellingPrice', e.target.value)} className="input" /></Field>
+        <Field label={allVariantsPriced ? "Base Selling Price (not used)" : "Selling Price"} required={needsBasePrice}><input required={needsBasePrice} disabled={allVariantsPriced} type="number" min="0" step="0.01" value={form.sellingPrice} onChange={e => update('sellingPrice', e.target.value)} placeholder={allVariantsPriced ? "Each variant has its own price" : "Fallback for variants without a price"} className="input disabled:bg-gray-100 disabled:text-gray-400" /></Field>
         <Field label="Cost Price (optional)"><input type="number" min="0" step="0.01" value={form.costPrice} onChange={e => update('costPrice', e.target.value)} className="input" /></Field>
         <Field label="Discount Price (optional)"><input type="number" min="0" step="0.01" value={form.discountPrice} onChange={e => update('discountPrice', e.target.value)} className="input" /></Field>
         <Field label="SKU / Product Code (optional)"><input value={form.baseSku} onChange={e => update('baseSku', e.target.value)} className="input" /></Field>

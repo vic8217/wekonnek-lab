@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic';
 import type L from 'leaflet';
 import toast from 'react-hot-toast';
 import { uploadApi } from '@/lib/api';
+import { findZoneCity, findZoneDistrict, loadAdminZoneAddresses, type ZoneCityOption } from '@/lib/zone-address';
 import {
 	BadgeDollarSign, BriefcaseBusiness, CalendarDays, Check, CheckCircle2, ClipboardCheck,
 	Crosshair, GraduationCap, Handshake, MapPin, Megaphone, Network, Phone, Send,
@@ -30,24 +31,6 @@ const perks = [
 	{ icon: MapPin, text: 'Support local businesses in your area' },
 	{ icon: CalendarDays, text: 'Flexible schedule' },
 ];
-
-const NCR_CITIES = [
-	'Caloocan', 'Las Piñas', 'Makati', 'Malabon', 'Mandaluyong', 'Manila',
-	'Marikina', 'Muntinlupa', 'Navotas', 'Parañaque', 'Pasay', 'Pasig',
-	'Quezon City', 'San Juan', 'Taguig', 'Valenzuela', 'Pateros',
-];
-
-const NCR_CITY_CENTERS: Record<string, [number, number]> = {
-	'Caloocan': [14.7566, 121.0450], 'Las Piñas': [14.4453, 120.9939],
-	'Makati': [14.5547, 121.0244], 'Malabon': [14.6681, 120.9658],
-	'Mandaluyong': [14.5794, 121.0359], 'Manila': [14.5995, 120.9842],
-	'Marikina': [14.6507, 121.1029], 'Muntinlupa': [14.4081, 121.0415],
-	'Navotas': [14.6732, 120.9350], 'Parañaque': [14.4793, 121.0198],
-	'Pasay': [14.5378, 121.0014], 'Pasig': [14.5764, 121.0851],
-	'Quezon City': [14.6760, 121.0437], 'San Juan': [14.6019, 121.0355],
-	'Taguig': [14.5176, 121.0509], 'Valenzuela': [14.7011, 120.9830],
-	'Pateros': [14.5447, 121.0680],
-};
 
 const LocationMap = dynamic(() => import('@/components/LocationMap'), {
 	ssr: false,
@@ -100,12 +83,17 @@ function CoordinatorForm() {
 	const [region, setRegion] = useState('');
 	const [province, setProvince] = useState('');
 	const [city, setCity] = useState('');
+	const [district, setDistrict] = useState('');
+	const [barangay, setBarangay] = useState('');
+	const [zoneCities, setZoneCities] = useState<ZoneCityOption[]>([]);
 	const [selectedLocation, setSelectedLocation] = useState<[number, number] | null>(null);
 	const [locating, setLocating] = useState(false);
 	const [locationMessage, setLocationMessage] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [openPolicy, setOpenPolicy] = useState<'terms' | 'privacy' | null>(null);
 	const locationEnabled = region === 'NCR';
+	const cityOption = findZoneCity(zoneCities, city);
+	const districtOption = findZoneDistrict(cityOption, district);
 	const setCoordinates = (latitude: number, longitude: number) => setSelectedLocation([latitude, longitude]);
 	const locateUser = useCallback(() => {
 		if (!navigator.geolocation) {
@@ -131,6 +119,24 @@ function CoordinatorForm() {
 		const request = window.setTimeout(locateUser, 0);
 		return () => window.clearTimeout(request);
 	}, [locateUser]);
+	useEffect(() => {
+		loadAdminZoneAddresses()
+			.then(setZoneCities)
+			.catch(() => setZoneCities([]));
+	}, []);
+	useEffect(() => {
+		if (!city) return;
+		const query = [barangay, district, city, 'Philippines'].filter(Boolean).join(', ');
+		const controller = new AbortController();
+		const timer = window.setTimeout(() => fetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+			.then(response => response.ok ? response.json() : null)
+			.then(body => {
+				const point = body?.results?.[0]?.location;
+				if (point) setSelectedLocation([Number(point.lat), Number(point.lng)]);
+			})
+			.catch(() => {}), 200);
+		return () => { window.clearTimeout(timer); controller.abort(); };
+	}, [barangay, city, district]);
 	const handleMarkerDrag = (event: L.DragEndEvent) => {
 		const point = event.target.getLatLng();
 		setCoordinates(point.lat, point.lng);
@@ -159,7 +165,7 @@ function CoordinatorForm() {
 			const result = contentType.includes('application/json') ? await response.json() : { message: 'Application service is unavailable. Please try again.' };
 			if (!response.ok) throw new Error(result.message || 'Unable to submit application');
 			toast.success('Coordinator application submitted successfully.');
-			form.reset(); setRegion(''); setProvince(''); setCity(''); setSelectedLocation(null);
+			form.reset(); setRegion(''); setProvince(''); setCity(''); setDistrict(''); setBarangay(''); setSelectedLocation(null);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : 'Unable to submit application');
 		} finally { setSubmitting(false); }
@@ -172,8 +178,8 @@ function CoordinatorForm() {
 			<FormGroup icon={MapPin} title="LOCATION COVERAGE"><div className="grid gap-3 sm:grid-cols-3">
 				<SelectField label="Region" text="Select region" name="region" value={region} options={[{ value: 'NCR', label: 'National Capital Region (NCR)' }]} onChange={value => { setRegion(value); setProvince(''); setCity(''); setSelectedLocation(null); }} />
 				<SelectField label="Province / District" text="Select province / district" name="provinceDistrict" value={province} disabled={!locationEnabled} options={locationEnabled ? [{ value: 'Metro Manila', label: 'Metro Manila' }] : []} onChange={value => { setProvince(value); setCity(''); setSelectedLocation(null); }} />
-				<SelectField label="City / Municipality" text="Select city / municipality" name="cityMunicipality" value={city} disabled={!province} options={province ? NCR_CITIES.map(name => ({ value: name, label: name })) : []} onChange={value => { setCity(value); setSelectedLocation(value ? NCR_CITY_CENTERS[value] : null); }} />
-			</div><div className="mt-3 grid gap-3 sm:grid-cols-3"><Field name="barangay" label="Barangay" placeholder="Enter barangay" /><div className="sm:col-span-2"><Field name="preferredCoverageArea" label="Preferred Coverage Area" placeholder="Example: Barangays, puroks, subdivisions, or commercial areas" /></div></div>
+				<SelectField label="City / Municipality" text="Select city / municipality" name="cityMunicipality" value={city} disabled={!province} options={province ? zoneCities.map(item => ({ value: item.name, label: item.name })) : []} onChange={value => { setCity(value); setDistrict(''); setBarangay(''); setSelectedLocation(null); }} />
+			</div><div className="mt-3 grid gap-3 sm:grid-cols-3"><SelectField name="councilDistrict" label="Local Council District" text="Select council district" value={district} disabled={!cityOption} options={(cityOption?.districts || []).map(item => ({ value: item.name, label: item.name }))} onChange={value => { setDistrict(value); setBarangay(''); }} /><SelectField name="barangay" label="Barangay / Area" text="Select barangay / area" value={barangay} disabled={!districtOption} options={(districtOption?.areas || []).map(item => ({ value: item.name, label: item.name }))} onChange={setBarangay} /><div><Field name="preferredCoverageArea" label="Preferred Coverage Area" placeholder="Optional notes about the requested territory" /></div></div>
 				<div className="mt-4 overflow-hidden rounded-xl border border-[#ccd8e9] bg-slate-100">
 					<div className="relative h-64 sm:h-72"><LocationMap selectedLocation={selectedLocation} defaultCenter={[14.6091, 121.0223]} selectedZoom={17} onMapClick={setCoordinates} onMarkerDrag={handleMarkerDrag} /><button type="button" onClick={locateUser} disabled={locating} className="absolute right-3 top-3 z-[500] flex min-h-10 items-center gap-2 rounded-xl bg-white px-3 text-xs font-bold text-[#075cff] shadow-lg disabled:opacity-60"><Crosshair size={16} />{locating ? 'Locating…' : 'Use my location'}</button></div>
 					<div className="grid gap-3 border-t border-[#ccd8e9] bg-white p-3 sm:grid-cols-2">

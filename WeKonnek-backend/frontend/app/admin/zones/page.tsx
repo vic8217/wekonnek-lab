@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { MapPinned, Plus, Search, X, Pencil, Trash2, Building2, Map } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getToken } from '@/hooks/use-auth';
+import { NCR_COUNCIL_AREAS } from '@/lib/ncr-council-zones';
 
 type Region = { code: string; name: string; regionName?: string };
 type Province = { code: string; name: string; regionCode: string };
@@ -16,42 +17,8 @@ type Zone = { id: string; name: string; code: string; description: string | null
 const DISTRICTS = ['Lone District', '1st District', '2nd District', '3rd District', '4th District', '5th District', '6th District', '7th District', '8th District'];
 const GeographicAreaMap = dynamic(() => import('@/components/GeographicAreaMap'), { ssr: false });
 
-const NCR_CITY_COUNCIL_DISTRICTS: Record<string, string[]> = {
-  'City of Caloocan': ['1st District', '2nd District', '3rd District'],
-  'Caloocan City': ['1st District', '2nd District', '3rd District'],
-  'City of Las Piñas': ['1st District', '2nd District'],
-  'Las Piñas City': ['1st District', '2nd District'],
-  'City of Makati': ['1st District', '2nd District'],
-  'Makati City': ['1st District', '2nd District'],
-  'City of Malabon': ['1st District', '2nd District'],
-  'Malabon City': ['1st District', '2nd District'],
-  'City of Mandaluyong': ['1st District', '2nd District'],
-  'Mandaluyong City': ['1st District', '2nd District'],
-  'City of Manila': ['1st District', '2nd District', '3rd District', '4th District', '5th District', '6th District'],
-  'City of Marikina': ['1st District', '2nd District'],
-  'Marikina City': ['1st District', '2nd District'],
-  'City of Muntinlupa': ['1st District', '2nd District'],
-  'Muntinlupa City': ['1st District', '2nd District'],
-  'City of Navotas': ['1st District', '2nd District'],
-  'Navotas City': ['1st District', '2nd District'],
-  'City of Parañaque': ['1st District', '2nd District'],
-  'Parañaque City': ['1st District', '2nd District'],
-  'City of Pasay': ['1st District', '2nd District'],
-  'Pasay City': ['1st District', '2nd District'],
-  'City of Pasig': ['1st District', '2nd District'],
-  'Pasig City': ['1st District', '2nd District'],
-  'Quezon City': ['1st District', '2nd District', '3rd District', '4th District', '5th District', '6th District'],
-  'City of San Juan': ['1st District', '2nd District'],
-  'San Juan City': ['1st District', '2nd District'],
-  'City of Taguig': ['1st District', '2nd District'],
-  'Taguig City': ['1st District', '2nd District'],
-  'City of Valenzuela': ['1st District', '2nd District'],
-  'Valenzuela City': ['1st District', '2nd District'],
-  'Pateros': ['1st District', '2nd District'],
-  'Municipality of Pateros': ['1st District', '2nd District'],
-};
-
-const GEOGRAPHIC_AREAS: Record<string, Record<string, Area[]>> = {
+const GEOGRAPHIC_AREAS: Record<string, Record<string, Area[]>> = NCR_COUNCIL_AREAS;
+/* Legacy excerpt retained below only for reference while existing zones migrate.
   // City of Manila. These are its named geographic/administrative areas,
   // grouped under the city's six current city council districts.
   '133900000': {
@@ -102,7 +69,7 @@ const GEOGRAPHIC_AREAS: Record<string, Record<string, Area[]>> = {
       'San Antonio', 'San Martin de Porres', 'Sun Valley',
     ].map(name => ({ code: `paranaque-d2-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name })),
   },
-};
+}; */
 
 function api(path: string, init?: RequestInit) {
   const token = getToken();
@@ -183,7 +150,7 @@ export default function ZoneManagementPage() {
     const locality = localities.find(item => item.code === localityCode);
     if (!locality) return DISTRICTS;
     if (GEOGRAPHIC_AREAS[localityCode]) return Object.keys(GEOGRAPHIC_AREAS[localityCode]);
-    if (locality.regionCode === '130000000') return NCR_CITY_COUNCIL_DISTRICTS[locality.name] || ['1st District', '2nd District'];
+    if (locality.regionCode === '130000000') return ['1st District', '2nd District'];
     return DISTRICTS;
   }, [localities, localityCode]);
   const areaReservations = useMemo(() => {
@@ -206,7 +173,7 @@ export default function ZoneManagementPage() {
     if (!value) return;
     const mapping = GEOGRAPHIC_AREAS[value];
     const locality = localities.find(item => item.code === value);
-    const districtOptions = mapping ? Object.keys(mapping) : locality?.regionCode === '130000000' ? (NCR_CITY_COUNCIL_DISTRICTS[locality.name] || ['1st District', '2nd District']) : DISTRICTS;
+    const districtOptions = mapping ? Object.keys(mapping) : locality?.regionCode === '130000000' ? ['1st District', '2nd District'] : DISTRICTS;
     const nextDistrict = districtOptions[0];
     setDistrict(nextDistrict);
     setAreas(mapping?.[nextDistrict] || []);

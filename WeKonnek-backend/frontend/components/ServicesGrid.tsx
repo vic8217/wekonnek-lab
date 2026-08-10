@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
+import { merchantCategoriesApi, type MerchantCategory } from '@/lib/api';
 import {
   UtensilsCrossed,
   ShoppingBasket,
@@ -16,8 +18,10 @@ import {
 } from 'lucide-react';
 
 interface Service {
+  id?: number;
   name: string;
   icon: LucideIcon;
+  adminIcon?: string;
   href: string;
   /** Tailwind classes for the icon tile background + icon color. */
   bg: string;
@@ -43,6 +47,34 @@ const SERVICES: Service[] = [
   { name: 'Property', icon: House, href: '/property', bg: 'bg-gradient-to-br from-blue-500 to-indigo-700', color: 'text-white', details: 'Homes · Condos · Lots', stat: 'Near you', badge: 'New' },
 ];
 
+const CATEGORY_STYLES = [
+  { icon: UtensilsCrossed, bg: 'bg-gradient-to-br from-orange-400 to-red-500' },
+  { icon: ShoppingBasket, bg: 'bg-gradient-to-br from-emerald-400 to-green-600' },
+  { icon: Truck, bg: 'bg-gradient-to-br from-orange-400 to-amber-600' },
+  { icon: CalendarClock, bg: 'bg-gradient-to-br from-blue-400 to-indigo-600' },
+  { icon: Gift, bg: 'bg-gradient-to-br from-violet-500 to-purple-700' },
+  { icon: Ticket, bg: 'bg-gradient-to-br from-pink-400 to-rose-600' },
+  { icon: QrCode, bg: 'bg-gradient-to-br from-cyan-400 to-teal-600' },
+  { icon: LayoutGrid, bg: 'bg-gradient-to-br from-slate-500 to-slate-700' },
+  { icon: House, bg: 'bg-gradient-to-br from-blue-500 to-indigo-700' },
+];
+
+function managedService(category: MerchantCategory, index: number): Service {
+  const style = CATEGORY_STYLES[index % CATEGORY_STYLES.length];
+  const subcategories = category.subCategories || [];
+  return {
+    id: category.id,
+    name: category.name,
+    icon: style.icon,
+    adminIcon: category.icon?.trim(),
+    href: category.slug === 'property' ? '/property' : `/customer/explore/${category.slug}`,
+    bg: style.bg,
+    color: 'text-white',
+    details: category.description?.trim() || subcategories.slice(0, 3).map(item => item.name).join(' · ') || 'Explore local listings',
+    stat: `${subcategories.length} ${subcategories.length === 1 ? 'subcategory' : 'subcategories'}`,
+  };
+}
+
 const notifyComingSoon = (name: string) => toast(`${name} is coming soon!`, { icon: '🚧' });
 
 interface ServicesGridProps {
@@ -52,14 +84,31 @@ interface ServicesGridProps {
 }
 
 export default function ServicesGrid({ className = '', variant = 'mobile' }: ServicesGridProps) {
+  const [services, setServices] = useState<Service[]>(SERVICES);
+
+  useEffect(() => {
+    let active = true;
+    merchantCategoriesApi.getAll().then(categories => {
+      if (!active) return;
+      const managed = (categories || [])
+        .filter(category => category.isActive !== false)
+        .sort((a, b) => a.displayOrder - b.displayOrder)
+        .map(managedService);
+      if (managed.length) setServices(managed);
+    }).catch(() => {
+      // Keep the local defaults available while the backend is unavailable.
+    });
+    return () => { active = false; };
+  }, []);
+
   if (variant === 'desktop') {
     return (
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${className}`}>
-        {SERVICES.map(({ name, icon: Icon, href, bg, color, details, stat, badge, comingSoon }) => {
+        {services.map(({ id, name, icon: Icon, adminIcon, href, bg, color, details, stat, badge, comingSoon }) => {
           const inner = (
             <>
               <div className={`w-14 h-14 ${bg} rounded-full flex items-center justify-center`}>
-                <Icon className={`w-7 h-7 ${color}`} strokeWidth={1.9} />
+                {adminIcon ? <span className="text-2xl" aria-hidden="true">{adminIcon}</span> : <Icon className={`w-7 h-7 ${color}`} strokeWidth={1.9} />}
               </div>
               <span className="text-sm font-semibold text-gray-800">{name}</span>
               <span className="text-xs text-slate-500">{details}</span>
@@ -77,7 +126,7 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
           if (comingSoon) {
             return (
               <button
-                key={name}
+                key={id || name}
                 type="button"
                 onClick={() => notifyComingSoon(name)}
                 className={`${base} opacity-60 cursor-not-allowed`}
@@ -87,7 +136,7 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
             );
           }
           return (
-            <Link key={name} href={href} className={`${base} group hover:-translate-y-1.5 hover:shadow-[0_20px_42px_rgba(15,23,42,.14)] [&>div]:group-hover:scale-110`}>
+            <Link key={id || name} href={href} className={`${base} group hover:-translate-y-1.5 hover:shadow-[0_20px_42px_rgba(15,23,42,.14)] [&>div]:group-hover:scale-110`}>
               {inner}
             </Link>
           );
@@ -99,13 +148,13 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
   return (
     <section className={`px-4 ${className}`}>
       <div className="grid grid-cols-4 gap-x-2 gap-y-7 py-2">
-        {SERVICES.map(({ name, icon: Icon, href, bg, color, badge, comingSoon }) => {
+        {services.map(({ id, name, icon: Icon, adminIcon, href, bg, color, badge, comingSoon }) => {
           const inner = (
             <>
               <div
                 className={`relative mb-3 flex size-16 items-center justify-center rounded-[22px] ${bg} shadow-[0_10px_20px_rgba(15,23,42,.16)] transition-transform duration-200 group-active:scale-110 sm:size-[72px]`}
               >
-                <Icon className={`size-8 ${color} sm:size-9`} strokeWidth={1.8} />
+                {adminIcon ? <span className="text-3xl sm:text-4xl" aria-hidden="true">{adminIcon}</span> : <Icon className={`size-8 ${color} sm:size-9`} strokeWidth={1.8} />}
                 {comingSoon && (
                   <span className="absolute -top-1.5 -right-1.5 bg-gray-800 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                     SOON
@@ -121,7 +170,7 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
           if (comingSoon) {
             return (
               <button
-                key={name}
+                key={id || name}
                 type="button"
                 onClick={() => notifyComingSoon(name)}
                 className="relative flex min-h-[108px] min-w-0 flex-col items-center justify-start text-center opacity-60"
@@ -131,7 +180,7 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
             );
           }
           return (
-            <Link key={name} href={href} className="group relative flex min-h-[108px] min-w-0 flex-col items-center justify-start text-center transition-all duration-200 active:scale-[.94]">
+            <Link key={id || name} href={href} className="group relative flex min-h-[108px] min-w-0 flex-col items-center justify-start text-center transition-all duration-200 active:scale-[.94]">
               {inner}
             </Link>
           );
