@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-type DiscountType = 'percentage' | 'fixed' | 'bogo' | 'flash_sale';
+type DiscountType = 'percentage' | 'fixed' | 'bogo' | 'flash_sale' | 'bundle';
 type PromoStatus = 'active' | 'scheduled' | 'expired';
 
 interface Promotion {
@@ -16,113 +17,39 @@ interface Promotion {
   discount_type: DiscountType;
   discount_value: number;
   min_order_amount: number;
-  start_date: string;
-  end_date: string;
+  start_date: string | null;
+  end_date: string | null;
   status: PromoStatus;
   views: number;
   claims: number;
+  vouchers_to_issue: number;
   redemptions: number;
   applicable_categories: string[];
+  applies_to_total_bill?: boolean;
+  category_ids?: number[];
+  bundle_items?: Array<{ productId: number; productName: string; quantity: number }>;
+  bundle_price?: number;
 }
 
-const MOCK_PROMOTIONS: Promotion[] = [
-  {
-    id: 1,
-    title: 'Merienda Madness 50% OFF',
-    description: 'Half-off on all merienda items from 2PM-5PM. Perfect pang-hapon treat!',
-    discount_type: 'percentage',
-    discount_value: 50,
-    min_order_amount: 150,
-    start_date: '2026-06-15',
-    end_date: '2026-07-15',
-    status: 'active',
-    views: 4820,
-    claims: 1245,
-    redemptions: 890,
-    applicable_categories: ['Merienda', 'Snacks'],
-  },
-  {
-    id: 2,
-    title: 'Payday Weekend Sale',
-    description: 'Celebrate sweldo with ₱100 off on orders above ₱500!',
-    discount_type: 'fixed',
-    discount_value: 100,
-    min_order_amount: 500,
-    start_date: '2026-06-28',
-    end_date: '2026-06-30',
-    status: 'active',
-    views: 3210,
-    claims: 780,
-    redemptions: 542,
-    applicable_categories: ['All Items'],
-  },
-  {
-    id: 3,
-    title: 'Fiesta Bundle Deal',
-    description: 'Buy 1 Fiesta Platter, get 1 FREE Rice Bucket! Pang-handaan na!',
-    discount_type: 'bogo',
-    discount_value: 0,
-    min_order_amount: 0,
-    start_date: '2026-06-20',
-    end_date: '2026-07-20',
-    status: 'active',
-    views: 2950,
-    claims: 620,
-    redemptions: 410,
-    applicable_categories: ['Platters', 'Rice'],
-  },
-  {
-    id: 4,
-    title: 'Lunchtime Flash Sale',
-    description: '30-minute flash sale every weekday! Limited stocks, first-come first-served.',
-    discount_type: 'flash_sale',
-    discount_value: 40,
-    min_order_amount: 200,
-    start_date: '2026-07-01',
-    end_date: '2026-07-31',
-    status: 'scheduled',
-    views: 0,
-    claims: 0,
-    redemptions: 0,
-    applicable_categories: ['Lunch Combos'],
-  },
-  {
-    id: 5,
-    title: 'Salamat Po! Loyalty Promo',
-    description: 'Exclusive 20% off for returning customers. Maraming salamat sa tiwala!',
-    discount_type: 'percentage',
-    discount_value: 20,
-    min_order_amount: 300,
-    start_date: '2026-07-05',
-    end_date: '2026-08-05',
-    status: 'scheduled',
-    views: 0,
-    claims: 0,
-    redemptions: 0,
-    applicable_categories: ['All Items'],
-  },
-  {
-    id: 6,
-    title: 'Summer Sarap Blowout',
-    description: 'Summer is over but the deals were hot! ₱75 off on refreshing drinks.',
-    discount_type: 'fixed',
-    discount_value: 75,
-    min_order_amount: 250,
-    start_date: '2026-04-01',
-    end_date: '2026-05-31',
-    status: 'expired',
-    views: 8450,
-    claims: 3200,
-    redemptions: 2670,
-    applicable_categories: ['Drinks', 'Desserts'],
-  },
-];
+interface MerchantProduct {
+  id: number;
+  name: string;
+  categoryId?: number;
+  category?: { id: number; name: string };
+}
+
+interface MerchantBrand {
+  name: string;
+  logoUrl?: string;
+  coverImageUrl?: string;
+}
 
 const DISCOUNT_TYPE_LABELS: Record<DiscountType, { label: string; color: string }> = {
   percentage: { label: '% OFF', color: 'bg-orange-100 text-orange-800' },
   fixed: { label: 'FIXED', color: 'bg-blue-100 text-blue-800' },
   bogo: { label: 'BOGO', color: 'bg-purple-100 text-purple-800' },
   flash_sale: { label: 'FLASH SALE', color: 'bg-red-100 text-red-800' },
+  bundle: { label: 'BUNDLE', color: 'bg-purple-100 text-purple-800' },
 };
 
 const STATUS_COLORS: Record<PromoStatus, string> = {
@@ -137,6 +64,9 @@ export default function MerchantPromotionsPage() {
   const [activeFilter, setActiveFilter] = useState<'all' | PromoStatus>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionMenuId, setActionMenuId] = useState<number | null>(null);
+  const [noExpiration, setNoExpiration] = useState(false);
+  const [merchantProducts, setMerchantProducts] = useState<MerchantProduct[]>([]);
+  const [merchantBrand, setMerchantBrand] = useState<MerchantBrand | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -147,11 +77,41 @@ export default function MerchantPromotionsPage() {
     start_date: '',
     end_date: '',
     applicable_categories: '',
+    vouchers_to_issue: 1,
+    applies_to_total_bill: true,
+    category_ids: [] as number[],
+    bundle_items: [] as Array<{ productId: number; productName: string; quantity: number }>,
+    bundle_price: 0,
   });
 
   useEffect(() => {
     fetchPromotions();
+    const loadProducts = async () => {
+      const token = getToken();
+      if (!token) return;
+      const merchantResponse = await fetch(`${API}/api/merchants/me`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!merchantResponse.ok) return;
+      const merchant = await merchantResponse.json();
+      setMerchantBrand({
+        name: merchant.name || 'Merchant',
+        logoUrl: publicAssetUrl(merchant.logoUrl || merchant.logo_url),
+        coverImageUrl: publicAssetUrl(merchant.coverImageUrl || merchant.cover_image_url),
+      });
+      const response = await fetch(`${API}/api/products?merchantId=${merchant.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) return;
+      const body = await response.json();
+      setMerchantProducts(Array.isArray(body) ? body : body.data || []);
+    };
+    loadProducts().catch(() => toast.error('Unable to load merchant categories and products'));
   }, []);
+
+  const merchantCategories = Array.from(
+    new Map(
+      merchantProducts
+        .filter(product => product.category?.id || product.categoryId)
+        .map(product => [product.category?.id || product.categoryId!, { id: product.category?.id || product.categoryId!, name: product.category?.name || 'Uncategorized' }]),
+    ).values(),
+  );
 
   const fetchPromotions = async () => {
     try {
@@ -164,11 +124,11 @@ export default function MerchantPromotionsPage() {
       const data = await res.json();
       const list: Promotion[] = (Array.isArray(data) ? data : data.data || []).map((p: any) => {
         const now = new Date();
-        const start = new Date(p.start_date);
-        const end = new Date(p.end_date);
+        const start = p.start_date ? new Date(p.start_date) : null;
+        const end = p.end_date ? new Date(p.end_date) : null;
         let status: PromoStatus = 'active';
-        if (now < start) status = 'scheduled';
-        else if (now > end || !p.is_active) status = 'expired';
+        if (start && now < start) status = 'scheduled';
+        else if ((end && now > end) || !p.is_active) status = 'expired';
         return {
           id: p.id,
           title: p.title,
@@ -181,13 +141,15 @@ export default function MerchantPromotionsPage() {
           status,
           views: p.views || 0,
           claims: p.claims || 0,
+          vouchers_to_issue: Number(p.vouchers_to_issue || 0),
           redemptions: p.redemptions || 0,
           applicable_categories: p.applicable_categories || [],
         };
       });
-      setPromotions(list.length > 0 ? list : MOCK_PROMOTIONS);
+      setPromotions(list);
     } catch {
-      setPromotions(MOCK_PROMOTIONS);
+      setPromotions([]);
+      toast.error('Unable to load promotions');
     } finally {
       setLoading(false);
     }
@@ -201,18 +163,23 @@ export default function MerchantPromotionsPage() {
       discount_type: form.discount_type,
       discount_value: form.discount_value,
       min_order_amount: form.min_order_amount,
-      start_date: form.start_date,
-      end_date: form.end_date,
-      status: new Date(form.start_date) > new Date() ? 'scheduled' : 'active',
+      start_date: noExpiration ? null : form.start_date || null,
+      end_date: noExpiration ? null : form.end_date || null,
+      status: !noExpiration && form.start_date && new Date(form.start_date) > new Date() ? 'scheduled' : 'active',
       views: 0,
       claims: 0,
+      vouchers_to_issue: form.vouchers_to_issue,
       redemptions: 0,
       applicable_categories: form.applicable_categories.split(',').map((s) => s.trim()).filter(Boolean),
+      applies_to_total_bill: form.applies_to_total_bill,
+      category_ids: form.category_ids,
+      bundle_items: form.bundle_items,
+      bundle_price: form.bundle_price,
     };
 
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/promotions`, {
+      const res = await fetch(`${API}/api/promotions/merchant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(newPromo),
@@ -232,14 +199,15 @@ export default function MerchantPromotionsPage() {
     }
 
     setShowCreateModal(false);
-    setForm({ title: '', description: '', discount_type: 'percentage', discount_value: 0, min_order_amount: 0, start_date: '', end_date: '', applicable_categories: '' });
+    setNoExpiration(false);
+    setForm({ title: '', description: '', discount_type: 'percentage', discount_value: 0, min_order_amount: 0, start_date: '', end_date: '', applicable_categories: '', vouchers_to_issue: 1, applies_to_total_bill: true, category_ids: [], bundle_items: [], bundle_price: 0 });
   };
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('Delete this promotion? This cannot be undone.')) return;
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/promotions/${id}`, {
+      const res = await fetch(`${API}/api/promotions/merchant/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -260,7 +228,7 @@ export default function MerchantPromotionsPage() {
     const newStatus = promo?.status === 'active' ? 'expired' : 'active';
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/promotions/${id}`, {
+      const res = await fetch(`${API}/api/promotions/merchant/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ is_active: newStatus === 'active' }),
@@ -404,7 +372,10 @@ export default function MerchantPromotionsPage() {
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      <span>{formatDate(promo.start_date)} &ndash; {formatDate(promo.end_date)}</span>
+                      <span>
+                        {promo.start_date ? formatDate(promo.start_date) : 'Available now'} &ndash;{' '}
+                        {promo.end_date ? formatDate(promo.end_date) : 'No expiration'}
+                      </span>
                       {promo.min_order_amount > 0 && (
                         <span className="ml-2 text-gray-400">Min. ₱{promo.min_order_amount}</span>
                       )}
@@ -472,8 +443,10 @@ export default function MerchantPromotionsPage() {
                     <p className="text-[10px] lg:text-xs text-gray-400">Views</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-sm lg:text-base font-bold text-gray-900">{formatNumber(promo.claims)}</p>
-                    <p className="text-[10px] lg:text-xs text-gray-400">Claims</p>
+                    <p className="text-sm lg:text-base font-bold text-gray-900">
+                      {formatNumber(promo.claims)} / {formatNumber(promo.vouchers_to_issue)}
+                    </p>
+                    <p className="text-[10px] lg:text-xs text-gray-400">Vouchers issued</p>
                   </div>
                   <div className="text-center">
                     <p className="text-sm lg:text-base font-bold text-gray-900">{formatNumber(promo.redemptions)}</p>
@@ -537,9 +510,10 @@ export default function MerchantPromotionsPage() {
                     <option value="fixed">Fixed Amount OFF</option>
                     <option value="bogo">Buy One Get One</option>
                     <option value="flash_sale">Flash Sale</option>
+                    <option value="bundle">Product Bundle</option>
                   </select>
                 </div>
-                <div>
+                {form.discount_type !== 'bundle' && <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {form.discount_type === 'bogo' ? 'Free Items' : form.discount_type === 'percentage' || form.discount_type === 'flash_sale' ? 'Discount (%)' : 'Discount (₱)'}
                   </label>
@@ -550,7 +524,7 @@ export default function MerchantPromotionsPage() {
                     min={0}
                     className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
                   />
-                </div>
+                </div>}
               </div>
 
               <div>
@@ -564,43 +538,102 @@ export default function MerchantPromotionsPage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Number of vouchers to issue
+                </label>
+                <input
+                  type="number"
+                  value={form.vouchers_to_issue}
+                  onChange={(e) => setForm({ ...form, vouchers_to_issue: Number(e.target.value) })}
+                  min={1}
+                  step={1}
+                  required
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
+                />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Each customer may claim this voucher code only once.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date <span className="font-normal text-gray-400">(optional for no expiration)</span></label>
                   <input
                     type="date"
                     value={form.start_date}
                     onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                    disabled={noExpiration}
                     className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date <span className="font-normal text-gray-400">(optional)</span></label>
                   <input
                     type="date"
                     value={form.end_date}
                     onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                    disabled={noExpiration}
                     className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
                   />
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={noExpiration}
+                      onChange={(e) => {
+                        setNoExpiration(e.target.checked);
+                        if (e.target.checked) setForm({ ...form, start_date: '', end_date: '' });
+                      }}
+                      className="size-4 accent-[#DB0002]"
+                    />
+                    No expiration date
+                  </label>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Applicable Categories</label>
-                <input
-                  type="text"
-                  value={form.applicable_categories}
-                  onChange={(e) => setForm({ ...form, applicable_categories: e.target.value })}
-                  placeholder="e.g. Merienda, Snacks, Drinks"
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
-                />
-                <p className="text-[11px] text-gray-400 mt-1">Comma-separated categories</p>
-              </div>
+              {form.discount_type === 'bundle' ? (
+                <div className="space-y-3 rounded-xl border border-purple-200 bg-purple-50 p-4">
+                  <label className="block text-sm font-bold">Bundle price (₱)
+                    <input type="number" min={1} value={form.bundle_price} onChange={e => setForm({ ...form, bundle_price: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 font-normal" />
+                  </label>
+                  <div><p className="text-sm font-bold">Bundle items</p><p className="text-[11px] text-gray-500">Select at least two products, such as food and a beverage.</p></div>
+                  <div className="max-h-48 space-y-2 overflow-y-auto">
+                    {merchantProducts.map(product => {
+                      const selected = form.bundle_items.find(item => item.productId === product.id);
+                      return <div key={product.id} className="flex items-center gap-3 rounded-lg bg-white p-2.5">
+                        <input type="checkbox" checked={Boolean(selected)} onChange={event => setForm(current => ({ ...current, bundle_items: event.target.checked ? [...current.bundle_items, { productId: product.id, productName: product.name, quantity: 1 }] : current.bundle_items.filter(item => item.productId !== product.id) }))} className="size-4 accent-purple-600" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{product.name}</span>
+                        {selected && <input aria-label={`${product.name} quantity`} type="number" min={1} value={selected.quantity} onChange={event => setForm(current => ({ ...current, bundle_items: current.bundle_items.map(item => item.productId === product.id ? { ...item, quantity: Math.max(1, Number(event.target.value)) } : item) }))} className="w-16 rounded-md border px-2 py-1 text-sm" />}
+                      </div>;
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm font-bold">
+                    <input type="checkbox" checked={form.applies_to_total_bill} onChange={event => setForm({ ...form, applies_to_total_bill: event.target.checked, category_ids: event.target.checked ? [] : form.category_ids })} className="size-4 accent-[#DB0002]" /> Applies to the total bill
+                  </label>
+                  {!form.applies_to_total_bill && <div className="mt-3 grid grid-cols-2 gap-2">
+                    {merchantCategories.map(category => <label key={category.id} className="flex items-center gap-2 rounded-lg bg-gray-50 p-2 text-xs font-medium"><input type="checkbox" checked={form.category_ids.includes(category.id)} onChange={event => setForm(current => ({ ...current, category_ids: event.target.checked ? [...current.category_ids, category.id] : current.category_ids.filter(id => id !== category.id) }))} className="accent-[#DB0002]" />{category.name}</label>)}
+                    {!merchantCategories.length && <p className="col-span-2 text-xs text-gray-500">No merchant product categories configured.</p>}
+                  </div>}
+                </div>
+              )}
 
               {/* Preview Card */}
               {form.title && (
-                <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-100 rounded-xl p-4">
-                  <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-1">Preview</p>
+                <div className="overflow-hidden rounded-xl border border-red-100 bg-white">
+                  <div className="relative aspect-[3/1] min-h-28 overflow-hidden bg-gradient-to-r from-red-950 to-orange-900">
+                    {merchantBrand?.coverImageUrl && <img src={merchantBrand.coverImageUrl} alt={`${merchantBrand.name} banner`} className="absolute inset-0 h-full w-full object-cover" />}
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/45 to-black/20" />
+                    <div className="absolute inset-x-0 bottom-0 flex items-end gap-3 p-3 text-white">
+                      <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-xl border-2 border-white bg-white text-lg font-black text-gray-800 shadow">
+                        {merchantBrand?.logoUrl ? <img src={merchantBrand.logoUrl} alt={`${merchantBrand.name} logo`} className="h-full w-full object-contain" /> : merchantBrand?.name?.charAt(0).toUpperCase() || 'M'}
+                      </div>
+                      <div className="min-w-0"><p className="text-[9px] font-black uppercase tracking-widest text-red-200">Promotion preview</p><p className="truncate text-sm font-black">{merchantBrand?.name || 'Your store'}</p></div>
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-r from-red-50 to-orange-50 p-4">
                   <h4 className="font-bold text-gray-900">{form.title}</h4>
                   {form.description && <p className="text-xs text-gray-500 mt-0.5">{form.description}</p>}
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -609,15 +642,20 @@ export default function MerchantPromotionsPage() {
                       {form.discount_type === 'fixed' && `₱${form.discount_value} OFF`}
                       {form.discount_type === 'bogo' && 'BOGO'}
                       {form.discount_type === 'flash_sale' && `⚡ ${form.discount_value}% FLASH`}
+                      {form.discount_type === 'bundle' && `BUNDLE ₱${form.bundle_price.toFixed(2)}`}
                     </span>
                     {form.min_order_amount > 0 && (
                       <span className="text-[10px] text-gray-400">Min. ₱{form.min_order_amount}</span>
                     )}
-                    {form.start_date && form.end_date && (
+                    <span className="text-[10px] text-gray-400">
+                      {form.vouchers_to_issue} voucher{form.vouchers_to_issue === 1 ? '' : 's'} available
+                    </span>
+                    {(form.start_date || noExpiration) && (
                       <span className="text-[10px] text-gray-400">
-                        {formatDate(form.start_date)} &ndash; {formatDate(form.end_date)}
+                        {noExpiration ? 'Available immediately · No expiration' : `${formatDate(form.start_date)} – ${form.end_date ? formatDate(form.end_date) : 'No expiration'}`}
                       </span>
                     )}
+                  </div>
                   </div>
                 </div>
               )}
@@ -632,7 +670,7 @@ export default function MerchantPromotionsPage() {
               </button>
               <button
                 onClick={handleCreate}
-                disabled={!form.title || !form.start_date || !form.end_date}
+                disabled={!form.title || form.vouchers_to_issue < 1 || !Number.isInteger(form.vouchers_to_issue) || (!noExpiration && (!form.start_date || !form.end_date)) || (form.discount_type !== 'bundle' && !form.applies_to_total_bill && form.category_ids.length === 0) || (form.discount_type === 'bundle' && (form.bundle_items.length < 2 || form.bundle_price <= 0))}
                 className="flex-1 px-4 py-2.5 bg-[#DB0002] text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create Promotion

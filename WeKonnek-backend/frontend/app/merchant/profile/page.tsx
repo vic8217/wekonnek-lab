@@ -174,6 +174,7 @@ export default function MerchantProfilePage() {
 
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [uploadingBranding, setUploadingBranding] = useState(false);
 
   useEffect(() => {
     fetchMerchantProfile();
@@ -357,6 +358,7 @@ export default function MerchantProfilePage() {
   };
 
   const handleFileUpload = async (file: File, type: 'banner' | 'logo') => {
+    setUploadingBranding(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -380,8 +382,12 @@ export default function MerchantProfilePage() {
       return data.url;
     } catch (error) {
       console.error('Error uploading file:', error);
+      if (type === 'banner') setBannerPreview(null);
+      else setLogoPreview(null);
       toast.error('Failed to upload file. Please try again.');
       return null;
+    } finally {
+      setUploadingBranding(false);
     }
   };
 
@@ -638,7 +644,7 @@ export default function MerchantProfilePage() {
               </label>
               <div
                 onClick={() => bannerInputRef.current?.click()}
-                className="relative border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-[#DB0002] transition-colors bg-gray-50"
+                className="relative overflow-hidden rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center cursor-pointer hover:border-[#DB0002] transition-colors"
               >
                 <input
                   ref={bannerInputRef}
@@ -658,11 +664,11 @@ export default function MerchantProfilePage() {
                   }}
                 />
                 {bannerPreview ? (
-                  <div className="relative">
+                  <div className="relative flex aspect-[3/1] w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100">
                     <img
                       src={bannerPreview}
                       alt="Banner preview"
-                      className="w-full h-48 object-cover rounded-lg"
+                      className="h-full w-full object-contain"
                     />
                     <button
                       type="button"
@@ -978,10 +984,10 @@ export default function MerchantProfilePage() {
           </button>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || uploadingBranding}
             className="px-6 py-3 bg-[#DB0002] text-white rounded-lg hover:bg-[#B80002] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {saving ? 'Saving...' : 'Save Changes'}
+            {uploadingBranding ? 'Uploading images…' : saving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       </form>

@@ -6,8 +6,52 @@ import { usePathname } from "next/navigation";
 import { QrCode } from "lucide-react";
 import { getToken, getUser, useAuth } from "@/hooks/use-auth";
 
+type CustomerNavSection = "home" | "orders" | "scan" | "deals" | "profile";
+
+function getCustomerNavSection(pathname: string): CustomerNavSection {
+  const firstSegment = pathname.split("/").filter(Boolean)[1] || "dashboard";
+
+  if (firstSegment === "scan") return "scan";
+
+  if (
+    [
+      "orders",
+      "tracking",
+      "chat",
+      "cart",
+      "checkout",
+      "bookings",
+      "reserve",
+    ].includes(firstSegment)
+  ) {
+    return "orders";
+  }
+
+  if (["deals", "promotions", "vouchers"].includes(firstSegment)) {
+    return "deals";
+  }
+
+  if (
+    [
+      "profile",
+      "edit-profile",
+      "addresses",
+      "address-picker",
+      "notifications",
+      "wallet",
+      "reviews",
+      "e-receipts",
+    ].includes(firstSegment)
+  ) {
+    return "profile";
+  }
+
+  return "home";
+}
+
 export default function MobileBottomNav() {
   const pathname = usePathname();
+  const activeSection = getCustomerNavSection(pathname || "");
   const { user: authUser } = useAuth();
   const [hasStoredCustomerSession, setHasStoredCustomerSession] =
     useState(false);
@@ -68,14 +112,7 @@ export default function MobileBottomNav() {
     };
   }, [isCustomerSignedIn, pathname]);
 
-  const isActive = (path: string) => {
-    if (path === "/customer/dashboard") {
-      return pathname === "/customer/dashboard";
-    }
-    return pathname?.startsWith(path);
-  };
-  const isProfileSection =
-    isActive("/customer/profile") || isActive("/customer/edit-profile");
+  const isActive = (section: CustomerNavSection) => activeSection === section;
 
   const profileHref = isCustomerSignedIn ? "/customer/profile" : "/auth/login";
 
@@ -92,20 +129,20 @@ export default function MobileBottomNav() {
           className="flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200"
         >
           <svg
-            className={`w-6 h-6 transition-colors duration-200 ${isActive("/customer/dashboard") ? "text-[#DB0002]" : "text-gray-400"}`}
-            fill={isActive("/customer/dashboard") ? "currentColor" : "none"}
+            className={`w-6 h-6 transition-colors duration-200 ${isActive("home") ? "text-[#DB0002]" : "text-gray-400"}`}
+            fill={isActive("home") ? "currentColor" : "none"}
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth={isActive("/customer/dashboard") ? 0 : 1.8}
+              strokeWidth={isActive("home") ? 0 : 1.8}
               d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
             />
           </svg>
           <span
-            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("/customer/dashboard") ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("home") ? "text-[#DB0002]" : "text-gray-400"}`}
           >
             Home
           </span>
@@ -118,7 +155,7 @@ export default function MobileBottomNav() {
         >
           <span className="relative">
             <svg
-              className={`w-6 h-6 transition-colors duration-200 ${isActive("/customer/orders") ? "text-[#DB0002]" : "text-gray-400"}`}
+              className={`w-6 h-6 transition-colors duration-200 ${isActive("orders") ? "text-[#DB0002]" : "text-gray-400"}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -137,7 +174,7 @@ export default function MobileBottomNav() {
             )}
           </span>
           <span
-            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("/customer/orders") ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("orders") ? "text-[#DB0002]" : "text-gray-400"}`}
           >
             Orders
           </span>
@@ -149,10 +186,14 @@ export default function MobileBottomNav() {
           className="flex flex-col items-center justify-center flex-1 py-1 relative mobile-press"
           title="Scan QR code"
         >
-          <div className="relative w-14 h-14 rounded-full bg-[#DB0002] flex items-center justify-center -mt-7 shadow-lg shadow-red-300/50 transition-all duration-200 active:scale-95">
+          <div
+            className={`relative flex h-14 w-14 items-center justify-center rounded-full bg-[#DB0002] -mt-7 shadow-lg shadow-red-300/50 transition-all duration-200 active:scale-95 ${isActive("scan") ? "ring-4 ring-red-100" : ""}`}
+          >
             <QrCode className="w-7 h-7 text-white" strokeWidth={2} />
           </div>
-          <span className="text-[10px] mt-0.5 font-semibold text-[#DB0002]">
+          <span
+            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("scan") ? "text-[#DB0002]" : "text-gray-400"}`}
+          >
             Scan
           </span>
         </Link>
@@ -163,7 +204,7 @@ export default function MobileBottomNav() {
           className="flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200"
         >
           <svg
-            className={`w-6 h-6 transition-colors duration-200 ${isActive("/customer/deals") ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`w-6 h-6 transition-colors duration-200 ${isActive("deals") ? "text-[#DB0002]" : "text-gray-400"}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -176,7 +217,7 @@ export default function MobileBottomNav() {
             />
           </svg>
           <span
-            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("/customer/deals") ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("deals") ? "text-[#DB0002]" : "text-gray-400"}`}
           >
             Deals
           </span>
@@ -188,7 +229,7 @@ export default function MobileBottomNav() {
           className="flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200"
         >
           <svg
-            className={`w-6 h-6 transition-colors duration-200 ${isProfileSection ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`w-6 h-6 transition-colors duration-200 ${isActive("profile") ? "text-[#DB0002]" : "text-gray-400"}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -201,7 +242,7 @@ export default function MobileBottomNav() {
             />
           </svg>
           <span
-            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isProfileSection ? "text-[#DB0002]" : "text-gray-400"}`}
+            className={`text-[10px] mt-0.5 font-semibold transition-colors duration-200 ${isActive("profile") ? "text-[#DB0002]" : "text-gray-400"}`}
           >
             {isCustomerSignedIn ? "Profile" : "Sign In"}
           </span>

@@ -7,14 +7,13 @@ export function publicAssetUrl(value?: string | null): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    const localBackend =
-      (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
-      url.port === "3000";
-    if (localBackend && url.pathname.startsWith("/api/uploads/")) {
+    if (url.pathname.startsWith("/api/uploads/")) {
       return `/api/backend/uploads/${url.pathname.slice("/api/uploads/".length)}${url.search}`;
     }
   } catch {
-    // Relative and data URLs are already browser-safe.
+    if (value.startsWith("/api/uploads/")) {
+      return `/api/backend/uploads/${value.slice("/api/uploads/".length)}`;
+    }
   }
   return value;
 }

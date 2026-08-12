@@ -580,6 +580,12 @@ model Promotion {
   description   String?   @db.Text
   discountType  String?   @map("discount_type") @db.VarChar(50)
   discountValue Decimal?  @map("discount_value") @db.Decimal(10, 2)
+  minOrderAmount Decimal  @default(0) @map("min_order_amount") @db.Decimal(10, 2)
+  voucherId     String?   @unique @map("voucher_id") @db.Uuid
+  appliesToTotalBill Boolean @default(true) @map("applies_to_total_bill")
+  categoryIds   Int[]     @default([]) @map("category_ids")
+  bundleItems   Json?     @map("bundle_items")
+  bundlePrice   Decimal?  @map("bundle_price") @db.Decimal(10, 2)
   startDate     DateTime? @map("start_date") @db.Timestamptz
   endDate       DateTime? @map("end_date") @db.Timestamptz
   isActive      Boolean   @default(true) @map("is_active")
@@ -587,6 +593,7 @@ model Promotion {
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  voucher  Voucher? @relation(fields: [voucherId], references: [id], onDelete: SetNull)
 
   @@index([merchantId])
   @@map("promotions")
@@ -815,6 +822,7 @@ model User {
   customerOrders           Order[]                  @relation("OrderCustomer")
   riderOrders              Order[]                  @relation("OrderRider")
   voucherRedemptions       VoucherRedemption[]
+  claimedVouchers          CustomerVoucher[]
   merchantStaff            MerchantStaff[]
   bazaarListings           BazaarListing[]
   authIdentities           AuthIdentity[]
@@ -1671,11 +1679,28 @@ model Voucher {
   expiresAt            DateTime      @map("expires_at")
   createdAt            DateTime      @default(now()) @map("created_at")
   updatedAt            DateTime      @default(now()) @updatedAt @map("updated_at")
+  vipOnly              Boolean       @default(false) @map("vip_only")
 
   redemptions VoucherRedemption[]
+  claims      CustomerVoucher[]
+  promotion  Promotion?
 
   @@index([code])
   @@map("vouchers")
+}
+
+model CustomerVoucher {
+  id        String   @id @default(uuid()) @db.Uuid
+  voucherId String   @map("voucher_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  claimedAt DateTime @default(now()) @map("claimed_at")
+
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([voucherId, userId])
+  @@index([userId, claimedAt])
+  @@map("customer_vouchers")
 }
 
 model VoucherRedemption {

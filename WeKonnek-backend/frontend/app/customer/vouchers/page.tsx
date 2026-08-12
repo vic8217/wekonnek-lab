@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -18,6 +19,8 @@ interface ApiVoucher {
   minOrderAmount: number;
   applicableOrderTypes: string | null;
   expiresAt: string;
+  noExpiration: boolean;
+  merchant: { id: number; name: string; slug: string; logoUrl?: string | null; coverImageUrl?: string | null } | null;
 }
 
 // Rotating palette so each voucher card gets a distinct look.
@@ -79,6 +82,14 @@ export default function CustomerVouchersPage() {
         minOrderAmount: Number(v.minOrderAmount ?? 0),
         applicableOrderTypes: v.applicableOrderTypes ?? null,
         expiresAt: v.expiresAt,
+        noExpiration: Boolean(v.noExpiration),
+        merchant: v.merchant
+          ? {
+              ...v.merchant,
+              logoUrl: publicAssetUrl(v.merchant.logoUrl),
+              coverImageUrl: publicAssetUrl(v.merchant.coverImageUrl),
+            }
+          : null,
       }));
       setVouchers(list);
     } catch (err: any) {
@@ -162,18 +173,41 @@ export default function CustomerVouchersPage() {
         <div className="px-4 py-3 space-y-3">
           {states}
           {!states && vouchers.map((voucher, i) => (
-            <div key={voucher.id} className="relative overflow-hidden rounded-xl shadow-sm">
+            <div key={voucher.id} className="relative overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+              {voucher.merchant?.coverImageUrl && (
+                <div className="relative h-20 overflow-hidden">
+                  <img src={voucher.merchant.coverImageUrl} alt={`${voucher.merchant.name} banner`} className="h-full w-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-black/10" />
+                  <div className="absolute bottom-2 left-3 flex items-center gap-2 text-white">
+                    <div className="grid size-8 place-items-center overflow-hidden rounded-lg border border-white bg-white text-xs font-bold text-gray-800">
+                      {voucher.merchant.logoUrl ? <img src={voucher.merchant.logoUrl} alt={`${voucher.merchant.name} logo`} className="size-full object-contain" /> : voucher.merchant.name.charAt(0)}
+                    </div>
+                    <span className="text-xs font-black">{voucher.merchant.name}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex">
                 <div className={`bg-gradient-to-b ${GRADIENTS[i % GRADIENTS.length]} w-28 flex-shrink-0 flex flex-col items-center justify-center p-3 text-white`}>
                   <span className="text-2xl font-black leading-none">{discountLabel(voucher)}</span>
                   <span className="text-[10px] font-medium mt-1 opacity-90">OFF</span>
                 </div>
                 <div className="bg-white flex-1 p-3 flex flex-col justify-center border-l-2 border-dashed border-gray-200">
+                  {voucher.merchant && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <div className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-lg bg-gray-100 text-xs font-bold">
+                        {voucher.merchant.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={voucher.merchant.logoUrl} alt="" className="size-full object-cover" />
+                        ) : voucher.merchant.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="truncate text-xs font-bold text-gray-700">{voucher.merchant.name}</span>
+                    </div>
+                  )}
                   <h3 className="text-sm font-bold text-gray-900">{voucher.title}</h3>
                   <p className="text-[11px] text-gray-500 mt-0.5">{subText(voucher)}</p>
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-[10px] text-gray-400">
-                      Expires: {new Date(voucher.expiresAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {voucher.noExpiration ? 'No expiration' : `Expires: ${new Date(voucher.expiresAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`}
                     </span>
                     <button
                       onClick={() => copyCode(voucher.code)}
@@ -204,15 +238,27 @@ export default function CustomerVouchersPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {vouchers.map((voucher, i) => (
               <div key={voucher.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                {voucher.merchant?.coverImageUrl && <div className="relative h-28 overflow-hidden"><img src={voucher.merchant.coverImageUrl} alt={`${voucher.merchant.name} banner`} className="h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-r from-black/65 to-transparent" /><div className="absolute bottom-3 left-3 flex items-center gap-2 text-white"><div className="grid size-10 place-items-center overflow-hidden rounded-lg border-2 border-white bg-white font-bold text-gray-800">{voucher.merchant.logoUrl ? <img src={voucher.merchant.logoUrl} alt={`${voucher.merchant.name} logo`} className="size-full object-contain" /> : voucher.merchant.name.charAt(0)}</div><span className="font-black">{voucher.merchant.name}</span></div></div>}
                 <div className={`bg-gradient-to-r ${GRADIENTS[i % GRADIENTS.length]} p-4 text-white`}>
                   <span className="text-3xl font-black">{discountLabel(voucher)}</span>
                   <span className="text-lg font-bold ml-1">OFF</span>
                 </div>
                 <div className="p-4">
+                  {voucher.merchant && (
+                    <div className="mb-3 flex items-center gap-2">
+                      <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-gray-100 text-sm font-bold">
+                        {voucher.merchant.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={voucher.merchant.logoUrl} alt="" className="size-full object-cover" />
+                        ) : voucher.merchant.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="font-bold text-gray-700">{voucher.merchant.name}</span>
+                    </div>
+                  )}
                   <h3 className="font-bold text-gray-900">{voucher.title}</h3>
                   <p className="text-sm text-gray-500 mt-1">{subText(voucher)}</p>
                   <p className="text-xs text-gray-400 mt-2">
-                    Expires: {new Date(voucher.expiresAt).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    {voucher.noExpiration ? 'No expiration' : `Expires: ${new Date(voucher.expiresAt).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}`}
                   </p>
                   <button
                     onClick={() => copyCode(voucher.code)}

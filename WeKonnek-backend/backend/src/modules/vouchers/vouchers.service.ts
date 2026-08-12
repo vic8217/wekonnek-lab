@@ -72,14 +72,22 @@ export class VouchersService {
 
     const vouchers = await this.prisma.voucher.findMany({
       where: {
+        claims: { some: { userId } },
         status: VoucherStatus.active,
         startsAt: { lte: now },
         expiresAt: { gte: now },
       },
+      include: {
+        promotion: {
+          include: {
+            merchant: { select: { id: true, name: true, slug: true, logoUrl: true, coverImageUrl: true } },
+          },
+        },
+      },
       orderBy: { expiresAt: 'asc' },
     });
 
-    const available: Voucher[] = [];
+    const available: any[] = [];
     for (const v of vouchers) {
       if (v.maxTotalUses > 0 && v.totalRedemptions >= v.maxTotalUses) continue;
 
@@ -88,10 +96,64 @@ export class VouchersService {
       });
       if (userRedemptions >= v.maxUsesPerUser) continue;
 
-      available.push(v);
+      available.push({
+        ...v,
+        merchant: v.promotion?.merchant || null,
+        noExpiration: !v.promotion?.endDate,
+      });
     }
 
     return available;
+  }
+
+  async claim(code: string, userId: string) {
+    const voucher = await this.prisma.voucher.findUnique({
+      where: { code: code.trim().toUpperCase() },
+    });
+    if (!voucher) throw new NotFoundException('Voucher is not available');
+
+    const now = new Date();
+    if (
+      voucher.status !== VoucherStatus.active ||
+      now < voucher.startsAt ||
+      now > voucher.expiresAt
+    ) {
+      throw new BadRequestException('This voucher is not currently available');
+    }
+
+    if (voucher.vipOnly) {
+      const loyalty = await this.prisma.loyaltyAccount.findUnique({
+        where: { userId },
+        select: { tier: true },
+      });
+      if (!loyalty || !['gold', 'platinum'].includes(loyalty.tier)) {
+        throw new BadRequestException(
+          'This VIP voucher can only be added by VIP customers',
+        );
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.customerVoucher.findUnique({
+        where: { voucherId_userId: { voucherId: voucher.id, userId } },
+      });
+      if (existing) return { voucher, alreadyClaimed: true };
+
+      // Lock the voucher row while counting claims so concurrent requests
+      // cannot issue more vouchers than the merchant configured.
+      await tx.$queryRaw`SELECT id FROM "vouchers" WHERE id = ${voucher.id}::uuid FOR UPDATE`;
+      const issued = await tx.customerVoucher.count({
+        where: { voucherId: voucher.id },
+      });
+      if (voucher.maxTotalUses > 0 && issued >= voucher.maxTotalUses) {
+        throw new BadRequestException('All vouchers have already been claimed');
+      }
+
+      await tx.customerVoucher.create({
+        data: { voucherId: voucher.id, userId },
+      });
+      return { voucher, alreadyClaimed: false };
+    });
   }
 
   async validate(

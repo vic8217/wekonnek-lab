@@ -122,6 +122,7 @@ export default function CustomerProfilePage() {
   const [summary, setSummary] = useState(EMPTY);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [voucherCount, setVoucherCount] = useState(0);
 
   useEffect(() => {
     if (loading || !user) {
@@ -149,6 +150,50 @@ export default function CustomerProfilePage() {
       });
     return () => controller.abort();
   }, [loading, user]);
+
+  useEffect(() => {
+    if (loading || !user) {
+      if (!loading) setVoucherCount(0);
+      return;
+    }
+
+    let active = true;
+    const loadVoucherCount = async () => {
+      const token = getToken();
+      if (!token) return;
+      try {
+        const response = await fetch('/api/backend/vouchers/customer/available', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const body = await response.json();
+        const vouchers = Array.isArray(body) ? body : body.data || [];
+        if (active) setVoucherCount(vouchers.length);
+      } catch {
+        // Keep the last known count when the wallet is temporarily unavailable.
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadVoucherCount();
+    };
+
+    loadVoucherCount();
+    window.addEventListener('focus', loadVoucherCount);
+    window.addEventListener('pageshow', loadVoucherCount);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', loadVoucherCount);
+      window.removeEventListener('pageshow', loadVoucherCount);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [loading, user]);
+
+  const profileMetrics = useMemo(
+    () => metrics.map(metric => metric.label === 'Vouchers' ? { ...metric, value: voucherCount } : metric),
+    [voucherCount],
+  );
 
   const fullName = useMemo(
     () =>
@@ -252,7 +297,7 @@ export default function CustomerProfilePage() {
       </section>
 
       <section className="mt-7 grid grid-cols-5 rounded-2xl border border-slate-200 bg-white px-1 py-4 shadow-sm">
-        {metrics.map(({ label, value, icon: Icon, href, color }, index) => (
+        {profileMetrics.map(({ label, value, icon: Icon, href, color }, index) => (
           <Link
             key={label}
             href={href}

@@ -11,8 +11,8 @@ import {
   onCartChange,
   type CartItem,
 } from '@/lib/cart';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+import { merchantsApi } from '@/lib/api';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 interface MerchantCart {
   merchantId: string;
@@ -30,28 +30,31 @@ export default function CartPage() {
 
   const loadCarts = useCallback(async () => {
     const ids = getActiveCartMerchantIds();
-    const result: MerchantCart[] = await Promise.all(
+    const result = await Promise.all(
       ids.map(async (id) => {
         const items = getCart(id);
         const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
-        let merchantName = `Merchant #${id}`;
-        let merchantSlug: string | undefined;
-        let logoUrl: string | undefined;
         try {
-          const res = await fetch(`${API}/api/merchants/${id}`);
-          if (res.ok) {
-            const m = await res.json();
-            merchantName = m.name || merchantName;
-            merchantSlug = m.slug;
-            logoUrl = m.logo_url || m.logoUrl;
-          }
+          const merchant = await merchantsApi.getById(Number(id));
+          return {
+            merchantId: id,
+            merchantName: merchant.name,
+            merchantSlug: merchant.slug,
+            logoUrl: publicAssetUrl(merchant.logoUrl),
+            items,
+            subtotal,
+          } as MerchantCart;
         } catch {
-          /* keep fallback name */
+          // Ignore obsolete/sample carts that are not tied to a real merchant.
+          return null;
         }
-        return { merchantId: id, merchantName, merchantSlug, logoUrl, items, subtotal };
       }),
     );
-    setCarts(result.filter((c) => c.items.length > 0));
+    setCarts(
+      result.filter(
+        (cart): cart is MerchantCart => Boolean(cart && cart.items.length > 0),
+      ),
+    );
     setLoading(false);
   }, []);
 
@@ -60,14 +63,23 @@ export default function CartPage() {
     return onCartChange(() => loadCarts());
   }, [loadCarts]);
 
-  const changeQty = (merchantId: string, productId: number, delta: number) => {
-    const current = getCart(merchantId).find((i) => i.product_id === productId);
+  const changeQty = (
+    merchantId: string,
+    productId: number,
+    variantId: number | undefined,
+    delta: number,
+  ) => {
+    const current = getCart(merchantId).find(
+      (item) =>
+        item.product_id === productId &&
+        (item.variant_id ?? null) === (variantId ?? null),
+    );
     if (!current) return;
-    updateQuantity(merchantId, productId, current.quantity + delta);
+    updateQuantity(merchantId, productId, current.quantity + delta, variantId);
   };
 
-  const remove = (merchantId: string, productId: number) => {
-    removeFromCart(merchantId, productId);
+  const remove = (merchantId: string, productId: number, variantId?: number) => {
+    removeFromCart(merchantId, productId, variantId);
   };
 
   if (loading) {
@@ -146,7 +158,7 @@ export default function CartPage() {
               {/* Items */}
               <div className="divide-y divide-gray-50">
                 {cart.items.map((item) => (
-                  <div key={item.product_id} className="flex items-center gap-3 px-4 py-3">
+                  <div key={`${item.product_id}:${item.variant_id ?? 'base'}`} className="flex items-center gap-3 px-4 py-3">
                     <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
                       {item.image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -157,25 +169,28 @@ export default function CartPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium text-gray-900 truncate">{item.product_name}</h3>
+                      {item.variant_name && (
+                        <p className="text-xs font-medium text-gray-500">{item.variant_name}</p>
+                      )}
                       <p className="text-xs text-gray-400">₱{item.price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
-                        onClick={() => changeQty(cart.merchantId, item.product_id, -1)}
+                        onClick={() => changeQty(cart.merchantId, item.product_id, item.variant_id, -1)}
                         className="w-7 h-7 border border-gray-200 rounded-lg flex items-center justify-center text-sm text-gray-500"
                       >
                         −
                       </button>
                       <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
                       <button
-                        onClick={() => changeQty(cart.merchantId, item.product_id, 1)}
+                        onClick={() => changeQty(cart.merchantId, item.product_id, item.variant_id, 1)}
                         className="w-7 h-7 bg-[#DB0002] text-white rounded-lg flex items-center justify-center text-sm"
                       >
                         +
                       </button>
                     </div>
                     <button
-                      onClick={() => remove(cart.merchantId, item.product_id)}
+                      onClick={() => remove(cart.merchantId, item.product_id, item.variant_id)}
                       className="p-1 text-gray-300 hover:text-red-500"
                       title="Remove"
                     >

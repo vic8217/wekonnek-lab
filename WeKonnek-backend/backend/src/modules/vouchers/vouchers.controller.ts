@@ -95,6 +95,14 @@ export class VouchersController {
     return this.vouchersService.findAvailableForCustomer(req.user.id);
   }
 
+  @Post('customer/claim')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add a voucher to the current customer wallet' })
+  claim(@Req() req: any, @Body() body: { code: string }) {
+    return this.vouchersService.claim(body.code, req.user.id);
+  }
+
   @Post('validate')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

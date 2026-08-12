@@ -35,6 +35,14 @@ export class PromotionsController {
     return this.promotionsService.findMerchantPromotions(req.user.id, filter);
   }
 
+  @Get('merchant/:merchantId/active')
+  @ApiOperation({ summary: 'List active customer-visible merchant promotions' })
+  findActiveMerchantPromotions(
+    @Param('merchantId', ParseIntPipe) merchantId: number,
+  ) {
+    return this.promotionsService.findActiveMerchantPromotions(merchantId);
+  }
+
   @Post('merchant')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

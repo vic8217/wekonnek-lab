@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsEmail,
   IsUrl,
+  Matches,
   IsIn,
   Min,
   Max,
@@ -107,12 +108,16 @@ export class CreateMerchantDto {
   country?: string;
 
   @ApiPropertyOptional({ example: 'https://example.com/logo.png' })
-  @IsUrl()
+  @Matches(/^(https?:\/\/|\/)/, {
+    message: 'logoUrl must be an HTTP(S) URL or a site-relative asset path',
+  })
   @IsOptional()
   logoUrl?: string;
 
   @ApiPropertyOptional({ example: 'https://example.com/cover.jpg' })
-  @IsUrl()
+  @Matches(/^(https?:\/\/|\/)/, {
+    message: 'coverImageUrl must be an HTTP(S) URL or a site-relative asset path',
+  })
   @IsOptional()
   coverImageUrl?: string;
 

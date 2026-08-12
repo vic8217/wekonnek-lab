@@ -12,7 +12,6 @@ import {
   CakeSlice,
   CircleDollarSign,
   Coffee,
-  Crown,
   Heart,
   Home,
   Info,
@@ -23,7 +22,6 @@ import {
   QrCode,
   Sandwich,
   Share2,
-  ShoppingCart,
   Sparkles,
   Star,
   Store,
@@ -34,7 +32,7 @@ import {
   UtensilsCrossed,
   Wifi,
 } from "lucide-react";
-import { addToCart, getCartCount, onCartChange } from "@/lib/cart";
+import { addToCart } from "@/lib/cart";
 import {
   merchantsApi,
   productsApi,
@@ -47,6 +45,18 @@ import {
   merchantSubscriptionFromProfile,
 } from "@/lib/merchant-subscription";
 import { publicAssetUrl } from "@/lib/public-asset-url";
+import { getToken } from "@/hooks/use-auth";
+
+interface MerchantPromotion {
+  id: number;
+  title: string;
+  description?: string;
+  discount_type: "percentage" | "fixed";
+  discount_value: number;
+  min_order_amount: number;
+  voucher_code: string;
+  end_date?: string | null;
+}
 
 const foodProductPhotos = [
   "/images/menu-caramel-macchiato.png",
@@ -103,6 +113,9 @@ export default function MerchantMarketplacePage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Overview");
   const [tabInteracted, setTabInteracted] = useState(false);
+  const [variantProduct, setVariantProduct] = useState<Product | null>(null);
+  const [promotions, setPromotions] = useState<MerchantPromotion[]>([]);
+  const [claimingVoucher, setClaimingVoucher] = useState<string | null>(null);
   const merchantName = merchant?.name || titleCase(merchantSlug);
   const merchantId = merchant?.id || numericId(`${category}-${merchantSlug}`);
   const activeShop =
@@ -116,10 +129,7 @@ export default function MerchantMarketplacePage() {
     : { tier: "basic", active: false };
   const platinumAccess = hasPlatinumAccess(subscription);
   const onlineOrdering = hasMerchantFeature(subscription, "online-ordering");
-  const discountVouchers = hasMerchantFeature(
-    subscription,
-    "discount-vouchers",
-  );
+  const discountVouchers = hasMerchantFeature(subscription, "discount-vouchers");
   const serviceFeatures = [
     { icon: Truck, title: "Door Delivery", mobileTitle: "Delivery" },
     { icon: PackageCheck, title: "Pick-Up", mobileTitle: "Pick-Up" },
@@ -138,7 +148,6 @@ export default function MerchantMarketplacePage() {
         ]
       : []),
   ];
-  const [cartCount, setCartCount] = useState(0);
   const productPhotoSet = categoryPhotos[category] || [
     "/images/partner-green-market.png",
     "/images/partner-wellness-spa.png",
@@ -160,6 +169,18 @@ export default function MerchantMarketplacePage() {
           ? await productsApi.getForShop(record.id, defaultShop.id)
           : await productsApi.getByMerchant(record.id);
         if (active) setProducts(menu);
+        if (active && hasMerchantFeature(
+          merchantSubscriptionFromProfile(record as unknown as Record<string, unknown>),
+          "discount-vouchers",
+        )) {
+          const response = await fetch(`/api/backend/promotions/merchant/${record.id}/active`, {
+            cache: "no-store",
+          });
+          if (response.ok) {
+            const body = await response.json();
+            if (active) setPromotions(Array.isArray(body) ? body : body.data || []);
+          }
+        }
       })
       .catch((error) => {
         if (active) {
@@ -177,11 +198,6 @@ export default function MerchantMarketplacePage() {
     };
   }, [merchantSlug]);
 
-  useEffect(() => {
-    const refresh = () => setCartCount(getCartCount(merchantId));
-    refresh();
-    return onCartChange(refresh);
-  }, [merchantId]);
   useEffect(() => {
     if (!tabInteracted) return;
     const target = activeTab.startsWith("Reviews")
@@ -205,15 +221,66 @@ export default function MerchantMarketplacePage() {
   const productImage = (product: Product, index = 0) =>
     publicAssetUrl(product.imageUrl) ||
     productPhotoSet[index % productPhotoSet.length];
-  const add = (product: Product) => {
+  const variantName = (variant: NonNullable<Product["variants"]>[number]) =>
+    variant.optionValues
+      ?.map((link) => link.optionValue.value)
+      .filter(Boolean)
+      .join(" / ") || variant.sku;
+  const add = (
+    product: Product,
+    variant?: NonNullable<Product["variants"]>[number],
+  ) => {
     addToCart(merchantId, {
       product_id: product.id,
       product_name: product.name,
-      price: productPrice(product),
-      image_url: publicAssetUrl(product.imageUrl),
+      price: Number(variant?.price ?? productPrice(product)),
+      image_url: publicAssetUrl(variant?.imageUrl || product.imageUrl),
       merchant_id: merchantId,
+      variant_id: variant?.id,
+      variant_name: variant ? variantName(variant) : undefined,
     });
-    toast.success(`${product.name} added to cart`);
+    setVariantProduct(null);
+    toast.success(
+      `${product.name}${variant ? ` (${variantName(variant)})` : ""} added to cart`,
+    );
+  };
+
+  const startAdd = (product: Product) => {
+    const variants = (product.variants || []).filter(
+      (variant) =>
+        variant.isActive && variant.availabilityStatus !== "Out of Stock",
+    );
+    if (variants.length > 0) {
+      setVariantProduct(product);
+      return;
+    }
+    add(product);
+  };
+
+  const claimVoucher = async (code: string) => {
+    const token = getToken();
+    if (!token) {
+      toast.error("Sign in to add this voucher to your wallet");
+      return;
+    }
+    setClaimingVoucher(code);
+    try {
+      const response = await fetch("/api/backend/vouchers/customer/claim", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "Voucher could not be added");
+      toast.success(body.alreadyClaimed ? "Voucher is already in your wallet" : "Voucher added to your wallet");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Voucher could not be added");
+    } finally {
+      setClaimingVoucher(null);
+    }
   };
 
   return (
@@ -286,10 +353,24 @@ export default function MerchantMarketplacePage() {
         <section
           id="merchant-overview"
           tabIndex={-1}
-          className="relative mt-3 scroll-mt-20 overflow-hidden rounded-2xl bg-gradient-to-r from-[#171313] via-[#60200c] to-[#1a1717] p-7 text-white shadow-xl outline-none"
+          className="relative mt-3 min-h-[210px] scroll-mt-20 overflow-hidden rounded-2xl bg-gradient-to-r from-[#171313] via-[#60200c] to-[#1a1717] p-7 text-white shadow-xl outline-none sm:min-h-[230px]"
         >
-          <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:28px_28px]" />
-          <div className="relative flex items-center gap-6">
+          {merchant?.coverImageUrl ? (
+            <>
+              <Image
+                src={publicAssetUrl(merchant.coverImageUrl)!}
+                alt={`${merchantName} banner`}
+                fill
+                priority
+                sizes="(max-width: 1280px) 100vw, calc(100vw - 244px)"
+                className="object-cover object-center"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-black/30" />
+            </>
+          ) : (
+            <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:28px_28px]" />
+          )}
+          <div className="relative z-10 flex min-h-[154px] items-center gap-6 sm:min-h-[174px]">
             <div className="relative size-28 shrink-0 overflow-hidden rounded-2xl border-4 border-white bg-white">
               <Image
                 src={
@@ -415,7 +496,7 @@ export default function MerchantMarketplacePage() {
                     </span>
                   </div>
                   <button
-                    onClick={() => add(product)}
+                    onClick={() => startAdd(product)}
                     disabled={!shopOpen || !product.isAvailable}
                     className="mt-3 min-h-9 w-full rounded-xl bg-[#ff0730] text-xs font-bold text-white transition active:scale-[.98] disabled:bg-slate-300"
                   >
@@ -453,53 +534,49 @@ export default function MerchantMarketplacePage() {
           </div>
         </section>
 
-        {discountVouchers && (
+        {discountVouchers && promotions.length > 0 && (
           <section className="mt-5">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-black">Exclusive Discounts</h2>
-              <p className="text-xs text-slate-500">
-                Available to WeKonnek customers
-              </p>
+              <Link href="/customer/vouchers" className="text-xs font-bold text-red-600">
+                Voucher wallet
+              </Link>
             </div>
-            <div className="mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 no-scrollbar xl:grid xl:grid-cols-3 xl:overflow-visible xl:pb-0">
-              <article className="min-w-[250px] flex-1 snap-start rounded-2xl border border-red-100 bg-red-50 p-4 xl:min-w-0 xl:p-5">
-                <p className="text-xs font-black text-red-600">
-                  REGULAR DISCOUNT
-                </p>
-                <h3 className="mt-2 text-2xl font-black text-red-600">
-                  10% OFF
-                </h3>
-                <p className="text-sm text-slate-600">On all purchases</p>
-                <span className="mt-3 inline-flex rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white">
-                  Use Code: WKC10
-                </span>
-                <p className="mt-2 text-xs text-slate-500">Min. spend ₱200</p>
-              </article>
-              <article className="min-w-[250px] flex-1 snap-start rounded-2xl border border-amber-100 bg-amber-50 p-4 xl:min-w-0 xl:p-5">
-                <p className="text-xs font-black text-amber-600">
-                  VIP DISCOUNT
-                </p>
-                <h3 className="mt-2 text-2xl font-black text-orange-600">
-                  15% OFF
-                </h3>
-                <p className="text-sm text-slate-600">On all purchases</p>
-                <span className="mt-3 inline-flex rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">
-                  Use Code: VIP15
-                </span>
-                <p className="mt-2 text-xs text-slate-500">Min. spend ₱300</p>
-              </article>
-              <article className="flex min-w-[250px] flex-1 snap-start flex-col items-center justify-center rounded-2xl border border-red-100 bg-red-50 p-4 text-center xl:min-w-0 xl:p-5">
-                <Crown className="fill-red-600 text-red-600" size={38} />
-                <h3 className="mt-2 text-lg font-black text-red-600">
-                  Become a VIP
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Unlock bigger discounts and exclusive perks.
-                </p>
-                <button className="mt-3 rounded-xl bg-[#ff0730] px-5 py-2.5 text-sm font-bold text-white">
-                  Learn More
-                </button>
-              </article>
+            <div className="mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 no-scrollbar xl:grid xl:grid-cols-3 xl:overflow-visible">
+              {promotions.map((promotion) => (
+                <article key={promotion.id} className="min-w-[250px] flex-1 snap-start overflow-hidden rounded-2xl border border-red-100 bg-red-50 xl:min-w-0">
+                  <div className="relative h-24 overflow-hidden bg-red-950">
+                    {merchant?.coverImageUrl && <Image src={publicAssetUrl(merchant.coverImageUrl)!} alt={`${merchantName} banner`} fill sizes="300px" className="object-cover" />}
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/70 to-black/20" />
+                    <div className="absolute bottom-2 left-3 flex items-center gap-2 text-white">
+                      <div className="relative grid size-9 place-items-center overflow-hidden rounded-lg border-2 border-white bg-white text-sm font-black text-slate-800">
+                        {merchant?.logoUrl ? <Image src={publicAssetUrl(merchant.logoUrl)!} alt={`${merchantName} logo`} fill sizes="36px" className="object-contain" /> : merchantName.charAt(0)}
+                      </div>
+                      <span className="text-xs font-black">{merchantName}</span>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                  <p className="text-xs font-black uppercase text-red-600">{promotion.title}</p>
+                  <h3 className="mt-2 text-2xl font-black text-red-600">
+                    {promotion.discount_type === "percentage"
+                      ? `${Number(promotion.discount_value)}% OFF`
+                      : `₱${Number(promotion.discount_value).toFixed(2)} OFF`}
+                  </h3>
+                  {promotion.description && <p className="mt-1 text-sm text-slate-600">{promotion.description}</p>}
+                  <button
+                    type="button"
+                    onClick={() => claimVoucher(promotion.voucher_code)}
+                    disabled={claimingVoucher !== null}
+                    className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
+                  >
+                    {claimingVoucher === promotion.voucher_code ? "Adding…" : "Add to wallet"}
+                  </button>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Min. spend ₱{Number(promotion.min_order_amount || 0).toFixed(2)} · {promotion.end_date ? `Until ${new Date(promotion.end_date).toLocaleDateString("en-PH")}` : "No expiration"}
+                  </p>
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         )}
@@ -634,36 +711,60 @@ export default function MerchantMarketplacePage() {
         </section>
       </main>
 
-      <div className="fixed inset-x-0 bottom-16 z-40 flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-8px_24px_rgba(15,23,42,.1)] xl:bottom-0 xl:left-[244px]">
-        <div className="hidden min-w-64 sm:block">
-          <b>{merchantName}</b>
-          <p className="text-xs text-slate-500">
-            ★ {Number(merchant?.rating || 0).toFixed(1)} ·{" "}
-            {merchant?.totalReviews || 0} reviews · {merchant?.city || "Local"}
-          </p>
+      {variantProduct && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="variant-dialog-title"
+          onClick={() => setVariantProduct(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase text-red-600">
+                  Choose a variant
+                </p>
+                <h2 id="variant-dialog-title" className="mt-1 text-xl font-black">
+                  {variantProduct.name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVariantProduct(null)}
+                className="grid size-9 place-items-center rounded-full bg-slate-100 text-xl text-slate-600"
+                aria-label="Close variant selection"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-5 grid gap-3">
+              {(variantProduct.variants || [])
+                .filter(
+                  (variant) =>
+                    variant.isActive &&
+                    variant.availabilityStatus !== "Out of Stock",
+                )
+                .map((variant) => (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    onClick={() => add(variantProduct, variant)}
+                    className="flex min-h-14 items-center justify-between rounded-2xl border border-slate-200 px-4 text-left transition hover:border-red-500 hover:bg-red-50 active:scale-[.99]"
+                  >
+                    <span className="font-bold">{variantName(variant)}</span>
+                    <span className="font-black text-red-600">
+                      ₱{Number(variant.price ?? productPrice(variantProduct)).toFixed(2)}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </div>
         </div>
-        {platinumAccess && (
-          <Link
-            href={`/customer/scan`}
-            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-700 font-bold text-white"
-          >
-            <QrCode size={19} /> In-Store Ordering
-          </Link>
-        )}
-        {onlineOrdering && (
-          <Link
-            href={`/customer/cart`}
-            className="relative flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#ff0730] font-bold text-white"
-          >
-            <ShoppingCart size={19} /> Cart
-            {cartCount > 0 && (
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs text-red-600">
-                {cartCount}
-              </span>
-            )}
-          </Link>
-        )}
-      </div>
+      )}
     </div>
   );
 }

@@ -74,7 +74,11 @@ export function addToCart(
 ): CartItem[] {
   const existing = getCart(merchantId);
   const qty = item.quantity ?? 1;
-  const idx = existing.findIndex((c) => c.product_id === item.product_id);
+  const idx = existing.findIndex(
+    (c) =>
+      c.product_id === item.product_id &&
+      (c.variant_id ?? null) === (item.variant_id ?? null),
+  );
   let next: CartItem[];
   if (idx >= 0) {
     next = [...existing];
@@ -90,11 +94,15 @@ export function updateQuantity(
   merchantId: number | string,
   productId: number,
   quantity: number,
+  variantId?: number,
 ): CartItem[] {
   const existing = getCart(merchantId);
   const next = existing
     .map((c) =>
-      c.product_id === productId ? { ...c, quantity: Math.max(0, quantity) } : c,
+      c.product_id === productId &&
+      (c.variant_id ?? null) === (variantId ?? null)
+        ? { ...c, quantity: Math.max(0, quantity) }
+        : c,
     )
     .filter((c) => c.quantity > 0);
   setCart(merchantId, next);
@@ -104,8 +112,9 @@ export function updateQuantity(
 export function removeFromCart(
   merchantId: number | string,
   productId: number,
+  variantId?: number,
 ): CartItem[] {
-  return updateQuantity(merchantId, productId, 0);
+  return updateQuantity(merchantId, productId, 0, variantId);
 }
 
 export function getCartCount(merchantId: number | string): number {

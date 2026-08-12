@@ -61,6 +61,7 @@ export default function CustomerLayout({
   const isProfile = pathname === "/customer/profile";
   const isEditProfile = pathname === "/customer/edit-profile";
   const isScan = pathname === "/customer/scan";
+  const isCart = pathname === "/customer/cart";
   const isCheckout = pathname === "/customer/checkout";
   const isEReceipt = pathname.startsWith("/customer/e-receipts");
   const isDineInOrderFlow = /^\/customer\/orders\/[^/]+(?:\/bill-out)?$/.test(pathname);
@@ -98,7 +99,7 @@ export default function CustomerLayout({
     <div className="min-h-screen bg-gray-50">
       <div className={usesStandaloneDesktop ? "xl:hidden" : ""}>
         <CustomerHeader
-          hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
+          hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isCart || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
           showCart={isMerchantDetail}
         />
       </div>
