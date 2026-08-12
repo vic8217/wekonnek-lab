@@ -1,9 +1,12 @@
 import axios from "axios";
 
+const API_ORIGIN =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+
 const API_BASE_URL =
   typeof window !== "undefined"
     ? "/api"
-    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+    : `${API_ORIGIN.replace(/\/$/, "")}/api`;
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
