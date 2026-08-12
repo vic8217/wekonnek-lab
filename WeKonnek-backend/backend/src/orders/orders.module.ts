@@ -4,9 +4,12 @@ import { OrdersController } from './orders.controller';
 import { PaymentsWebhookController } from './payments-webhook.controller';
 import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
 import { NotificationsModule } from '../modules/notifications/notifications.module';
+import { VouchersModule } from '../modules/vouchers/vouchers.module';
+import { InvoicesModule } from '../modules/invoices/invoices.module';
+import { DineInCrewModule } from '../dine-in-crew/dine-in-crew.module';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, VouchersModule, InvoicesModule, DineInCrewModule],
   controllers: [OrdersController, PaymentsWebhookController],
   providers: [OrdersService, PaymentGatewayService],
   exports: [OrdersService],

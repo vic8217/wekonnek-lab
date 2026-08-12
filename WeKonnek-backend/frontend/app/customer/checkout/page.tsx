@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth, getToken, setAuth, type AuthUser } from '@/hooks/use-auth';
 import { calculateDeliveryFee, getAllBarangays, DeliveryFeeResult } from '@/lib/delivery-zones';
-import { generateInvoice } from '@/lib/e-invoice';
 import toast from 'react-hot-toast';
+import OrderFlowStepper from '@/components/OrderFlowStepper';
 import {
   getCart,
   setCart as persistCart,
@@ -21,10 +21,14 @@ const API = '';
 interface MerchantInfo {
   id: number;
   name: string;
+  slug: string;
+  logo_url?: string | null;
+  is_verified?: boolean;
   address: string;
   city: string;
   delivery_zone_id: number | null;
   barangay: string | null;
+  branches?: Array<{ id: number; isDefault?: boolean; isActive?: boolean; is_active?: boolean }>;
 }
 
 interface BarangayOption {
@@ -40,7 +44,7 @@ function CheckoutAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) 
   const [authError, setAuthError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -54,7 +58,7 @@ function CheckoutAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) 
       const res = await fetch(`${API}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || 'Invalid credentials');
@@ -176,12 +180,17 @@ function CheckoutAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) 
         {mode === 'signin' ? (
           <form onSubmit={handleEmailSignIn} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label htmlFor="checkout-identifier" className="block text-sm font-medium text-gray-700 mb-1">
+                Email or mobile number
+              </label>
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                id="checkout-identifier"
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                inputMode="text"
+                autoComplete="username"
+                placeholder="juan@example.com or 0917 123 4567"
                 required
                 className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#DB0002]/20 focus:border-[#DB0002] outline-none"
               />
@@ -292,6 +301,7 @@ export default function CheckoutPage() {
   const merchantId = searchParams.get('merchant');
   // Table tag forwarded from a scanned dine-in QR code (e.g. "Table 5").
   const tableParam = searchParams.get('table');
+  const hasEstablishedDineIn = Boolean(tableParam);
   const [authGatePassed, setAuthGatePassed] = useState(false);
 
   const [loading, setLoading] = useState(true);
@@ -353,7 +363,7 @@ export default function CheckoutPage() {
 
       if (merchantId) {
         try {
-          const res = await fetch(`${API}/api/merchants/${merchantId}`);
+          const res = await fetch(`/api/backend/merchants/${merchantId}`);
           if (res.ok) {
             const data = await res.json();
             if (data) setMerchant(data);
@@ -364,7 +374,7 @@ export default function CheckoutPage() {
       const token = await getToken();
       if (token) {
         try {
-          const res = await fetch(`${API}/api/users/me`, {
+          const res = await fetch(`/api/backend/users/me`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {
@@ -411,6 +421,9 @@ export default function CheckoutPage() {
   const deliveryFee = orderType === 'delivery' ? deliveryFeeResult.fee : 0;
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + deliveryFee;
+  const digitalMenuHref = merchant?.slug
+    ? `/merchants/${merchant.slug}${tableParam ? `?table=${encodeURIComponent(tableParam)}` : ''}`
+    : '/customer/scan';
 
   const filteredBarangays = barangaySearch.length > 0
     ? barangayOptions.filter(b =>
@@ -470,13 +483,26 @@ export default function CheckoutPage() {
         price: item.price,
         subtotal: item.price * item.quantity,
       }));
+      const cartShopId = cartItems.find(item => item.shop_id)?.shop_id;
+      const availableBranches = merchant?.branches?.filter(
+        branch => branch.isActive !== false && branch.is_active !== false,
+      ) || [];
+      const checkoutShopId = availableBranches.find(branch => branch.id === cartShopId)?.id
+        || availableBranches.find(branch => branch.isDefault)?.id
+        || availableBranches[0]?.id
+        || (!merchant?.branches?.length ? cartShopId : undefined);
 
-      const res = await fetch(`${API}/api/orders`, {
+      if (!checkoutShopId) {
+        toast.error('This merchant has no available shop for the order. Return to the digital menu and try again.');
+        return;
+      }
+
+      const res = await fetch(`/api/backend/orders`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           merchant_id: parseInt(merchantId || '0'),
-          shop_id: cartItems[0]?.shop_id,
+          shop_id: checkoutShopId,
           order_type: orderType,
           total_amount: total,
           delivery_address: orderType === 'delivery' ? deliveryAddress : null,
@@ -486,15 +512,19 @@ export default function CheckoutPage() {
           customer_barangay: orderType === 'delivery' ? customerBarangay : null,
           table_number: orderType === 'dine_in' ? tableNumber : null,
           notes: notes || null,
-          payment_method: paymentMethod,
-          gateway: gatewayFor(paymentMethod),
+          // Dine-in payment is collected later when the merchant moves the
+          // ticket to Bill Out; order placement must never launch a gateway.
+          payment_method: orderType === 'dine_in' ? 'cod' : paymentMethod,
+          gateway: orderType === 'dine_in' ? undefined : gatewayFor(paymentMethod),
           items: orderItems,
         }),
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || 'Failed to place order');
+        const message = Array.isArray(err.message) ? err.message.join(', ') : err.message;
+        toast.error(message || 'Failed to place order. Please try again.');
+        return;
       }
 
       const order = await res.json();
@@ -513,16 +543,9 @@ export default function CheckoutPage() {
         );
       }
 
-      try {
-        await generateInvoice(order.id);
-      } catch (invoiceErr) {
-        console.error('Invoice generation failed (non-blocking):', invoiceErr);
-      }
-
-      router.push(`/customer/orders/${order.id}?placed=1`);
+      router.replace(`/customer/orders/${order.id}?placed=1`);
     } catch (error: any) {
-      console.error('Error placing order:', error);
-      alert(error.message || 'Failed to place order. Please try again.');
+      toast.error(error.message || 'Failed to place order. Please try again.');
     } finally {
       setPlacing(false);
     }
@@ -572,24 +595,32 @@ export default function CheckoutPage() {
     <>
       {/* ========== MOBILE CHECKOUT ========== */}
       <div className="lg:hidden min-h-screen bg-gray-50">
-        {/* Sticky Header */}
-        <div className="sticky top-0 z-20 bg-white border-b border-gray-100 safe-area-top">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <button onClick={() => router.back()} className="p-1 mobile-press" title="Go back">
-              <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {/* Dine-in merchant header */}
+        <div className="px-4 pt-3">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#171313] via-[#60200c] to-[#1a1717] p-4 text-white shadow-lg">
+            <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:28px_28px]" />
+            <button onClick={() => router.push(digitalMenuHref)} className="relative z-10 mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-white/90 mobile-press" title="Back to digital menu">
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
+              Back to digital menu
             </button>
-            <div className="flex-1">
-              <h1 className="text-base font-bold text-gray-900">Checkout</h1>
-              {merchant && <p className="text-[11px] text-gray-400">{merchant.name}</p>}
+            <div className="relative z-10 flex items-center gap-3">
+              <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl border-2 border-white bg-white text-xl font-black text-gray-500">
+                {merchant?.logo_url ? <img src={merchant.logo_url} alt="" className="size-full object-cover" /> : merchant?.name?.charAt(0)}
+              </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-black">{merchant?.name || 'Review your order'}</h1>
+                <p className="mt-1 text-xs text-white/80">Dine-in{tableParam ? ` · ${tableParam}` : ''}</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="px-4 py-3 space-y-3 mobile-scroll pb-40">
+        <div className="px-4 py-3 space-y-3 mobile-scroll pb-64">
+          <OrderFlowStepper currentStep={2} menuHref={digitalMenuHref} />
           {/* Order Type */}
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          {!hasEstablishedDineIn && <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="text-sm font-bold text-gray-900 mb-3">Order Type</h2>
             <div className="grid grid-cols-3 gap-2">
               {[
@@ -611,7 +642,7 @@ export default function CheckoutPage() {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
           {/* Delivery Address + Barangay */}
           {orderType === 'delivery' && (
@@ -705,11 +736,16 @@ export default function CheckoutPage() {
               <div className="space-y-3">
                 {cartItems.map((item) => (
                   <div key={item.product_id} className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <span className="text-lg">🍽️</span>
+                    <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                      {item.image_url ? (
+                        <img src={item.image_url} alt={item.product_name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-lg">🍽️</div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium text-gray-900 truncate">{item.product_name}</h3>
+                      {item.variant_name && <p className="truncate text-[11px] text-gray-500">{item.variant_name}</p>}
                       <p className="text-xs text-gray-400">₱{item.price.toFixed(2)}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -751,7 +787,7 @@ export default function CheckoutPage() {
           </div>
 
           {/* Payment Method */}
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          {orderType !== 'dine_in' ? <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="text-sm font-bold text-gray-900 mb-3">Payment</h2>
             <div className="space-y-2">
               {[
@@ -787,11 +823,16 @@ export default function CheckoutPage() {
                 </button>
               ))}
             </div>
-          </div>
+          </div> : (
+            <div className="rounded-2xl border border-purple-100 bg-purple-50 p-4 text-sm text-purple-900">
+              <p className="font-bold">Payment at bill out</p>
+              <p className="mt-1 text-xs text-purple-700">Place your order now. Payment will be collected when you request the bill.</p>
+            </div>
+          )}
         </div>
 
         {/* Fixed Bottom - Order Summary */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 safe-area-bottom lg:hidden">
+        <div className="fixed bottom-20 left-0 right-0 z-30 border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(15,23,42,0.08)] lg:hidden">
           <div className="px-4 py-3">
             <div className="flex items-center justify-between mb-1.5 text-sm">
               <span className="text-gray-500">Subtotal ({cartItems.reduce((s, i) => s + i.quantity, 0)} items)</span>
@@ -823,7 +864,7 @@ export default function CheckoutPage() {
               disabled={placing || cartItems.length === 0}
               className="w-full py-3.5 bg-[#DB0002] text-white rounded-2xl font-bold text-base disabled:opacity-50 mobile-press active:bg-[#B80002] transition-colors"
             >
-              {placing ? 'Placing Order...' : `Place Order`}
+              {placing ? 'Placing Order...' : 'Confirm & Place Order'}
             </button>
           </div>
         </div>
@@ -831,22 +872,30 @@ export default function CheckoutPage() {
 
       {/* ========== DESKTOP CHECKOUT ========== */}
       <div className="hidden lg:block max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Go back">
-            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#171313] via-[#60200c] to-[#1a1717] p-7 text-white shadow-xl">
+          <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:28px_28px]" />
+          <button onClick={() => router.push(digitalMenuHref)} className="relative z-10 mb-5 inline-flex items-center gap-2 text-sm font-bold text-white/90" title="Back to digital menu">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
+            Back to digital menu
           </button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Checkout</h1>
-            {merchant && <p className="text-gray-600">Ordering from {merchant.name}</p>}
+          <div className="relative z-10 flex items-center gap-5">
+            <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-4 border-white bg-white text-3xl font-black text-gray-500">
+              {merchant?.logo_url ? <img src={merchant.logo_url} alt="" className="size-full object-cover" /> : merchant?.name?.charAt(0)}
+            </div>
+            <div>
+              <h1 className="text-2xl font-black">{merchant?.name || 'Review your order'}</h1>
+              <p className="mt-1 text-sm text-white/80">Dine-in{tableParam ? ` · ${tableParam}` : ''}</p>
+            </div>
           </div>
         </div>
+        <OrderFlowStepper currentStep={2} menuHref={digitalMenuHref} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {/* Order Type */}
-            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            {!hasEstablishedDineIn && <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
               <h2 className="font-bold text-gray-900 mb-4">Order Type</h2>
               <div className="grid grid-cols-3 gap-3">
                 {[
@@ -866,7 +915,7 @@ export default function CheckoutPage() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
 
             {orderType === 'delivery' && (
               <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
@@ -967,10 +1016,16 @@ export default function CheckoutPage() {
               ) : (
                 <div className="space-y-4">
                   {cartItems.map((item) => (
-                    <div key={item.product_id} className="flex items-center justify-between border-b border-gray-100 pb-4">
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{item.product_name}</h3>
+                    <div key={item.product_id} className="flex items-center justify-between gap-4 border-b border-gray-100 pb-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <div className="size-16 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                          {item.image_url ? <img src={item.image_url} alt={item.product_name} className="size-full object-cover" /> : <div className="grid size-full place-items-center text-xl">🍽️</div>}
+                        </div>
+                        <div className="min-w-0">
+                        <h3 className="truncate font-medium text-gray-900">{item.product_name}</h3>
+                        {item.variant_name && <p className="truncate text-xs text-gray-500">{item.variant_name}</p>}
                         <p className="text-sm text-gray-500">₱{item.price.toFixed(2)} each</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
@@ -992,7 +1047,7 @@ export default function CheckoutPage() {
             </div>
 
             {/* Payment Method */}
-            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            {orderType !== 'dine_in' ? <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
               <h2 className="font-bold text-gray-900 mb-4">Payment Method</h2>
               <div className="space-y-3">
                 {[
@@ -1021,7 +1076,12 @@ export default function CheckoutPage() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div> : (
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-6 text-purple-900 shadow-sm">
+                <h2 className="font-bold">Payment at bill out</h2>
+                <p className="mt-1 text-sm text-purple-700">Confirm the order now. Payment will be collected when you request the bill.</p>
+              </div>
+            )}
           </div>
 
           {/* Right Column - Order Summary */}
@@ -1060,7 +1120,7 @@ export default function CheckoutPage() {
                 disabled={placing || cartItems.length === 0}
                 className="w-full mt-6 py-4 bg-[#DB0002] text-white rounded-lg hover:bg-[#B80002] transition-colors font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {placing ? 'Placing Order...' : `Place Order • ₱${total.toFixed(2)}`}
+                {placing ? 'Placing Order...' : `Confirm & Place Order • ₱${total.toFixed(2)}`}
               </button>
               <p className="text-xs text-gray-400 text-center mt-3">
                 By placing an order, you agree to our terms and conditions.

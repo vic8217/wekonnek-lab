@@ -4,8 +4,6 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { getToken } from '@/hooks/use-auth';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-
 // ─── Types ────────────────────────────────────────────
 
 type TableShape = 'round' | 'square' | 'rectangle';
@@ -28,8 +26,12 @@ export interface FloorTable {
 interface FloorPlanEditorProps {
   merchantId: number;
   editable: boolean;
+  configurationGrid?: boolean;
+  selectedTableLabel?: string | null;
+  statusFilter?: string;
+  onTableCountChange?: (count: number) => void;
   onTableClick?: (tableLabel: string) => void;
-  tableStatuses?: Record<string, { status: string; customerName?: string; orderCode?: string; totalAmount?: number }>;
+  tableStatuses?: Record<string, { status: string; customerName?: string; orderCode?: string; totalAmount?: number; elapsedMinutes?: number; requestCount?: number }>;
 }
 
 // ─── Constants ────────────────────────────────────────
@@ -40,21 +42,48 @@ const GRID_SIZE = 20;
 const MIN_TABLE_SIZE = 40;
 
 const STATUS_COLORS: Record<string, string> = {
+  placed: '#f97316',
+  active: '#7c3aed',
+  processing: '#7c3aed',
+  preparing: '#7c3aed',
   served: '#22c55e',
-  pending: '#22d3ee',
+  pending: '#f97316',
   request: '#facc15',
-  bill_out: '#d946ef',
+  bill_draft: '#f59e0b',
+  bill_out: '#dc2626',
+  payment_pending: '#facc15',
+  manual_payment: '#2563eb',
   reserved: '#ef4444',
   open: '#e5e7eb',
 };
 
 const STATUS_TEXT_COLORS: Record<string, string> = {
+  placed: '#ffffff',
+  active: '#ffffff',
+  processing: '#ffffff',
+  preparing: '#ffffff',
   open: '#6b7280',
   served: '#ffffff',
   pending: '#ffffff',
   request: '#1f2937',
+  bill_draft: '#422006',
   bill_out: '#ffffff',
+  payment_pending: '#422006',
+  manual_payment: '#ffffff',
   reserved: '#ffffff',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  open: 'Vacant',
+  placed: 'Order placed',
+  active: 'Accepted',
+  processing: 'Accepted',
+  preparing: 'Preparing',
+  served: 'Served',
+  bill_draft: 'Bill-out form incomplete',
+  bill_out: 'Bill-out requested',
+  payment_pending: 'Bill confirmed · Awaiting payment',
+  manual_payment: 'Manual payment · Processing',
 };
 
 // ─── Component ────────────────────────────────────────
@@ -62,6 +91,10 @@ const STATUS_TEXT_COLORS: Record<string, string> = {
 export default function FloorPlanEditor({
   merchantId,
   editable,
+  configurationGrid = false,
+  selectedTableLabel,
+  statusFilter = 'all',
+  onTableCountChange,
   onTableClick,
   tableStatuses = {},
 }: FloorPlanEditorProps) {
@@ -73,6 +106,17 @@ export default function FloorPlanEditor({
   const [hasChanges, setHasChanges] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const normalizeLabel = (label: string) => label.trim().toLowerCase().replace(/\s+/g, ' ');
+  const configuredLabels = new Set(tables.map((table) => normalizeLabel(table.label)));
+  const unmatchedTickets = Object.entries(tableStatuses).filter(
+    ([label]) => !configuredLabels.has(normalizeLabel(label)),
+  );
+  const statusForTable = (label: string) => Object.entries(tableStatuses).find(
+    ([statusLabel]) => normalizeLabel(statusLabel) === normalizeLabel(label),
+  )?.[1];
+  const displayCanvasHeight = editable
+    ? CANVAS_HEIGHT
+    : Math.max(CANVAS_HEIGHT, ...tables.map((table) => table.posY + table.height + 20));
 
   const snap = useCallback((v: number) => (snapToGrid ? Math.round(v / GRID_SIZE) * GRID_SIZE : v), [snapToGrid]);
 
@@ -81,12 +125,15 @@ export default function FloorPlanEditor({
   const fetchTables = useCallback(async () => {
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/merchants/${merchantId}/floor-tables`, {
+      const res = await fetch(`/api/backend/merchants/${merchantId}/floor-tables`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch floor tables');
-      const data = await res.json();
-      setTables(data);
+      const data: FloorTable[] = await res.json();
+      const uniqueTables = data.filter((table, index, rows) => rows.findIndex(candidate =>
+        candidate.label.trim().toLowerCase().replace(/\s+/g, ' ') === table.label.trim().toLowerCase().replace(/\s+/g, ' '),
+      ) === index);
+      setTables(uniqueTables);
     } catch (err) {
       console.error('Error fetching floor tables:', err);
     } finally {
@@ -97,6 +144,10 @@ export default function FloorPlanEditor({
   useEffect(() => {
     fetchTables();
   }, [fetchTables]);
+
+  useEffect(() => {
+    onTableCountChange?.(tables.length);
+  }, [onTableCountChange, tables.length]);
 
   // ─── CRUD helpers ───────────────────────────────
 
@@ -133,7 +184,7 @@ export default function FloorPlanEditor({
   const saveLayout = async () => {
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/merchants/${merchantId}/floor-tables/bulk`, {
+      const res = await fetch(`/api/backend/merchants/${merchantId}/floor-tables/bulk`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tables }),
@@ -166,6 +217,7 @@ export default function FloorPlanEditor({
     e.preventDefault();
     e.stopPropagation();
     setSelectedId(idx);
+    if (configurationGrid) return;
 
     const rect = canvasRef.current!.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -252,6 +304,7 @@ export default function FloorPlanEditor({
     }
     e.stopPropagation();
     setSelectedId(idx);
+    if (configurationGrid) return;
     const touch = e.touches[0];
     const rect = canvasRef.current!.getBoundingClientRect();
     const mouseX = touch.clientX - rect.left;
@@ -348,7 +401,7 @@ export default function FloorPlanEditor({
               </svg>
               Reset
             </button>
-            <label className="flex items-center gap-1.5 ml-auto text-xs text-gray-600 cursor-pointer select-none">
+            {!configurationGrid && <label className="flex items-center gap-1.5 ml-auto text-xs text-gray-600 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={snapToGrid}
@@ -356,36 +409,67 @@ export default function FloorPlanEditor({
                 className="w-3.5 h-3.5 rounded border-gray-300 text-red-600 focus:ring-red-500"
               />
               Snap to grid
-            </label>
+            </label>}
+          </div>
+        )}
+
+        {!editable && unmatchedTickets.length > 0 && (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="mb-2 text-xs font-bold text-amber-900">Active tables not yet placed on the floor plan</p>
+            <div className="flex flex-wrap gap-2">
+              {unmatchedTickets.map(([label, ticket]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onTableClick?.(label)}
+                  className="min-w-36 rounded-xl border-2 border-fuchsia-400 bg-fuchsia-500 px-4 py-3 text-left text-white shadow-sm hover:bg-fuchsia-600"
+                >
+                  <span className="block text-sm font-black">{label}</span>
+                  <span className="block text-xs font-bold">{STATUS_LABELS[ticket.status] || ticket.status.replaceAll('_', ' ')}</span>
+                  {ticket.orderCode && <span className="block text-[10px] opacity-90">{ticket.orderCode}</span>}
+                  {ticket.totalAmount !== undefined && <span className="block text-xs font-semibold">₱{ticket.totalAmount.toFixed(2)}</span>}
+                  {!!ticket.requestCount && <span className="mt-1 inline-flex rounded-full bg-red-600 px-2 py-1 text-[10px] font-black text-white">🔔 {ticket.requestCount} request{ticket.requestCount === 1 ? '' : 's'}</span>}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
         {/* Canvas */}
+        <div className={configurationGrid ? 'max-h-[620px] overflow-auto rounded-xl border-2 border-gray-300 bg-white' : ''}>
         <div
           ref={canvasRef}
           onClick={handleCanvasClick}
-          className="relative border-2 border-gray-300 rounded-xl bg-white overflow-hidden select-none"
+          className={`${configurationGrid ? 'relative min-w-[820px] select-none' : 'relative overflow-hidden rounded-xl border-2 border-gray-300 bg-white select-none'}`}
           style={{
             width: '100%',
-            maxWidth: CANVAS_WIDTH,
-            aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-            backgroundImage: editable
-              ? `radial-gradient(circle, #d1d5db 1px, transparent 1px)`
-              : 'none',
+            maxWidth: editable && !configurationGrid ? CANVAS_WIDTH : 'none',
+            minHeight: configurationGrid ? 600 : undefined,
+            aspectRatio: configurationGrid ? undefined : `${CANVAS_WIDTH} / ${displayCanvasHeight}`,
+            backgroundImage: `radial-gradient(circle, ${editable ? '#d1d5db' : '#e2e8f0'} 1px, transparent 1px)`,
             backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
           }}
         >
           {/* Scale wrapper for responsive canvas */}
           <div
-            className="absolute inset-0"
+            className={configurationGrid ? 'grid grid-cols-5 gap-5 p-5' : 'absolute inset-0'}
             style={{ transformOrigin: 'top left' }}
           >
             {tables.map((table, idx) => {
-              const status = tableStatuses[table.label]?.status || 'open';
+              const tableTicket = statusForTable(table.label);
+              const status = tableTicket?.status || 'open';
               const bgColor = editable ? (selectedId === idx ? '#dbeafe' : '#f3f4f6') : (STATUS_COLORS[status] || STATUS_COLORS.open);
               const textColor = editable ? '#374151' : (STATUS_TEXT_COLORS[status] || STATUS_TEXT_COLORS.open);
-              const customerName = tableStatuses[table.label]?.customerName;
-              const totalAmount = tableStatuses[table.label]?.totalAmount;
+              const customerName = tableTicket?.customerName;
+              const elapsedMinutes = tableTicket?.elapsedMinutes;
+              const requestCount = tableTicket?.requestCount || 0;
+              const isDisplaySelected = !editable && !!selectedTableLabel && normalizeLabel(selectedTableLabel) === normalizeLabel(table.label);
+              const matchesFilter = statusFilter === 'all'
+                || (statusFilter === 'vacant' && status === 'open')
+                || (statusFilter === 'active' && status !== 'open')
+                || (statusFilter === 'bill_out' && status === 'payment_pending')
+                || (statusFilter === 'bill_out' && status === 'manual_payment')
+                || status === statusFilter;
 
               return (
                 <div
@@ -397,36 +481,46 @@ export default function FloorPlanEditor({
                     if (!editable) onTableClick?.(table.label);
                     else setSelectedId(idx);
                   }}
-                  className={`absolute flex flex-col items-center justify-center border-2 transition-shadow ${
+                  className={`${configurationGrid ? `relative min-h-28 ${table.shape === 'rectangle' ? 'w-full' : 'mx-auto aspect-square w-28'}` : 'absolute'} flex flex-col items-center justify-center border-2 shadow-sm transition-all ${
                     getShapeClasses(table.shape)
-                  } ${editable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:shadow-lg'} ${
-                    selectedId === idx && editable ? 'border-blue-500 shadow-lg ring-2 ring-blue-200' : 'border-gray-300'
-                  }`}
+                  } ${editable && !configurationGrid ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-xl'} ${
+                    selectedId === idx && editable ? 'border-blue-500 shadow-lg ring-2 ring-blue-200' : isDisplaySelected ? 'border-slate-900 ring-4 ring-slate-900/15 shadow-xl' : 'border-white/70'
+                  } ${!editable && !matchesFilter ? 'pointer-events-none opacity-15 grayscale' : ''}`}
                   style={{
-                    left: `${(table.posX / CANVAS_WIDTH) * 100}%`,
-                    top: `${(table.posY / CANVAS_HEIGHT) * 100}%`,
-                    width: `${(table.width / CANVAS_WIDTH) * 100}%`,
-                    height: `${(table.height / CANVAS_HEIGHT) * 100}%`,
+                    left: configurationGrid ? undefined : `${(table.posX / CANVAS_WIDTH) * 100}%`,
+                    top: configurationGrid ? undefined : `${(table.posY / displayCanvasHeight) * 100}%`,
+                    width: configurationGrid ? undefined : `${(table.width / CANVAS_WIDTH) * 100}%`,
+                    height: configurationGrid ? undefined : `${(table.height / displayCanvasHeight) * 100}%`,
                     backgroundColor: bgColor,
                     color: textColor,
-                    transform: `rotate(${table.rotation}deg)`,
+                    transform: configurationGrid ? undefined : `rotate(${table.rotation}deg)`,
                     zIndex: selectedId === idx ? 20 : 10,
                   }}
-                  title={`${table.label} – ${table.capacity} seats`}
+                  title={`${table.label} – ${STATUS_LABELS[status] || status} – ${table.capacity} seats`}
+                  role={!editable ? 'button' : undefined}
+                  tabIndex={!editable ? 0 : undefined}
+                  onKeyDown={!editable ? (event) => { if (event.key === 'Enter' || event.key === ' ') onTableClick?.(table.label); } : undefined}
                 >
+                  {!editable && requestCount > 0 && <span className="absolute -left-2 -top-2 z-30 inline-flex min-h-6 min-w-6 animate-pulse items-center justify-center rounded-full bg-red-600 px-1.5 text-[9px] font-black text-white shadow-lg ring-2 ring-white" title={`${requestCount} open service request${requestCount === 1 ? '' : 's'}`}>🔔 {requestCount}</span>}
+                  {!editable && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-current opacity-80 ring-2 ring-white/70" />}
                   <span className="text-[10px] lg:text-xs font-bold leading-tight truncate max-w-full px-1">
                     {table.label}
                   </span>
+                  {!editable && (
+                    <span className="text-[8px] lg:text-[10px] font-bold leading-tight">
+                      {STATUS_LABELS[status] || status.replaceAll('_', ' ')}
+                    </span>
+                  )}
                   {!editable && customerName && (
                     <span className="text-[8px] lg:text-[10px] opacity-80 truncate max-w-full px-1">{customerName}</span>
                   )}
-                  {!editable && totalAmount !== undefined && totalAmount > 0 && (
-                    <span className="text-[8px] lg:text-[10px] font-semibold">₱{totalAmount.toFixed(0)}</span>
+                  {!editable && elapsedMinutes !== undefined && (
+                    <span className="text-[7px] lg:text-[9px] font-semibold opacity-80">{elapsedMinutes} min</span>
                   )}
                   <span className="text-[7px] lg:text-[9px] opacity-60">{table.capacity} seats</span>
 
                   {/* Resize handles (edit mode only) */}
-                  {editable && selectedId === idx && (
+                  {editable && !configurationGrid && selectedId === idx && (
                     <>
                       {['tl', 'tr', 'bl', 'br'].map((corner) => (
                         <div
@@ -459,6 +553,7 @@ export default function FloorPlanEditor({
               {editable && <p className="text-xs mt-1">Click &quot;Add Table&quot; to get started</p>}
             </div>
           )}
+        </div>
         </div>
       </div>
 

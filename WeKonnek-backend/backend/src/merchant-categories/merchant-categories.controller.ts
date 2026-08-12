@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Header, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
@@ -20,6 +21,18 @@ export class MerchantCategoriesController {
   @Roles(UserRole.admin, UserRole.staff)
   @ApiOperation({ summary: 'Create a merchant business category' })
   create(@Body() body: { name: string; description?: string; icon?: string }) { return this.service.create(body); }
+
+  @Post('import')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Import merchant categories and subcategories from CSV' })
+  importCsv(@UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('CSV file is required');
+    if (!file.originalname.toLowerCase().endsWith('.csv')) throw new BadRequestException('Only CSV files are supported');
+    return this.service.importCsv(file.buffer.toString('utf8'));
+  }
 
   @Post(':categoryId/sub-categories')
   @UseGuards(JwtAuthGuard, RolesGuard)

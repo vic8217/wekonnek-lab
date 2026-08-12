@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { productTypesForCategory } from './product-types';
+import { operationState } from '../branches/branch-operation';
 
 /** Add snake_case aliases so the storefront and merchant inventory read consistently. */
 function serializeProduct<T extends Record<string, any> | null>(product: T): T {
@@ -145,8 +146,9 @@ export class ProductsService {
   async findForShop(merchantId: number, shopId: number) {
     const shop = await this.prisma.branch.findFirst({ where: { id: shopId, merchantId, isActive: true } });
     if (!shop) throw new NotFoundException('Shop not found');
+    const shopIsOpen = operationState(shop).is_open;
     const assignments = await this.prisma.shopProduct.findMany({
-      where: { merchantId, shopId, isEnabled: true },
+      where: { merchantId, shopId, isEnabled: true, isOnMenu: true, menuVisible: true },
       include: {
         product: {
           include: {
@@ -156,6 +158,7 @@ export class ProductsService {
           },
         },
       },
+      orderBy: [{ menuCategoryOrder: 'asc' }, { menuDisplayOrder: 'asc' }],
     });
     const balances = await this.prisma.shopInventory.findMany({ where: { merchantId, shopId } });
     return assignments
@@ -163,7 +166,9 @@ export class ProductsService {
       .map(assignment => {
         const productBalances = balances.filter(balance => balance.productId === assignment.productId);
         const inStock = !assignment.product.trackInventory || productBalances.some(balance => balance.quantity - balance.reservedQuantity > 0);
-        const customerStatus = assignment.product.availabilityStatus !== 'Available'
+        const customerStatus = !shopIsOpen
+          ? 'Shop Closed'
+          : assignment.product.availabilityStatus !== 'Available'
           ? 'Temporarily Unavailable'
           : inStock ? 'Available' : 'Out of Stock';
         const { quantity: _legacyQuantity, lowStockThreshold: _legacyThreshold, costPrice: _internalCost, ...publicProduct } = assignment.product;
@@ -183,6 +188,11 @@ export class ProductsService {
           sellingPrice: assignment.priceOverride ?? assignment.product.sellingPrice,
           availabilityStatus: customerStatus,
           isAvailable: customerStatus === 'Available',
+          description: assignment.menuDescription || publicProduct.description,
+          menuBadge: assignment.menuBadge,
+          menuFeatured: assignment.menuFeatured,
+          menuCategory: assignment.menuCategory || assignment.product.subCategory?.name || assignment.product.category?.name,
+          menuDisplayOrder: assignment.menuDisplayOrder,
           shopId,
         });
       });

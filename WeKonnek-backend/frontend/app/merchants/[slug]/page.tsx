@@ -50,12 +50,9 @@ interface Product {
   variants?: Array<{ id: number; sku: string; price?: number | null; availabilityStatus?: 'Available' | 'Out of Stock' | 'Temporarily Unavailable'; optionValues?: Array<{ optionValue: { value: string } }> }>;
   category_id: number | null;
   sub_category_id: number | null;
-}
-
-interface SubCategory {
-  id: number;
-  name: string;
-  slug: string;
+  menuBadge?: 'BESTSELLER' | 'NEW' | 'PROMO' | 'FEATURED' | null;
+  menuFeatured?: boolean;
+  menuCategory?: string;
 }
 
 type SortMode = 'newest' | 'price_asc' | 'price_desc' | 'popularity';
@@ -68,14 +65,15 @@ export default function CustomerMerchantDetailPage() {
   // Table tag from a scanned dine-in QR code (e.g. "Table 5"). When present we
   // surface a banner and carry it through to checkout.
   const tableTag = searchParams.get('table');
+  const requestedTransactionType = searchParams.get('transactionType') || searchParams.get('orderType');
+  const isDineInTransaction = Boolean(tableTag) || ['dine_in', 'in_store'].includes(requestedTransactionType || '');
 
   const [merchant, setMerchant] = useState<Merchant | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [activeSubCat, setActiveSubCat] = useState<number | null>(null);
+  const [activeMenuCategory, setActiveMenuCategory] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [cartCount, setCartCount] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -113,13 +111,6 @@ export default function CustomerMerchantDetailPage() {
         }));
         setProducts(normalized);
 
-        if (merchantData.category_id) {
-          const subsRes = await fetch(`${API}/api/sub-categories?categoryId=${merchantData.category_id}&active=true`);
-          if (subsRes.ok && !cancelled) {
-            const subsData = await subsRes.json();
-            setSubCategories(Array.isArray(subsData) ? subsData : subsData.data || []);
-          }
-        }
       } catch (err: any) {
         console.error('Error loading merchant:', err);
         if (!cancelled) setError(err.message || 'Failed to load merchant');
@@ -147,8 +138,8 @@ export default function CustomerMerchantDetailPage() {
 
   const filteredProducts = useMemo(() => {
     let list = products;
-    if (activeSubCat != null) {
-      list = list.filter((p) => p.sub_category_id === activeSubCat);
+    if (activeMenuCategory != null) {
+      list = list.filter((p) => p.menuCategory === activeMenuCategory);
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -180,13 +171,13 @@ export default function CustomerMerchantDetailPage() {
         break;
     }
     return sorted;
-  }, [products, activeSubCat, search, sortMode, cart]);
+  }, [products, activeMenuCategory, search, sortMode, cart]);
 
-  const subCategoryCounts = useMemo(() => {
-    const counts = new Map<number, number>();
+  const menuCategoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const p of products) {
-      if (p.sub_category_id != null) {
-        counts.set(p.sub_category_id, (counts.get(p.sub_category_id) || 0) + 1);
+      if (p.menuCategory) {
+        counts.set(p.menuCategory, (counts.get(p.menuCategory) || 0) + 1);
       }
     }
     return counts;
@@ -215,6 +206,7 @@ export default function CustomerMerchantDetailPage() {
       merchant_id: merchant.id,
       shop_id: selectedShopId || undefined,
       variant_id: variantId,
+      variant_name: variant?.optionValues?.map(link => link.optionValue.value).filter(Boolean).join(' / ') || undefined,
     });
   };
 
@@ -288,48 +280,31 @@ export default function CustomerMerchantDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-32">
-      {/* Cover header */}
-      <div className="relative">
-        <div className="h-44 lg:h-60 w-full overflow-hidden bg-gradient-to-br from-red-100 to-orange-100">
-          {merchant.cover_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={merchant.cover_image_url}
-              alt={merchant.name}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <span className="text-6xl">🏪</span>
-            </div>
-          )}
-        </div>
-        <button
-          onClick={() => router.back()}
-          className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/95 shadow-md flex items-center justify-center"
-          title="Go back"
-        >
-          <svg
-            className="w-5 h-5 text-gray-700"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+      {/* Merchant marketplace header */}
+      <div className="mx-auto max-w-3xl px-4 pt-4">
+        <section className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#171313] via-[#60200c] to-[#1a1717] p-5 text-white shadow-xl sm:p-7">
+          <div className="absolute inset-0 opacity-20 [background-image:radial-gradient(#fff_1px,transparent_1px)] [background-size:28px_28px]" />
+          <button
+            onClick={() => router.back()}
+            className="relative z-10 mb-5 flex size-10 items-center justify-center rounded-full bg-white text-gray-700 shadow-md"
+            title="Go back"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
-      </div>
-
-      {/* Merchant info */}
-      <div className="max-w-3xl mx-auto px-4 -mt-8 relative">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-          <div className="flex items-start gap-3">
-            <div className="w-16 h-16 rounded-2xl overflow-hidden bg-gray-100 flex-shrink-0 -mt-10 border-4 border-white shadow-sm">
+            <svg
+              className="w-5 h-5 text-gray-700"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          </button>
+          <div className="relative flex items-center gap-4 sm:gap-6">
+            <div className="relative size-20 shrink-0 overflow-hidden rounded-2xl border-4 border-white bg-white sm:size-28">
               {merchant.logo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -338,18 +313,18 @@ export default function CustomerMerchantDetailPage() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-gray-400">
+                <div className="flex h-full w-full items-center justify-center text-3xl font-black text-gray-500">
                   {merchant.name.charAt(0)}
                 </div>
               )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-bold text-gray-900 truncate">
+                <h1 className="truncate text-2xl font-black sm:text-3xl">
                   {merchant.name}
                 </h1>
                 {merchant.is_verified && (
-                  <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full font-semibold">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2 py-1 text-[10px] font-bold text-white">
                     <svg
                       className="w-3 h-3"
                       fill="currentColor"
@@ -366,20 +341,20 @@ export default function CustomerMerchantDetailPage() {
                 )}
               </div>
               {merchant.description && (
-                <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                <p className="mt-1 line-clamp-2 text-xs text-white/80 sm:text-sm">
                   {merchant.description}
                 </p>
               )}
-              <div className="flex items-center flex-wrap gap-3 mt-2 text-xs text-gray-500">
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-white/80">
                 {merchant.rating != null && Number(merchant.rating) > 0 && (
                   <span className="flex items-center gap-1">
                     <span className="text-yellow-400">⭐</span>
-                    <span className="font-semibold text-gray-700">
+                    <span className="font-bold text-white">
                       {Number(merchant.rating).toFixed(1)}
                     </span>
                     {merchant.total_reviews != null &&
                       Number(merchant.total_reviews) > 0 && (
-                        <span className="text-gray-400">
+                        <span className="text-white/60">
                           ({merchant.total_reviews})
                         </span>
                       )}
@@ -391,23 +366,25 @@ export default function CustomerMerchantDetailPage() {
                 {merchant.phone && (
                   <a
                     href={`tel:${merchant.phone}`}
-                    className="flex items-center gap-1 text-[#DB0002] font-medium"
+                    className="flex items-center gap-1 font-semibold text-white"
                   >
                     📞 {merchant.phone}
                   </a>
                 )}
               </div>
-              <div className="mt-3">
-                <Link
-                  href={`/customer/reserve?merchant=${merchant.id}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#165BB8] text-white text-xs font-semibold active:scale-95 transition-transform"
-                >
-                  🍽️ Reserve a Table
-                </Link>
-              </div>
+              {!isDineInTransaction && (
+                <div className="mt-4">
+                  <Link
+                    href={`/customer/reserve?merchant=${merchant.id}`}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-red-600 transition-transform active:scale-95"
+                  >
+                    🍽️ Reserve a Table
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       {/* Dine-in table banner (from scanned QR) */}
@@ -473,34 +450,32 @@ export default function CustomerMerchantDetailPage() {
           </select>
         </div>
 
-        {subCategories.length > 0 && (
+        {menuCategoryCounts.size > 0 && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
             <button
-              onClick={() => setActiveSubCat(null)}
+              onClick={() => setActiveMenuCategory(null)}
               className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                activeSubCat === null
+                activeMenuCategory === null
                   ? 'bg-[#DB0002] text-white shadow-sm'
                   : 'bg-white text-gray-700 border border-gray-200'
               }`}
             >
               All ({products.length})
             </button>
-            {subCategories.map((sub) => {
-              const count = subCategoryCounts.get(sub.id) || 0;
-              if (count === 0) return null;
+            {[...menuCategoryCounts.entries()].map(([name, count]) => {
               return (
                 <button
-                  key={sub.id}
+                  key={name}
                   onClick={() =>
-                    setActiveSubCat(activeSubCat === sub.id ? null : sub.id)
+                    setActiveMenuCategory(activeMenuCategory === name ? null : name)
                   }
                   className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                    activeSubCat === sub.id
+                    activeMenuCategory === name
                       ? 'bg-[#DB0002] text-white shadow-sm'
                       : 'bg-white text-gray-700 border border-gray-200'
                   }`}
                 >
-                  {sub.name} ({count})
+                  {name} ({count})
                 </button>
               );
             })}
@@ -515,7 +490,7 @@ export default function CustomerMerchantDetailPage() {
             <span className="text-4xl mb-3 block">🛍️</span>
             <p className="text-gray-700 font-medium">No products available</p>
             <p className="text-xs text-gray-500 mt-1">
-              {search || activeSubCat
+              {search || activeMenuCategory
                 ? 'Try clearing your filters'
                 : 'This merchant hasn\u2019t added items yet'}
             </p>
@@ -543,6 +518,11 @@ export default function CustomerMerchantDetailPage() {
                       <div className="w-full h-full flex items-center justify-center text-3xl text-gray-300">
                         🍽️
                       </div>
+                    )}
+                    {product.menuBadge && !outOfStock && (
+                      <span className="absolute left-2 top-2 rounded-full bg-red-600 px-2 py-1 text-[9px] font-black text-white">
+                        {product.menuBadge}
+                      </span>
                     )}
                     {outOfStock && (
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center">

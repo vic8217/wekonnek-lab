@@ -31,6 +31,7 @@ export const SUBSCRIPTION_FEATURES: Record<SubscriptionTier, string[]> = {
     'Customer insights',
   ],
   platinum: [
+    'DINE_IN_CREW',
     'Unlimited Product listings',
     '24/7 priority support',
     'Promotional badges',

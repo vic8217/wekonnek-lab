@@ -107,4 +107,58 @@ export class OrdersController {
       body.payment_ref,
     );
   }
+
+  @Patch(':id/bill-out')
+  @ApiOperation({ summary: 'Request dine-in bill-out and apply one optional discount' })
+  requestBillOut(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+  ) {
+    return this.ordersService.requestBillOut(id, req.user.id, body);
+  }
+
+  @Patch(':id/bill-out-draft')
+  @ApiOperation({ summary: 'Persist an unfinished dine-in bill-out discount form' })
+  saveBillOutDraft(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.ordersService.saveBillOutDraft(id, req.user.id, body);
+  }
+
+  @Post(':id/service-requests')
+  @ApiOperation({ summary: 'Customer submits a dine-in table service request' })
+  createServiceRequest(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: { type?: string; details?: string }) {
+    return this.ordersService.createServiceRequest(id, req.user.id, body);
+  }
+
+  @Patch(':id/service-requests/:requestId')
+  @ApiOperation({ summary: 'Shop assigns or completes a dine-in service request' })
+  updateServiceRequest(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Param('requestId', ParseIntPipe) requestId: number, @Body() body: { assignedStaffId?: number | null; status?: string }) {
+    return this.ordersService.updateServiceRequest(id, requestId, req.user.id, body);
+  }
+
+  @Patch(':id/items/:itemId/status')
+  @ApiOperation({ summary: 'Update a dine-in food item status' })
+  updateItemStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('itemId', ParseIntPipe) itemId: number,
+    @Body() body: { status: string },
+  ) {
+    return this.ordersService.updateItemStatus(id, itemId, body.status);
+  }
+
+  @Patch(':id/confirm-bill-out')
+  @ApiOperation({ summary: 'Merchant confirms a requested bill-out' })
+  confirmBillOut(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.confirmBillOut(id, req.user.id, req.user.role);
+  }
+
+  @Post(':id/checkout-payment')
+  @ApiOperation({ summary: 'Choose manual payment or start a bill-out payment gateway' })
+  checkoutPayment(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { method: 'manual' | 'gcash' | 'maya' | 'card' },
+  ) {
+    return this.ordersService.checkoutPayment(id, req.user.id, body.method);
+  }
 }

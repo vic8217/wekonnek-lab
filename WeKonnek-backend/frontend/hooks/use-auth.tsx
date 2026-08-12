@@ -192,6 +192,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       let token = getToken();
       if (!token) {
+        // Crew pairing and handheld operations use their own device/session
+        // credentials. They are public entry points and must not depend on (or
+        // try to refresh) a customer/merchant browser session.
+        if (window.location.pathname.startsWith('/crew')) {
+          setUser(undefined);
+          return;
+        }
         if (scopeForPath() === 'default' && localStorage.getItem(SIGNED_OUT_KEY) === 'true') {
           setUser(undefined);
           return;

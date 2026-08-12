@@ -21,6 +21,8 @@ function serializeReview(r: any) {
     rating: r.rating,
     review_text: r.reviewText,
     reviewText: r.reviewText,
+    order_id: r.orderId,
+    photo_urls: r.photoUrls || [],
     response_text: r.responseText,
     responseText: r.responseText,
     responded_at: r.respondedAt,
@@ -50,15 +52,31 @@ export class ReviewsService {
       rating?: number;
       review_text?: string;
       reviewText?: string;
+      order_id?: string;
+      orderId?: string;
+      photo_urls?: string[];
+      photoUrls?: string[];
     },
   ) {
     const merchantId = input.merchant_id ?? input.merchantId;
     const productId = input.product_id ?? input.productId;
     const rating = input.rating;
     const reviewText = input.review_text ?? input.reviewText ?? '';
+    const orderId = input.order_id ?? input.orderId;
+    const photoUrls = input.photo_urls ?? input.photoUrls ?? [];
 
     if (!rating || rating < 1 || rating > 5)
       throw new BadRequestException('rating must be between 1 and 5');
+    if (photoUrls.length > 5) throw new BadRequestException('A review may include up to 5 photos');
+    if (orderId) {
+      const order = await this.prisma.wkOrder.findFirst({
+        where: { id: Number(orderId), userId, status: 'completed' },
+      });
+      if (!order) throw new BadRequestException('Only completed orders may be reviewed');
+      if (merchantId && order.merchantId !== Number(merchantId)) throw new BadRequestException('Merchant does not match this order');
+      const duplicate = await this.prisma.review.findFirst({ where: { userId, orderId: String(orderId) } });
+      if (duplicate) throw new BadRequestException('You already reviewed this order');
+    }
 
     const review = await this.prisma.review.create({
       data: {
@@ -67,6 +85,8 @@ export class ReviewsService {
         productId: productId ? Number(productId) : null,
         rating: Number(rating),
         reviewText,
+        orderId: orderId ? String(orderId) : null,
+        photoUrls,
       },
       include: { merchant: true, product: true },
     });

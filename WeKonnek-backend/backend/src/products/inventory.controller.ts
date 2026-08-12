@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { MerchantsService } from '../merchants/merchants.service';
 import { ProductsService } from './products.service';
 import { ShopInventoryService } from './shop-inventory.service';
-import { AssignShopProductDto, CreateInventoryMovementDto, TransferInventoryDto, UpdateReorderLevelDto } from './dto/shop-inventory.dto';
+import { AssignShopProductDto, CloseInventoryDayDto, CreateInventoryMovementDto, TransferInventoryDto, UpdateReorderLevelDto } from './dto/shop-inventory.dto';
 
 @ApiTags('inventory')
 @ApiBearerAuth()
@@ -60,6 +60,27 @@ export class InventoryController {
     return this.shopInventory.shopProducts(scope.merchantId, scope.shopId);
   }
 
+  @Get('digital-menu')
+  @ApiOperation({ summary: 'Get branch-scoped digital menu configuration' })
+  async digitalMenu(@Req() req: any, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.digitalMenu(scope.merchantId, scope.shopId);
+  }
+
+  @Patch('digital-menu/items/:productId')
+  @ApiOperation({ summary: 'Add or update a product presentation on the branch digital menu' })
+  async updateDigitalMenuItem(@Req() req: any, @Param('productId', ParseIntPipe) productId: number, @Body() body: any, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.updateDigitalMenuItem(scope.merchantId, scope.shopId, productId, body);
+  }
+
+  @Patch('digital-menu/reorder')
+  @ApiOperation({ summary: 'Persist branch digital menu category and item order' })
+  async reorderDigitalMenu(@Req() req: any, @Body() body: any, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.reorderDigitalMenu(scope.merchantId, scope.shopId, body);
+  }
+
   @Patch('reorder-level')
   @ApiOperation({ summary: 'Set a shop-specific reorder level' })
   async reorderLevel(@Req() req: any, @Body() body: UpdateReorderLevelDto, @Query('shopId') shopId?: string) {
@@ -86,6 +107,27 @@ export class InventoryController {
   async transfer(@Req() req: any, @Body() body: TransferInventoryDto, @Query('shopId') shopId?: string) {
     const scope = await this.context(req, shopId ? Number(shopId) : undefined);
     return this.shopInventory.transfer(scope.merchantId, scope.shopId, body, req.user.id);
+  }
+
+  @Get('transfer-destinations')
+  @ApiOperation({ summary: 'List sibling shops available as inventory transfer destinations' })
+  async transferDestinations(@Req() req: any, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.transferDestinations(scope.merchantId, scope.shopId);
+  }
+
+  @Post('daily-counts')
+  @ApiOperation({ summary: 'Record a physical end-of-day inventory count and variance' })
+  async closeDay(@Req() req: any, @Body() body: CloseInventoryDayDto, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.closeDay(scope.merchantId, scope.shopId, body, req.user.id);
+  }
+
+  @Get('daily-counts')
+  @ApiOperation({ summary: 'List daily inventory reconciliation counts for one shop' })
+  async dailyCounts(@Req() req: any, @Query('shopId') shopId?: string) {
+    const scope = await this.context(req, shopId ? Number(shopId) : undefined);
+    return this.shopInventory.dailyCounts(scope.merchantId, scope.shopId);
   }
 
   @Get('low-stock')

@@ -85,7 +85,7 @@ export default function MobileBottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 xl:hidden safe-area-bottom no-select shadow-[0_-8px_24px_rgba(15,23,42,0.08)]">
-      <div className="flex items-center justify-around h-16 px-2 max-w-3xl mx-auto">
+      <div className="mx-auto flex h-20 max-w-3xl items-center justify-around px-2 pt-4">
         {/* Home */}
         <Link
           href="/customer/dashboard"

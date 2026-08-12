@@ -34,6 +34,7 @@ import { BazaarPromosModule } from './bazaar-promos/bazaar-promos.module';
 import { BazaarListingsModule } from './bazaar-listings/bazaar-listings.module';
 import { ListingInquiriesModule } from './listing-inquiries/listing-inquiries.module';
 import { PropertyModule } from './property/property.module';
+import { DineInCrewModule } from './dine-in-crew/dine-in-crew.module';
 
 // ─── WeKonnek Core Modules (merged from standalone backend) ─
 import { AuthModule } from './modules/auth/auth.module';
@@ -99,6 +100,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     BazaarListingsModule,
     ListingInquiriesModule,
     PropertyModule,
+    DineInCrewModule,
 
     // ─── WeKonnek Core ────────────────────────────
     AuthModule,

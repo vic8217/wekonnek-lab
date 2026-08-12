@@ -9,6 +9,9 @@ import {
   PaymentGatewayService,
 } from '../modules/wallet/payment-gateway.service';
 import { NotificationsService } from '../modules/notifications/notifications.service';
+import { VouchersService } from '../modules/vouchers/vouchers.service';
+import { InvoicesService } from '../modules/invoices/invoices.service';
+import { DineInSyncService } from '../dine-in-crew/dine-in-sync.service';
 import { WalletPaymentGateway, NotificationType } from '@prisma/client';
 
 interface OrderItemInput {
@@ -43,6 +46,8 @@ interface CreateOrderInput {
   items: OrderItemInput[];
 }
 
+export type CrewOrderInput = CreateOrderInput;
+
 /** Online payment methods that require a gateway checkout. */
 const ONLINE_METHODS = new Set(['gcash', 'grab_pay', 'card', 'maya', 'xendit']);
 
@@ -56,11 +61,16 @@ function serializeOrder(order: any) {
     productId: it.productId,
     variant_id: it.variantId,
     variantId: it.variantId,
+    variant_name: it.variant?.optionValues?.map((link: any) => link.optionValue?.value).filter(Boolean).join(' / ') || null,
+    variantName: it.variant?.optionValues?.map((link: any) => link.optionValue?.value).filter(Boolean).join(' / ') || null,
+    image_url: it.variant?.imageUrl || it.product?.imageUrl || null,
+    imageUrl: it.variant?.imageUrl || it.product?.imageUrl || null,
     product_name: it.productName,
     productName: it.productName,
     quantity: it.quantity,
     price: it.price,
     subtotal: it.subtotal,
+    status: it.status,
   }));
   const merchant = order.merchant
     ? {
@@ -70,6 +80,12 @@ function serializeOrder(order: any) {
         logo_url: order.merchant.logoUrl,
       }
     : undefined;
+  const serviceRequests = (order.serviceRequests || []).map((request: any) => ({
+    id: request.id, order_id: request.orderId, type: request.type, details: request.details,
+    status: request.status, assigned_staff_id: request.assignedStaffId,
+    assigned_staff_name: request.assignedStaff?.displayName || null,
+    assigned_at: request.assignedAt, completed_at: request.completedAt, created_at: request.createdAt,
+  }));
   return {
     id: order.id,
     order_code: order.orderCode,
@@ -95,6 +111,10 @@ function serializeOrder(order: any) {
     payment_status: order.paymentStatus,
     payment_ref: order.paymentRef,
     payment_url: order.paymentUrl,
+    discount_type: order.discountType,
+    discount_amount: order.discountAmount,
+    discount_details: order.discountDetails,
+    voucher_id: order.voucherId,
     created_at: order.createdAt,
     createdAt: order.createdAt,
     updated_at: order.updatedAt,
@@ -104,6 +124,8 @@ function serializeOrder(order: any) {
     order_items: items,
     orderItems: items,
     items,
+    service_requests: serviceRequests,
+    serviceRequests,
     customer: order.user
       ? {
           id: order.user.id,
@@ -122,6 +144,9 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly paymentGateway: PaymentGatewayService,
     private readonly notifications: NotificationsService,
+    private readonly vouchers: VouchersService,
+    private readonly invoices: InvoicesService,
+    private readonly dineInSync: DineInSyncService,
   ) {}
 
   private generateOrderCode(): string {
@@ -187,6 +212,7 @@ export class OrdersService {
 
     const paymentMethod = (input.payment_method || 'cod').toLowerCase();
     const isOnline = ONLINE_METHODS.has(paymentMethod);
+    const orderType = input.order_type ?? input.orderType ?? 'delivery';
 
     const created = await this.prisma.wkOrder.create({
       data: {
@@ -195,7 +221,7 @@ export class OrdersService {
         merchantId: Number(merchantId),
         shopId: shop.id,
         status: 'pending',
-        orderType: input.order_type ?? input.orderType ?? 'delivery',
+        orderType,
         totalAmount,
         deliveryAddress: input.delivery_address ?? null,
         deliveryFee,
@@ -213,11 +239,13 @@ export class OrdersService {
             quantity: it.quantity,
             price: it.price,
             subtotal: it.subtotal,
+            status: ['dine_in', 'in_store'].includes(orderType) ? 'preparing' : null,
           })),
         },
       },
       include: {
         orderItems: true,
+        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
         merchant: { include: { category: true } },
       },
     });
@@ -287,6 +315,7 @@ export class OrdersService {
     } catch {
       // swallow — merchant alerts are non-critical to order creation
     }
+    if (['dine_in', 'in_store'].includes(created.orderType)) await this.dineInSync.recordOrder(created.id, 'ORDER_CREATED');
 
     // Online payment → create a gateway checkout and attach the redirect URL.
     if (isOnline) {
@@ -364,6 +393,7 @@ export class OrdersService {
       where,
       include: {
         orderItems: true,
+        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
         merchant: { include: { category: true } },
         // customer info is useful for merchant/admin views
         ...(opts.merchantId || opts.isAdmin ? {} : {}),
@@ -389,7 +419,15 @@ export class OrdersService {
     const order = await this.prisma.wkOrder.findUnique({
       where: { id: Number(id) },
       include: {
-        orderItems: true,
+        orderItems: {
+          include: {
+            product: { select: { imageUrl: true } },
+            variant: {
+              include: { optionValues: { include: { optionValue: true } } },
+            },
+          },
+        },
+        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
         merchant: { include: { category: true } },
       },
     });
@@ -443,7 +481,7 @@ export class OrdersService {
     const data: any = { status };
     if (
       ['completed', 'delivered'].includes(status) &&
-      existing.paymentMethod === 'cod' &&
+      ['cod', 'cash'].includes(existing.paymentMethod) &&
       existing.paymentStatus !== 'paid'
     ) {
       data.paymentStatus = 'paid';
@@ -457,6 +495,14 @@ export class OrdersService {
         merchant: { include: { category: true } },
       },
     });
+    if (willFinalize && ['dine_in', 'in_store'].includes(existing.orderType)) {
+      await this.invoices.generateFromDineInOrder(Number(id));
+      if (existing.shopId && existing.tableNumber) {
+        const siblings = await this.prisma.wkOrder.findMany({ where: { id: { not: Number(id) }, shopId: existing.shopId, tableNumber: { equals: existing.tableNumber, mode: 'insensitive' }, orderType: { in: ['dine_in', 'in_store'] }, status: { notIn: ['completed', 'cancelled', 'delivered'] } }, select: { id: true } });
+        for (const sibling of siblings) await this.updateStatus(sibling.id, 'cancelled');
+      }
+    }
+    if (['dine_in', 'in_store'].includes(existing.orderType)) await this.dineInSync.recordOrder(Number(id), status === 'completed' ? 'ORDER_COMPLETED' : 'ORDER_STATUS_CHANGED');
     return serializeOrder(order);
   }
 
@@ -472,20 +518,224 @@ export class OrdersService {
     return serializeOrder(order);
   }
 
+  async updateItemStatus(orderId: number, itemId: number, status: string) {
+    if (!['preparing', 'served'].includes(status)) throw new BadRequestException('Item status must be preparing or served');
+    const item = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId },
+      include: { order: true },
+    });
+    if (!item) throw new NotFoundException('Order item not found');
+    if (!['dine_in', 'in_store'].includes(item.order.orderType)) throw new BadRequestException('Item status is available only for dine-in orders');
+
+    await this.prisma.orderItem.update({ where: { id: itemId }, data: { status } });
+    const remaining = await this.prisma.orderItem.count({ where: { orderId, status: { not: 'served' } } });
+    await this.prisma.wkOrder.update({
+      where: { id: orderId },
+      data: { status: remaining === 0 ? 'ready' : 'preparing' },
+    });
+    await this.dineInSync.recordOrder(orderId, status === 'served' ? 'ITEM_SERVED' : 'ITEM_PREPARING');
+    return this.findById(orderId);
+  }
+
+  async requestBillOut(
+    id: number,
+    userId: string,
+    input: {
+      discountType?: 'none' | 'sc_pwd' | 'voucher';
+      totalDiners?: number;
+      eligibleDiners?: number;
+      cards?: Array<{ type: 'sc' | 'pwd'; reference: string; name: string; address: string; idPhoto?: string }>;
+      voucherCode?: string;
+    },
+  ) {
+    const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
+    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
+    if (existing.orderType !== 'dine_in') throw new BadRequestException('Bill-out is available only for dine-in orders');
+    if (existing.status === 'bill_out') throw new BadRequestException('Bill-out has already been requested');
+    if (!['ready', 'bill_out'].includes(existing.status)) {
+      throw new BadRequestException('Bill-out is available after the order has been served');
+    }
+
+    const discountType = input.discountType || 'none';
+    const gross = Number(existing.totalAmount);
+    let discountAmount = 0;
+    let discountDetails: Record<string, unknown> | null = null;
+    let voucherId: string | null = null;
+
+    if (discountType === 'sc_pwd') {
+      const totalDiners = Number(input.totalDiners);
+      const eligibleDiners = Number(input.eligibleDiners);
+      const cards = input.cards || [];
+      if (!Number.isInteger(totalDiners) || totalDiners < 1) throw new BadRequestException('Enter the total number of diners');
+      if (!Number.isInteger(eligibleDiners) || eligibleDiners < 1 || eligibleDiners > totalDiners) throw new BadRequestException('Enter a valid number of SC/PWD diners');
+      if (cards.length !== eligibleDiners || cards.some(card => !card.reference?.trim() || !card.name?.trim() || !card.address?.trim() || !['sc', 'pwd'].includes(card.type))) {
+        throw new BadRequestException('Complete all card details for every SC/PWD diner');
+      }
+      const eligibleShare = gross * (eligibleDiners / totalDiners);
+      const vatExclusiveShare = eligibleShare / 1.12;
+      const vatExemption = Math.round((eligibleShare - vatExclusiveShare) * 100) / 100;
+      const scPwdDiscount = Math.round((vatExclusiveShare * 0.2) * 100) / 100;
+      discountAmount = Math.round((vatExemption + scPwdDiscount) * 100) / 100;
+      discountDetails = {
+        totalDiners,
+        eligibleDiners,
+        cards: cards.map(card => ({
+          type: card.type,
+          reference: card.reference.trim(),
+          name: card.name.trim(),
+          address: card.address.trim(),
+          ...(card.idPhoto ? { idPhoto: card.idPhoto } : {}),
+        })),
+        vatExemption,
+        scPwdDiscount,
+      };
+    } else if (discountType === 'voucher') {
+      if (!input.voucherCode?.trim()) throw new BadRequestException('Select a voucher from your wallet');
+      const validation = await this.vouchers.validate(input.voucherCode, userId, gross, 'dine_in');
+      if (!validation.valid || !validation.voucher) throw new BadRequestException(validation.reason || 'Voucher is not valid');
+      discountAmount = Number(validation.discountAmount || 0);
+      voucherId = validation.voucher.id;
+      discountDetails = { code: validation.voucher.code, title: validation.voucher.title };
+    } else if (discountType !== 'none') {
+      throw new BadRequestException('Only one supported discount may be selected');
+    }
+
+    const updated = await this.prisma.wkOrder.update({
+      where: { id },
+      data: {
+        status: 'bill_out',
+        discountType: discountType === 'none' ? null : discountType,
+        discountAmount,
+        discountDetails: discountDetails as any,
+        voucherId,
+        totalAmount: Math.max(0, gross - discountAmount),
+      },
+      include: { orderItems: true, merchant: { include: { category: true } } },
+    });
+
+    if (voucherId) await this.vouchers.redeem(voucherId, userId, String(id), discountAmount);
+    await this.dineInSync.recordOrder(id, 'BILL_REQUESTED');
+    return serializeOrder(updated);
+  }
+
+  async saveBillOutDraft(id: number, userId: string, input: any) {
+    const existing = await this.prisma.wkOrder.findFirst({ where: { id, userId } });
+    if (!existing || existing.orderType !== 'dine_in') throw new NotFoundException('Dine-in order not found');
+    if (!['ready', 'bill_out'].includes(existing.status)) throw new BadRequestException('Bill-out details can be edited only after all items are served');
+    const discountType = String(input.discountType || 'none');
+    if (!['none', 'sc_pwd', 'voucher'].includes(discountType)) throw new BadRequestException('Invalid discount type');
+    const details = discountType === 'sc_pwd' ? {
+      draft: true,
+      totalDiners: Math.max(1, Number(input.totalDiners || 1)),
+      eligibleDiners: Math.max(1, Number(input.eligibleDiners || 1)),
+      cards: Array.isArray(input.cards) ? input.cards.map((card: any) => ({ type: card.type === 'pwd' ? 'pwd' : 'sc', reference: String(card.reference || '').slice(0, 100), name: String(card.name || '').slice(0, 150), address: String(card.address || '').slice(0, 250), idPhoto: String(card.idPhoto || '').slice(0, 1000) })) : [],
+    } : discountType === 'voucher' ? { draft: true, code: String(input.voucherCode || '').slice(0, 80) } : null;
+    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { discountType: discountType === 'none' ? null : discountType, discountDetails: details as any, discountAmount: 0 }, include: { orderItems: true, merchant: { include: { category: true } }, serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } } } });
+    await this.dineInSync.recordOrder(id, 'BILL_OUT_DRAFT_UPDATED');
+    return serializeOrder(updated);
+  }
+
+  async confirmBillOut(id: number, userId: string, role?: string) {
+    const existing = await this.prisma.wkOrder.findUnique({
+      where: { id },
+      include: { merchant: { select: { userId: true } } },
+    });
+    if (!existing) throw new NotFoundException('Order not found');
+    if (existing.merchant.userId !== userId && !['admin', 'staff'].includes(String(role))) {
+      throw new ForbiddenException('This ticket belongs to another merchant');
+    }
+    if (existing.status !== 'bill_out') throw new BadRequestException('The customer has not requested bill-out');
+    const order = await this.prisma.wkOrder.update({
+      where: { id },
+      data: { status: 'payment_pending', paymentMethod: 'pending_selection', paymentStatus: 'pending' },
+      include: { orderItems: true, merchant: { include: { category: true } } },
+    });
+    await this.dineInSync.recordOrder(id, 'BILL_OUT_CONFIRMED');
+    return serializeOrder(order);
+  }
+
+  async checkoutPayment(id: number, userId: string, method: 'manual' | 'gcash' | 'maya' | 'card') {
+    const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
+    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
+    if (existing.status !== 'payment_pending') throw new BadRequestException('Wait for the merchant to confirm bill-out');
+    if (method === 'manual') {
+      const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: 'cash', paymentStatus: 'pending' }, include: { orderItems: true, merchant: { include: { category: true } } } });
+      await this.dineInSync.recordOrder(id, 'PAYMENT_METHOD_SELECTED');
+      return serializeOrder(updated);
+    }
+    if (!['gcash', 'maya', 'card'].includes(method)) throw new BadRequestException('Unsupported payment method');
+    const gateway = this.resolveGateway(undefined, method);
+    const appUrl = process.env.APP_BASE_URL || 'http://localhost:3001';
+    const result = await this.paymentGateway.createPayment({
+      gateway,
+      amount: Number(existing.totalAmount),
+      description: `WeKonnek Bill-Out ${existing.orderCode}`,
+      paymentMethod: method === 'maya' ? 'gcash' : method,
+      redirectSuccess: `${appUrl}/customer/orders/${id}?paid=1`,
+      redirectFailed: `${appUrl}/customer/orders/${id}?paid=0`,
+      metadata: { orderId: String(id), orderCode: existing.orderCode },
+    });
+    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: method, paymentRef: result.gatewayTransactionId, paymentUrl: result.paymentUrl }, include: { orderItems: true, merchant: { include: { category: true } } } });
+    await this.dineInSync.recordOrder(id, 'PAYMENT_METHOD_SELECTED');
+    return serializeOrder(updated);
+  }
+
   /** Called by payment webhooks to mark an order paid/failed by metadata.orderId. */
   async markPaidByGateway(orderId: string, status: 'completed' | 'failed') {
     if (!orderId) return;
     const id = Number(orderId);
     if (Number.isNaN(id)) return;
-    await this.prisma.wkOrder
-      .update({
-        where: { id },
-        data: {
-          paymentStatus: status === 'completed' ? 'paid' : 'failed',
-          ...(status === 'completed' ? { status: 'processing' } : {}),
-        },
-      })
-      .catch(() => undefined);
+    const existing = await this.prisma.wkOrder.findUnique({ where: { id } }).catch(() => null);
+    if (!existing) return;
+    if (status === 'completed' && existing.status === 'payment_pending') {
+      await this.updateStatus(id, 'completed');
+      await this.prisma.wkOrder.update({ where: { id }, data: { paymentStatus: 'paid' } });
+      return;
+    }
+    await this.prisma.wkOrder.update({
+      where: { id },
+      data: {
+        paymentStatus: status === 'completed' ? 'paid' : 'failed',
+        ...(status === 'completed' ? { status: 'processing' } : {}),
+      },
+    });
+  }
+
+  async createServiceRequest(orderId: number, userId: string, input: { type?: string; details?: string }) {
+    const allowed = new Set(['spoon_fork', 'water_cold', 'water_hot', 'condiments', 'plates_saucers', 'other']);
+    const type = String(input.type || '').trim().toLowerCase();
+    const details = String(input.details || '').trim().slice(0, 250) || null;
+    if (!allowed.has(type)) throw new BadRequestException('Select a valid service request');
+    if (type === 'other' && !details) throw new BadRequestException('Describe what you need');
+    const order = await this.prisma.wkOrder.findFirst({ where: { id: orderId, userId } });
+    if (!order || order.orderType !== 'dine_in' || !order.shopId) throw new NotFoundException('Active dine-in order not found');
+    if (['bill_out', 'payment_pending', 'completed', 'cancelled'].includes(order.status)) throw new BadRequestException('Service requests are closed for this ticket');
+    const request = await this.prisma.dineInServiceRequest.create({ data: { orderId, shopId: order.shopId, requestedByUserId: userId, type, details } });
+    await this.dineInSync.record(order.shopId, 'SERVICE_REQUEST_CREATED', request.id, { serviceRequest: this.serializeServiceRequest(request), orderId });
+    return this.serializeServiceRequest(request);
+  }
+
+  async updateServiceRequest(orderId: number, requestId: number, actorUserId: string, input: { assignedStaffId?: number | null; status?: string }) {
+    const request = await this.prisma.dineInServiceRequest.findFirst({ where: { id: requestId, orderId }, include: { order: true } });
+    if (!request) throw new NotFoundException('Service request not found');
+    const owner = await this.prisma.merchant.findFirst({ where: { id: request.order.merchantId, userId: actorUserId } });
+    const staffActor = owner ? null : await this.prisma.merchantStaff.findFirst({ where: { merchantId: request.order.merchantId, userId: actorUserId, isActive: true } });
+    if (!owner && !staffActor) throw new ForbiddenException('Shop access is required');
+    const status = input.status ? String(input.status).toLowerCase() : undefined;
+    if (status && !['pending', 'assigned', 'completed'].includes(status)) throw new BadRequestException('Invalid request status');
+    const assignedStaffId = input.assignedStaffId === null ? null : input.assignedStaffId ? Number(input.assignedStaffId) : undefined;
+    if (assignedStaffId) {
+      const assigned = await this.prisma.merchantStaff.findFirst({ where: { id: assignedStaffId, merchantId: request.order.merchantId, isActive: true, OR: [{ branchId: request.shopId }, { branchId: null }] } });
+      if (!assigned) throw new BadRequestException('Select an active crew member for this shop');
+    }
+    const nextStatus = status || (assignedStaffId ? 'assigned' : request.status);
+    const updated = await this.prisma.dineInServiceRequest.update({ where: { id: requestId }, data: { ...(assignedStaffId !== undefined ? { assignedStaffId, assignedAt: assignedStaffId ? new Date() : null } : {}), status: nextStatus, completedAt: nextStatus === 'completed' ? new Date() : null }, include: { assignedStaff: true } });
+    await this.dineInSync.record(request.shopId, 'SERVICE_REQUEST_UPDATED', updated.id, { serviceRequest: this.serializeServiceRequest(updated), orderId });
+    return this.serializeServiceRequest(updated);
+  }
+
+  private serializeServiceRequest(request: any) {
+    return { id: request.id, order_id: request.orderId, type: request.type, details: request.details, status: request.status, assigned_staff_id: request.assignedStaffId, assigned_staff_name: request.assignedStaff?.displayName || null, assigned_at: request.assignedAt, completed_at: request.completedAt, created_at: request.createdAt };
   }
 
   async getStats(merchantId?: number) {

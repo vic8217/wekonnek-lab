@@ -90,6 +90,23 @@ export class InvoicesController {
     });
   }
 
+  @Get('my')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List the logged-in customer’s saved e-receipts' })
+  async findMine(@Request() req: any) {
+    await this.invoicesService.ensureCustomerDineInReceipts(req.user.id);
+    return this.invoicesService.findByCustomer(req.user.id, { limit: 100 });
+  }
+
+  @Get('my/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'View one of the logged-in customer’s saved e-receipts' })
+  async findMineById(@Request() req: any, @Param('id') id: string) {
+    return this.invoicesService.findMineById(id, req.user.id);
+  }
+
   @Get('order/:orderId')
   @ApiOperation({ summary: 'Get invoice for a specific order' })
   async findByOrder(@Param('orderId') orderId: string) {

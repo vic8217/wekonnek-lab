@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { randomBytes } from 'crypto';
+import { operationState } from './branch-operation';
 
 const PASSKEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -148,6 +149,7 @@ export class BranchesService {
     branches = await Promise.all(branches.map((branch) => this.ensureShopAccess(branch)));
     return branches.map((b) => ({
       ...b,
+      ...operationState(b),
       merchant_id: b.merchantId,
       zip_code: b.zipCode,
       registered_business_name: b.registeredBusinessName,
@@ -243,6 +245,15 @@ export class BranchesService {
       data.taxClassification = input.tax_classification ?? input.taxClassification;
     if (input.operating_hours !== undefined || input.operatingHours !== undefined)
       data.operatingHours = input.operating_hours ?? input.operatingHours;
+    if (input.manual_open_override !== undefined || input.manualOpenOverride !== undefined) {
+      const override = input.manual_open_override ?? input.manualOpenOverride;
+      if (override !== null && typeof override !== 'boolean') {
+        throw new BadRequestException('Manual shop override must be open, closed, or automatic');
+      }
+      data.manualOpenOverride = override;
+      data.manualOverrideUpdatedAt = new Date();
+      data.manualOverrideUpdatedBy = requester.id;
+    }
     if (input.is_active !== undefined || input.isActive !== undefined)
       data.isActive = input.is_active ?? input.isActive;
 
@@ -258,7 +269,7 @@ export class BranchesService {
       data.passkeyExpiresAt = new Date(Date.now() + PASSKEY_LIFETIME_MS);
     }
     const branch = await this.prisma.branch.update({ where: { id }, data });
-    return { ...branch, merchant_id: branch.merchantId, is_active: branch.isActive };
+    return { ...branch, ...operationState(branch), merchant_id: branch.merchantId, is_active: branch.isActive };
   }
 
   async regeneratePasskey(id: number, requester: { id: string; role?: string }) {

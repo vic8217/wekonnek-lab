@@ -29,7 +29,12 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { merchantCategoriesApi, type MerchantCategory } from "@/lib/api";
+import {
+  merchantCategoriesApi,
+  merchantsApi,
+  type Merchant,
+  type MerchantCategory,
+} from "@/lib/api";
 import BazaarSellerPromo from "@/components/BazaarSellerPromo";
 
 const configs: Record<
@@ -352,6 +357,8 @@ export default function CategoryMarketplacePage() {
   };
   const [managedCategory, setManagedCategory] =
     useState<MerchantCategory | null>(null);
+  const [merchants, setMerchants] = useState<Merchant[]>([]);
+  const [loadingMerchants, setLoadingMerchants] = useState(true);
   const config = {
     ...fallbackConfig,
     name: managedCategory?.name || fallbackConfig.name,
@@ -366,27 +373,53 @@ export default function CategoryMarketplacePage() {
   const CategoryIcon = categoryStyle.icon;
   const [specialty, setSpecialty] = useState("All");
   const [sort, setSort] = useState("Popular");
-  const rows = useMemo(
-    () =>
-      config.merchants.map((name, index) => ({
-        name,
-        rating: (4.3 + (index % 6) / 10).toFixed(1),
-        distance: `${(0.5 + index * 0.25).toFixed(1)} km`,
-        offer: `${10 + (index % 4) * 5}% OFF`,
-        image: photos[index % photos.length],
-      })),
-    [config],
-  );
+  const rows = useMemo(() => {
+    const visible =
+      specialty === "All"
+        ? merchants
+        : merchants.filter((merchant) =>
+            merchant.subCategory?.name
+              ?.toLowerCase()
+              .includes(specialty.toLowerCase()),
+          );
+    const sorted = [...visible].sort((a, b) =>
+      sort === "Rating"
+        ? Number(b.rating || 0) - Number(a.rating || 0)
+        : a.name.localeCompare(b.name),
+    );
+    return sorted.map((merchant, index) => ({
+      merchant,
+      name: merchant.name,
+      rating: Number(merchant.rating || 0).toFixed(1),
+      distance: merchant.city || merchant.address || "Local",
+      offer: `${10 + (index % 4) * 5}% OFF`,
+      image:
+        merchant.coverImageUrl ||
+        merchant.logoUrl ||
+        photos[index % photos.length],
+    }));
+  }, [merchants, sort, specialty]);
 
   useEffect(() => {
     setManagedCategory(null);
     setSpecialty("All");
+    setMerchants([]);
+    setLoadingMerchants(true);
     merchantCategoriesApi
       .getBySlug(slug)
-      .then(setManagedCategory)
-      .catch((error) =>
-        console.error(`Failed to load managed category ${slug}:`, error),
-      );
+      .then(async (category) => {
+        setManagedCategory(category);
+        const result = await merchantsApi.search({
+          categoryId: category.id,
+          limit: 100,
+        });
+        setMerchants(result.data);
+      })
+      .catch((error) => {
+        console.error(`Failed to load managed category ${slug}:`, error);
+        setMerchants([]);
+      })
+      .finally(() => setLoadingMerchants(false));
   }, [slug]);
 
   return (
@@ -503,7 +536,11 @@ export default function CategoryMarketplacePage() {
           <section className="border-r border-slate-200 md:grid md:grid-cols-3 md:content-start md:gap-4 md:bg-slate-50 md:p-4 xl:block xl:bg-white xl:p-0">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2 md:col-span-3 md:-mx-4 md:-mt-4 md:mb-0 md:bg-white md:px-4 md:py-3 xl:mx-0 xl:mt-0">
               <div>
-                <b className="text-sm">{rows.length} merchants found</b>
+                <b className="text-sm">
+                  {loadingMerchants
+                    ? "Loading merchants…"
+                    : `${rows.length} merchants found`}
+                </b>
                 <p className="text-[10px] font-semibold text-red-600">
                   Shop discounts shown on every offer
                 </p>
@@ -512,13 +549,8 @@ export default function CategoryMarketplacePage() {
             </div>
             {rows.map((row) => (
               <Link
-                href={`/customer/explore/${slug}/${encodeURIComponent(
-                  row.name
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, "-")
-                    .replace(/(^-|-$)/g, ""),
-                )}`}
-                key={row.name}
+                href={`/customer/explore/${slug}/${row.merchant.slug}`}
+                key={row.merchant.id}
                 className="flex gap-3 border-b border-slate-200 p-3 transition hover:bg-slate-50 md:block md:overflow-hidden md:rounded-2xl md:border md:bg-white md:p-0 md:shadow-sm md:hover:shadow-md xl:flex xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-3 xl:shadow-none"
               >
                 <div className="relative size-24 shrink-0 overflow-hidden rounded-xl md:aspect-[4/3] md:h-auto md:w-full md:rounded-none xl:size-24 xl:rounded-xl">
@@ -558,6 +590,11 @@ export default function CategoryMarketplacePage() {
                 </div>
               </Link>
             ))}
+            {!loadingMerchants && rows.length === 0 && (
+              <div className="p-8 text-center text-sm text-slate-500 md:col-span-3 xl:col-span-1">
+                No active merchants are assigned to this category yet.
+              </div>
+            )}
           </section>
 
           <section className="relative hidden overflow-hidden bg-[#e7f4ec] xl:block">

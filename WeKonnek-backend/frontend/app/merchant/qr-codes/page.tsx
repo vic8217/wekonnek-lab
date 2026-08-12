@@ -4,8 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-
 interface QrTable {
   id: number;
   label: string;
@@ -34,7 +32,7 @@ export default function MerchantQrCodesPage() {
         return;
       }
 
-      const meRes = await fetch(`${API}/api/merchants/me`, {
+      const meRes = await fetch(`/api/backend/merchants/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!meRes.ok) throw new Error('Could not load your merchant profile');
@@ -43,7 +41,7 @@ export default function MerchantQrCodesPage() {
 
       const baseUrl = window.location.origin;
       const res = await fetch(
-        `${API}/api/merchants/${merchant.id}/floor-tables/qr?baseUrl=${encodeURIComponent(baseUrl)}`,
+        `/api/backend/merchants/${merchant.id}/floor-tables/qr?baseUrl=${encodeURIComponent(baseUrl)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) throw new Error('Failed to generate QR codes');

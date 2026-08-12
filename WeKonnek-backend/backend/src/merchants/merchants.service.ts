@@ -10,6 +10,7 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { operationState } from '../branches/branch-operation';
 
 function addOnQuantity(quantities: unknown, id: string) {
   if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
@@ -623,14 +624,17 @@ export class MerchantsService {
   async findBySlug(slug: string) {
     const merchant = await this.prisma.merchant.findUnique({
       where: { slug },
-      include: { category: true, subCategory: true, branches: { where: { isActive: true }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }], select: { id: true, name: true, address: true, city: true, isDefault: true } } },
+      include: { category: true, subCategory: true, branches: { where: { isActive: true }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }], select: { id: true, name: true, address: true, city: true, isDefault: true, isActive: true, operatingHours: true, manualOpenOverride: true, manualOverrideUpdatedAt: true } } },
     });
 
     if (!merchant) {
       throw new NotFoundException(`Merchant with slug ${slug} not found`);
     }
 
-    return serializeMerchant(merchant);
+    return serializeMerchant({
+      ...merchant,
+      branches: merchant.branches.map(branch => ({ ...branch, ...operationState(branch) })),
+    });
   }
 
   /**

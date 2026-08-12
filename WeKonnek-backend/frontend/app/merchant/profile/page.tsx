@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth, getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, loadZoneCityAreas, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -392,10 +393,6 @@ export default function MerchantProfilePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!storeDetailsConfirmed) {
-      toast.error('Confirm the operating hours and map location before saving.');
-      return;
-    }
     setSaving(true);
 
     try {
@@ -409,11 +406,6 @@ export default function MerchantProfilePage() {
         name: formData.name,
         description: formData.description,
         phone: formData.phone,
-        address: formData.address,
-        city: selectedCity || undefined,
-        region: selectedRegion || undefined,
-        councilDistrict: selectedDistrict || undefined,
-        geographicArea: selectedArea || undefined,
         taxClassification: formData.taxClassification,
         tin: formData.tin,
         registeredBusinessName: formData.registeredBusinessName,
@@ -421,8 +413,6 @@ export default function MerchantProfilePage() {
         ...(formData.website.trim() ? { website: formData.website.trim() } : {}),
         coverImageUrl: bannerPreview || merchant?.coverImageUrl,
         logoUrl: logoPreview || merchant?.logoUrl,
-        latitude: mapCenter[0],
-        longitude: mapCenter[1],
       };
 
       if (merchant?.id) {
@@ -434,30 +424,6 @@ export default function MerchantProfilePage() {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.message || 'Failed to update profile');
-        }
-      }
-
-      if (profileBranchId) {
-        const branchRes = await fetch(`${API}/api/branches/${profileBranchId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            address: formData.address,
-            city: selectedCity || undefined,
-            region: selectedRegion || undefined,
-            councilDistrict: selectedDistrict || undefined,
-            geographicArea: selectedArea || undefined,
-            latitude: mapCenter[0],
-            longitude: mapCenter[1],
-            operatingHours,
-            taxClassification: formData.taxClassification,
-            tin: formData.tin,
-            registeredBusinessName: formData.registeredBusinessName,
-          }),
-        });
-        if (!branchRes.ok) {
-          const err = await branchRes.json().catch(() => ({}));
-          throw new Error(Array.isArray(err.message) ? err.message.join(', ') : err.message || 'Failed to update store hours');
         }
       }
 
@@ -783,7 +749,14 @@ export default function MerchantProfilePage() {
           </div>
         </div>
 
-        {/* Store Hours & Location Section */}
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-5">
+          <h2 className="font-bold text-blue-900">Shop hours and locations are managed per shop</h2>
+          <p className="mt-1 text-sm text-blue-800">Use Shops to configure each location, operating schedule, and manual Open/Close override.</p>
+          <Link href="/merchant/branches" className="mt-3 inline-flex rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white">Manage Shops</Link>
+        </div>
+
+        {/* Legacy merchant-level store fields are intentionally hidden. */}
+        {false && (
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
           <div className="mb-6">
             <h2 className="text-xl font-bold text-gray-900 mb-1">Store Hours & Location</h2>
@@ -992,6 +965,7 @@ export default function MerchantProfilePage() {
             </label>
           </div>
         </div>
+        )}
 
         {/* Footer Buttons */}
         <div className="flex justify-end gap-4 pt-4">
@@ -1004,7 +978,7 @@ export default function MerchantProfilePage() {
           </button>
           <button
             type="submit"
-            disabled={saving || !storeDetailsConfirmed}
+            disabled={saving}
             className="px-6 py-3 bg-[#DB0002] text-white rounded-lg hover:bg-[#B80002] transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? 'Saving...' : 'Save Changes'}

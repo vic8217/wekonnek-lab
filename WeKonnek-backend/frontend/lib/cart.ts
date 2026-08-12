@@ -15,6 +15,7 @@ export interface CartItem {
   merchant_id?: number;
   shop_id?: number;
   variant_id?: number;
+  variant_name?: string;
 }
 
 const STORAGE_PREFIX = 'cart_';

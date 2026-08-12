@@ -182,6 +182,67 @@ export class InvoicesService {
     });
   }
 
+  async generateFromDineInOrder(orderId: number): Promise<Invoice> {
+    const reference = `wk-order:${orderId}`;
+    const existing = await this.prisma.invoice.findFirst({ where: { orderId: reference } });
+    if (existing) return existing;
+    const order = await this.prisma.wkOrder.findUnique({
+      where: { id: orderId },
+      include: { orderItems: true, merchant: true, shop: true },
+    });
+    if (!order || !['dine_in', 'in_store'].includes(order.orderType)) throw new NotFoundException('Dine-in order not found');
+    if (order.status !== 'completed') throw new BadRequestException('Complete the transaction before issuing the invoice');
+    const profile = await this.getDefaultBillingProfile();
+    const customer = await this.prisma.user.findUnique({ where: { id: order.userId } });
+    const serialNumber = await this.generateSerialNumber(profile);
+    const gross = order.orderItems.reduce((sum, item) => sum + Number(item.subtotal), 0);
+    const discount = Number(order.discountAmount || 0);
+    const details = (order.discountDetails || {}) as any;
+    const ratio = details.totalDiners ? Number(details.eligibleDiners || 0) / Number(details.totalDiners) : 0;
+    const eligibleGross = gross * ratio;
+    const eligibleVatExclusive = eligibleGross / 1.12;
+    const nonEligibleGross = gross - eligibleGross;
+    const vatableSales = nonEligibleGross / 1.12;
+    const vatAmount = nonEligibleGross - vatableSales;
+    return this.prisma.$transaction(async tx => {
+      // Backfill and page polling can request the same receipt concurrently. Lock
+      // by order reference so exactly one request is allowed to create it.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${reference}))`;
+      const lockedExisting = await tx.invoice.findFirst({ where: { orderId: reference } });
+      if (lockedExisting) return lockedExisting;
+      return tx.invoice.create({ data: {
+        serialNumber, type: InvoiceType.sales_invoice, status: InvoiceStatus.issued, invoiceDate: new Date(),
+        merchantBusinessName: order.shop?.registeredBusinessName || order.merchant.registeredBusinessName || order.merchant.name,
+        merchantTin: order.shop?.tin || order.merchant.tin || '',
+        merchantAddress: order.shop?.address || order.merchant.address || '', merchantIsVat: true,
+        merchantBirPermit: profile.birPermitNumber || '', merchantRdoCode: profile.rdoCode || '',
+        customerId: order.userId, customerName: [customer?.firstName, customer?.lastName].filter(Boolean).join(' ') || 'Cash Customer',
+        customerPhone: customer?.phone || '', customerEmail: customer?.email || '', orderId: reference,
+        orderNumber: order.orderCode, orderType: order.orderType,
+        lineItems: order.orderItems.map(item => ({ description: item.productName, quantity: item.quantity, unit: 'pc', unitPrice: Number(item.price), amount: Number(item.subtotal), vatAmount: 0, totalAmount: Number(item.subtotal) })),
+        subtotal: gross, discount, discountDescription: order.discountType || null,
+        vatableSales, vatAmount, vatExemptSales: ratio ? eligibleVatExclusive : 0, zeroRatedSales: 0,
+        totalAmount: Number(order.totalAmount), paymentMethod: order.paymentMethod, paymentReference: order.paymentRef,
+        amountPaid: Number(order.totalAmount), changeAmount: 0,
+        metadata: { tableNumber: order.tableNumber, discountDetails: order.discountDetails },
+      }});
+    });
+  }
+
+  async findMineById(id: string, customerId: string): Promise<Invoice> {
+    const invoice = await this.prisma.invoice.findFirst({ where: { id, customerId } });
+    if (!invoice) throw new NotFoundException('E-receipt not found');
+    return invoice;
+  }
+
+  async ensureCustomerDineInReceipts(customerId: string): Promise<void> {
+    const completed = await this.prisma.wkOrder.findMany({
+      where: { userId: customerId, status: 'completed', orderType: { in: ['dine_in', 'in_store'] } },
+      select: { id: true },
+    });
+    for (const order of completed) await this.generateFromDineInOrder(order.id);
+  }
+
   // ═══════════════════════════════════════════════════
   //  JSON FORMAT (Internal API)
   // ═══════════════════════════════════════════════════
@@ -690,12 +751,15 @@ export class InvoicesService {
     customerId: string,
     options?: { limit?: number; offset?: number },
   ): Promise<Invoice[]> {
-    return this.prisma.invoice.findMany({
+    const invoices = await this.prisma.invoice.findMany({
       where: { customerId },
       orderBy: { createdAt: 'desc' },
-      take: options?.limit || 20,
-      skip: options?.offset || 0,
     });
+    const unique = Array.from(
+      new Map(invoices.map(invoice => [invoice.orderId, invoice])).values(),
+    );
+    const offset = options?.offset || 0;
+    return unique.slice(offset, offset + (options?.limit || 20));
   }
 
   async findAll(filters?: {

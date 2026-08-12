@@ -40,8 +40,12 @@ export class FloorTablesService {
       orderBy: { sortOrder: 'asc' },
     });
 
+    const uniqueTables = tables.filter((table, index, rows) => rows.findIndex(candidate =>
+      candidate.label.trim().toLowerCase().replace(/\s+/g, ' ') === table.label.trim().toLowerCase().replace(/\s+/g, ' '),
+    ) === index);
+
     const qrTables = await Promise.all(
-      tables.map(async (table) => {
+      uniqueTables.map(async (table) => {
         const url = `${origin}/merchants/${merchant.slug}?table=${encodeURIComponent(table.label)}`;
         const dataUrl = await QRCode.toDataURL(url, {
           width: 512,

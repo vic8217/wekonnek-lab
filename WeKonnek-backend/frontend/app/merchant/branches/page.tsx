@@ -69,6 +69,11 @@ interface Branch {
   shop_id?: string | null;
   passkey?: string | null;
   passkey_expires_at?: string | null;
+  is_open?: boolean;
+  schedule_is_open?: boolean;
+  operation_source?: 'schedule' | 'manual';
+  manual_open_override?: boolean | null;
+  manual_override_updated_at?: string | null;
 }
 
 interface BranchForm {
@@ -111,6 +116,13 @@ const EMPTY_FORM: BranchForm = {
   taxClassification: '',
 };
 
+function formatHours(hours: Record<string, unknown> | null, key: string) {
+  const source = hours || {};
+  const period = (source[key] || (key === 'monday-friday' ? source.weekday : null)) as Record<string, unknown> | null;
+  if (!period || period.closed === true || !period.open || !period.close) return 'Closed';
+  return `${String(period.open)}–${String(period.close)}`;
+}
+
 export default function MerchantBranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +132,7 @@ export default function MerchantBranchesPage() {
   const [form, setForm] = useState<BranchForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [regeneratingPasskeyId, setRegeneratingPasskeyId] = useState<number | null>(null);
+  const [changingOperationId, setChangingOperationId] = useState<number | null>(null);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -332,6 +345,25 @@ export default function MerchantBranchesPage() {
     }
   };
 
+  const setOperationOverride = async (branch: Branch, override: boolean | null) => {
+    setChangingOperationId(branch.id);
+    try {
+      const res = await fetch(`${API}/api/branches/${branch.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ manual_open_override: override }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'Unable to change shop operation');
+      toast.success(override === null ? 'Shop now follows its operating schedule' : override ? 'Shop manually opened' : 'Shop manually closed');
+      if (merchantId) await fetchBranches(merchantId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to change shop operation');
+    } finally {
+      setChangingOperationId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -395,12 +427,36 @@ export default function MerchantBranchesPage() {
                         ? 'Inactive · Reload Wallet'
                         : 'Inactive'}
                   </span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${branch.is_open ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>
+                    {branch.is_open ? 'Open' : 'Closed'}
+                  </span>
                 </div>
               </div>
 
               {branch.address && (
                 <p className="text-sm text-gray-600 mb-2 line-clamp-2">{branch.address}</p>
               )}
+              <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <p className="font-semibold text-slate-800">Operating hours</p>
+                <p className="mt-1">Mon–Fri: {formatHours(branch.operatingHours, 'monday-friday')}</p>
+                <p>Saturday: {formatHours(branch.operatingHours, 'saturday')} · Sunday: {formatHours(branch.operatingHours, 'sunday')}</p>
+                <p className="mt-1 font-semibold">Status source: {branch.operation_source === 'manual' ? 'Manual override' : 'Automatic schedule'}</p>
+              </div>
+              <div className="mb-4 flex gap-2">
+                <button
+                  type="button"
+                  disabled={changingOperationId === branch.id || !(branch.isActive ?? branch.is_active)}
+                  onClick={() => void setOperationOverride(branch, !branch.is_open)}
+                  className={`flex-1 rounded-full px-4 py-2 text-xs font-bold text-white disabled:opacity-40 ${branch.is_open ? 'bg-red-600' : 'bg-emerald-600'}`}
+                >
+                  {changingOperationId === branch.id ? 'Updating…' : branch.is_open ? 'Close Shop' : 'Open Shop'}
+                </button>
+                {branch.operation_source === 'manual' && (
+                  <button type="button" disabled={changingOperationId === branch.id} onClick={() => void setOperationOverride(branch, null)} className="rounded-full border px-4 py-2 text-xs font-bold text-slate-700 disabled:opacity-40">
+                    Use Schedule
+                  </button>
+                )}
+              </div>
               {(!branch.latitude || !branch.longitude) && (
                 <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
                   Update the store address and pin this shop&apos;s map location.

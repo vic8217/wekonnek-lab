@@ -18,6 +18,9 @@ export class CreateInventoryMovementDto {
   @IsOptional() @IsNumber() @Min(0) unitCost?: number;
   @IsOptional() @IsString() referenceType?: string;
   @IsOptional() @IsString() referenceId?: string;
+  @IsOptional() @IsString() deliveryDate?: string;
+  @IsOptional() @IsString() deliveredBy?: string;
+  @IsOptional() @IsString() receivedAt?: string;
 }
 
 export class UpdateReorderLevelDto {
@@ -32,5 +35,13 @@ export class TransferInventoryDto {
   @IsOptional() @IsInt() variantId?: number | null;
   @IsInt() @Min(1) quantity: number;
   @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class CloseInventoryDayDto {
+  @IsInt() productId: number;
+  @IsOptional() @IsInt() variantId?: number | null;
+  @IsString() businessDate: string;
+  @IsInt() @Min(0) endingBalance: number;
   @IsOptional() @IsString() notes?: string;
 }

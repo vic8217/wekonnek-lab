@@ -7,6 +7,7 @@ import CustomerSidebar from "@/components/CustomerSidebar";
 import CustomerHeader from "@/components/CustomerHeader";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import PortalBackButton from "@/components/PortalBackButton";
+import OpenDineInTicketCard from "@/components/OpenDineInTicketCard";
 
 const PUBLIC_PREFIXES = [
   "/customer/dashboard",
@@ -60,6 +61,9 @@ export default function CustomerLayout({
   const isProfile = pathname === "/customer/profile";
   const isEditProfile = pathname === "/customer/edit-profile";
   const isScan = pathname === "/customer/scan";
+  const isCheckout = pathname === "/customer/checkout";
+  const isEReceipt = pathname.startsWith("/customer/e-receipts");
+  const isDineInOrderFlow = /^\/customer\/orders\/[^/]+(?:\/bill-out)?$/.test(pathname);
   const isMarketplaceCategory = pathname.startsWith("/customer/explore/");
   const isMerchantDetail = /^\/customer\/explore\/[^/]+\/[^/]+/.test(pathname);
   const usesStandaloneDesktop = isDashboard || isMarketplaceCategory;
@@ -94,16 +98,18 @@ export default function CustomerLayout({
     <div className="min-h-screen bg-gray-50">
       <div className={usesStandaloneDesktop ? "xl:hidden" : ""}>
         <CustomerHeader
-          hideMobileSearch={isMap || isProfile || isEditProfile || isScan}
+          hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
           showCart={isMerchantDetail}
         />
       </div>
+
+      {!isGuest && <OpenDineInTicketCard />}
 
       {/* Desktop layout: sidebar + main */}
       <div className={usesStandaloneDesktop ? "hidden" : "hidden xl:flex"}>
         <CustomerSidebar />
         <main className="flex-1 p-6">
-          {!isEditProfile && <PortalBackButton />}
+          {!isEditProfile && !isEReceipt && <PortalBackButton />}
           {children}
         </main>
       </div>
@@ -115,7 +121,7 @@ export default function CustomerLayout({
       {/* Mobile layout: full width content + bottom nav */}
       <div className="xl:hidden">
         <main className="pb-20">
-          {!isMarketplaceCategory && !isEditProfile && (
+          {!isMarketplaceCategory && !isEditProfile && !isCheckout && !isEReceipt && (
             <div className="px-4 pt-3 empty:hidden">
               <PortalBackButton />
             </div>

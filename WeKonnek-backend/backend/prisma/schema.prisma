@@ -109,8 +109,8 @@ model Merchant {
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  category             MerchantCategory?     @relation(fields: [categoryId], references: [id])
-  subCategory          MerchantSubCategory?  @relation(fields: [subCategoryId], references: [id])
+  category             MerchantCategory?      @relation(fields: [categoryId], references: [id])
+  subCategory          MerchantSubCategory?   @relation(fields: [subCategoryId], references: [id])
   products             Product[]
   orders               WkOrder[]
   reservations         Reservation[]
@@ -124,8 +124,14 @@ model Merchant {
   shopProducts         ShopProduct[]
   shopInventories      ShopInventory[]
   inventoryMovements   InventoryMovement[]
-  ownedCategories      Category[]            @relation("MerchantOwnedCategories")
-  ownedSubCategories   SubCategory[]         @relation("MerchantOwnedSubCategories")
+  inventoryDailyCounts InventoryDailyCount[]
+  featureGrants        MerchantFeatureGrant[]
+  crewDevices          CrewDevice[]
+  crewPairingTokens    CrewPairingToken[]
+  dineInAuditLogs      DineInAuditLog[]
+  dineInChanges        DineInChange[]
+  ownedCategories      Category[]             @relation("MerchantOwnedCategories")
+  ownedSubCategories   SubCategory[]          @relation("MerchantOwnedSubCategories")
 
   @@index([userId])
   @@index([categoryId])
@@ -363,17 +369,18 @@ model Product {
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  merchant           Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  category           Category?           @relation(fields: [categoryId], references: [id])
-  subCategory        SubCategory?        @relation(fields: [subCategoryId], references: [id])
-  orderItems         OrderItem[]
-  reviews            Review[]
-  productCategories  ProductCategory[]
-  options            ProductOption[]
-  variants           ProductVariant[]
-  shopProducts       ShopProduct[]
-  shopInventories    ShopInventory[]
-  inventoryMovements InventoryMovement[]
+  merchant             Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  category             Category?             @relation(fields: [categoryId], references: [id])
+  subCategory          SubCategory?          @relation(fields: [subCategoryId], references: [id])
+  orderItems           OrderItem[]
+  reviews              Review[]
+  productCategories    ProductCategory[]
+  options              ProductOption[]
+  variants             ProductVariant[]
+  shopProducts         ShopProduct[]
+  shopInventories      ShopInventory[]
+  inventoryMovements   InventoryMovement[]
+  inventoryDailyCounts InventoryDailyCount[]
 
   @@index([merchantId])
   @@index([categoryId])
@@ -406,20 +413,21 @@ model ProductOptionValue {
 }
 
 model ProductVariant {
-  id                 Int                         @id @default(autoincrement())
-  productId          Int                         @map("product_id")
-  sku                String                      @unique @db.VarChar(100)
-  barcode            String?                     @db.VarChar(100)
-  price              Decimal?                    @db.Decimal(10, 2)
-  imageUrl           String?                     @map("image_url") @db.VarChar(500)
-  isActive           Boolean                     @default(true) @map("is_active")
-  createdAt          DateTime                    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  product            Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  optionValues       ProductVariantOptionValue[]
-  shopInventories    ShopInventory[]
-  inventoryMovements InventoryMovement[]
-  orderItems         OrderItem[]
+  id                   Int                         @id @default(autoincrement())
+  productId            Int                         @map("product_id")
+  sku                  String                      @unique @db.VarChar(100)
+  barcode              String?                     @db.VarChar(100)
+  price                Decimal?                    @db.Decimal(10, 2)
+  imageUrl             String?                     @map("image_url") @db.VarChar(500)
+  isActive             Boolean                     @default(true) @map("is_active")
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  product              Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues         ProductVariantOptionValue[]
+  shopInventories      ShopInventory[]
+  inventoryMovements   InventoryMovement[]
+  inventoryDailyCounts InventoryDailyCount[]
+  orderItems           OrderItem[]
 
   @@index([productId])
   @@map("product_variants")
@@ -455,14 +463,22 @@ model ProductCategory {
 }
 
 model ShopProduct {
-  id            Int      @id @default(autoincrement())
-  merchantId    Int      @map("merchant_id")
-  shopId        Int      @map("shop_id")
-  productId     Int      @map("product_id")
-  isEnabled     Boolean  @default(true) @map("is_enabled")
-  priceOverride Decimal? @map("price_override") @db.Decimal(10, 2)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id                Int      @id @default(autoincrement())
+  merchantId        Int      @map("merchant_id")
+  shopId            Int      @map("shop_id")
+  productId         Int      @map("product_id")
+  isEnabled         Boolean  @default(true) @map("is_enabled")
+  priceOverride     Decimal? @map("price_override") @db.Decimal(10, 2)
+  isOnMenu          Boolean  @default(true) @map("is_on_menu")
+  menuVisible       Boolean  @default(true) @map("menu_visible")
+  menuDescription   String?  @map("menu_description") @db.Text
+  menuBadge         String?  @map("menu_badge") @db.VarChar(20)
+  menuFeatured      Boolean  @default(false) @map("menu_featured")
+  menuCategory      String?  @map("menu_category") @db.VarChar(120)
+  menuDisplayOrder  Int      @default(0) @map("menu_display_order")
+  menuCategoryOrder Int      @default(0) @map("menu_category_order")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   shop     Branch   @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -470,6 +486,8 @@ model ShopProduct {
 
   @@unique([shopId, productId])
   @@index([merchantId, shopId])
+  @@index([shopId, isOnMenu, menuVisible])
+  @@index([shopId, menuCategoryOrder, menuDisplayOrder])
   @@map("shop_products")
 }
 
@@ -496,23 +514,26 @@ model ShopInventory {
 }
 
 model InventoryMovement {
-  id             Int      @id @default(autoincrement())
-  merchantId     Int      @map("merchant_id")
-  shopId         Int      @map("shop_id")
-  productId      Int      @map("product_id")
-  variantId      Int?     @map("variant_id")
-  type           String   @db.VarChar(30)
-  quantityChange Int      @map("quantity_change")
-  balanceAfter   Int      @map("balance_after")
-  transferShopId Int?     @map("transfer_shop_id")
-  reference      String?  @db.VarChar(150)
-  referenceType  String?  @map("reference_type") @db.VarChar(50)
-  referenceId    String?  @map("reference_id") @db.VarChar(100)
-  reason         String?  @db.VarChar(100)
-  unitCost       Decimal? @map("unit_cost") @db.Decimal(10, 2)
-  createdBy      String?  @map("created_by") @db.Uuid
-  notes          String?  @db.Text
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id             Int       @id @default(autoincrement())
+  merchantId     Int       @map("merchant_id")
+  shopId         Int       @map("shop_id")
+  productId      Int       @map("product_id")
+  variantId      Int?      @map("variant_id")
+  type           String    @db.VarChar(30)
+  quantityChange Int       @map("quantity_change")
+  balanceAfter   Int       @map("balance_after")
+  transferShopId Int?      @map("transfer_shop_id")
+  reference      String?   @db.VarChar(150)
+  referenceType  String?   @map("reference_type") @db.VarChar(50)
+  referenceId    String?   @map("reference_id") @db.VarChar(100)
+  reason         String?   @db.VarChar(100)
+  unitCost       Decimal?  @map("unit_cost") @db.Decimal(10, 2)
+  deliveryDate   DateTime? @map("delivery_date") @db.Date
+  deliveredBy    String?   @map("delivered_by") @db.VarChar(150)
+  receivedAt     DateTime? @map("received_at") @db.Timestamptz
+  createdBy      String?   @map("created_by") @db.Uuid
+  notes          String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   merchant     Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   shop         Branch          @relation("InventoryMovementShop", fields: [shopId], references: [id], onDelete: Cascade)
@@ -523,6 +544,33 @@ model InventoryMovement {
   @@index([merchantId, shopId, productId, variantId])
   @@index([createdAt])
   @@map("inventory_movements")
+}
+
+model InventoryDailyCount {
+  id               Int      @id @default(autoincrement())
+  merchantId       Int      @map("merchant_id")
+  shopId           Int      @map("shop_id")
+  productId        Int      @map("product_id")
+  variantId        Int?     @map("variant_id")
+  variantKey       Int      @default(0) @map("variant_key")
+  businessDate     DateTime @map("business_date") @db.Date
+  beginningBalance Int      @map("beginning_balance")
+  expectedEnding   Int      @map("expected_ending")
+  endingBalance    Int      @map("ending_balance")
+  variance         Int
+  countedBy        String?  @map("counted_by") @db.Uuid
+  notes            String?  @db.Text
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop     Branch          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant  ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, productId, variantKey, businessDate])
+  @@index([merchantId, shopId, businessDate])
+  @@map("inventory_daily_counts")
 }
 
 model Promotion {
@@ -593,12 +641,17 @@ model WkOrder {
   paymentStatus    String   @default("pending") @map("payment_status") @db.VarChar(50)
   paymentRef       String?  @map("payment_ref") @db.VarChar(255)
   paymentUrl       String?  @map("payment_url") @db.VarChar(500)
+  discountType     String?  @map("discount_type") @db.VarChar(30)
+  discountAmount   Decimal  @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+  discountDetails  Json?    @map("discount_details")
+  voucherId        String?  @map("voucher_id") @db.Uuid
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  shop       Branch?     @relation(fields: [shopId], references: [id], onDelete: SetNull)
-  orderItems OrderItem[]
+  merchant        Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop            Branch?                @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  orderItems      OrderItem[]
+  serviceRequests DineInServiceRequest[]
 
   @@index([userId])
   @@index([merchantId])
@@ -616,6 +669,7 @@ model OrderItem {
   quantity    Int      @default(1)
   price       Decimal  @db.Decimal(10, 2)
   subtotal    Decimal  @db.Decimal(10, 2)
+  status      String?  @db.VarChar(30)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   order   WkOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -657,6 +711,8 @@ model Review {
   productId    Int?      @map("product_id")
   rating       Int
   reviewText   String?   @map("review_text") @db.Text
+  orderId      String?   @map("order_id")
+  photoUrls    Json?     @map("photo_urls")
   responseText String?   @map("response_text") @db.Text
   respondedAt  DateTime? @map("responded_at") @db.Timestamptz
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
@@ -665,6 +721,7 @@ model Review {
   merchant Merchant? @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   product  Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, orderId])
   @@index([merchantId])
   @@index([productId])
   @@index([userId])
@@ -1690,58 +1747,200 @@ model PointsTransaction {
 // ═══════════════════════════════════════════════════════
 
 model Branch {
-  id                     Int       @id @default(autoincrement())
-  merchantId             Int       @map("merchant_id")
-  shopId                 String?   @unique @map("shop_id") @db.VarChar(80)
-  passkey                String?   @map("passkey") @db.VarChar(100)
-  passkeyExpiresAt       DateTime? @map("passkey_expires_at") @db.Timestamptz
-  name                   String    @db.VarChar(255)
-  address                String?   @db.Text
-  city                   String?   @db.VarChar(100)
-  region                 String?   @db.VarChar(100)
-  councilDistrict        String?   @map("council_district") @db.VarChar(100)
-  geographicArea         String?   @map("geographic_area") @db.VarChar(150)
-  state                  String?   @db.VarChar(100)
-  zipCode                String?   @map("zip_code") @db.VarChar(20)
-  latitude               Decimal?  @db.Decimal(10, 8)
-  longitude              Decimal?  @db.Decimal(11, 8)
-  phone                  String?   @db.VarChar(50)
-  tin                    String?   @db.VarChar(30)
-  registeredBusinessName String?   @map("registered_business_name") @db.VarChar(255)
-  taxClassification      String    @default("") @map("tax_classification") @db.VarChar(50)
-  isDefault              Boolean   @default(false) @map("is_default")
-  operatingHours         Json?     @map("operating_hours")
-  isActive               Boolean   @default(true) @map("is_active")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  id                      Int       @id @default(autoincrement())
+  merchantId              Int       @map("merchant_id")
+  shopId                  String?   @unique @map("shop_id") @db.VarChar(80)
+  passkey                 String?   @map("passkey") @db.VarChar(100)
+  passkeyExpiresAt        DateTime? @map("passkey_expires_at") @db.Timestamptz
+  name                    String    @db.VarChar(255)
+  address                 String?   @db.Text
+  city                    String?   @db.VarChar(100)
+  region                  String?   @db.VarChar(100)
+  councilDistrict         String?   @map("council_district") @db.VarChar(100)
+  geographicArea          String?   @map("geographic_area") @db.VarChar(150)
+  state                   String?   @db.VarChar(100)
+  zipCode                 String?   @map("zip_code") @db.VarChar(20)
+  latitude                Decimal?  @db.Decimal(10, 8)
+  longitude               Decimal?  @db.Decimal(11, 8)
+  phone                   String?   @db.VarChar(50)
+  tin                     String?   @db.VarChar(30)
+  registeredBusinessName  String?   @map("registered_business_name") @db.VarChar(255)
+  taxClassification       String    @default("") @map("tax_classification") @db.VarChar(50)
+  isDefault               Boolean   @default(false) @map("is_default")
+  operatingHours          Json?     @map("operating_hours")
+  manualOpenOverride      Boolean?  @map("manual_open_override")
+  manualOverrideUpdatedAt DateTime? @map("manual_override_updated_at") @db.Timestamptz
+  manualOverrideUpdatedBy String?   @map("manual_override_updated_by") @db.Uuid
+  isActive                Boolean   @default(true) @map("is_active")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
 
-  merchant                   Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  merchant                   Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   staff                      MerchantStaff[]
   products                   ShopProduct[]
   inventories                ShopInventory[]
-  inventoryMovements         InventoryMovement[] @relation("InventoryMovementShop")
-  incomingInventoryTransfers InventoryMovement[] @relation("InventoryMovementTransferShop")
+  inventoryDailyCounts       InventoryDailyCount[]
+  inventoryMovements         InventoryMovement[]    @relation("InventoryMovementShop")
+  incomingInventoryTransfers InventoryMovement[]    @relation("InventoryMovementTransferShop")
   orders                     WkOrder[]
+  crewDevices                CrewDevice[]
+  crewPairingTokens          CrewPairingToken[]
+  dineInChanges              DineInChange[]
+  dineInServiceRequests      DineInServiceRequest[]
 
   @@map("branches")
 }
 
 model MerchantStaff {
-  id         Int               @id @default(autoincrement())
-  merchantId Int               @map("merchant_id")
-  userId     String            @map("user_id") @db.Uuid
-  branchId   Int?              @map("branch_id")
-  role       MerchantStaffRole @default(staff)
-  isActive   Boolean           @default(true) @map("is_active")
-  createdAt  DateTime          @default(now()) @map("created_at")
-  updatedAt  DateTime          @updatedAt @map("updated_at")
+  id           Int               @id @default(autoincrement())
+  merchantId   Int               @map("merchant_id")
+  userId       String            @map("user_id") @db.Uuid
+  branchId     Int?              @map("branch_id")
+  role         MerchantStaffRole @default(staff)
+  isActive     Boolean           @default(true) @map("is_active")
+  displayName  String?           @map("display_name") @db.VarChar(100)
+  dineInRole   String?           @map("dine_in_role") @db.VarChar(30)
+  employeeCode String?           @map("employee_code") @db.VarChar(50)
+  crewPinHash  String?           @map("crew_pin_hash") @db.VarChar(255)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
 
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  merchant                Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user                    User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch                  Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  crewSessions            CrewDeviceSession[]
+  dineInAuditLogs         DineInAuditLog[]
+  assignedServiceRequests DineInServiceRequest[]
 
   @@unique([merchantId, userId])
   @@map("merchant_staff")
+}
+
+model MerchantFeatureGrant {
+  id         String    @id @default(uuid()) @db.Uuid
+  merchantId Int       @map("merchant_id")
+  featureKey String    @map("feature_key") @db.VarChar(80)
+  source     String    @default("add_on") @db.VarChar(30)
+  limits     Json?
+  isActive   Boolean   @default(true) @map("is_active")
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, featureKey, source])
+  @@index([merchantId, featureKey, isActive])
+  @@map("merchant_feature_grants")
+}
+
+model CrewDevice {
+  id                 String              @id @default(uuid()) @db.Uuid
+  merchantId         Int                 @map("merchant_id")
+  shopId             Int                 @map("shop_id")
+  name               String              @db.VarChar(100)
+  role               String              @db.VarChar(30)
+  platform           String?             @db.VarChar(80)
+  tokenHash          String              @unique @map("token_hash") @db.VarChar(64)
+  status             String              @default("active") @db.VarChar(20)
+  registeredByUserId String              @map("registered_by_user_id") @db.Uuid
+  registeredAt       DateTime            @default(now()) @map("registered_at") @db.Timestamptz
+  lastSeenAt         DateTime?           @map("last_seen_at") @db.Timestamptz
+  revokedAt          DateTime?           @map("revoked_at") @db.Timestamptz
+  merchant           Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop               Branch              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sessions           CrewDeviceSession[]
+  auditLogs          DineInAuditLog[]
+
+  @@index([merchantId, shopId, status])
+  @@map("crew_devices")
+}
+
+model CrewPairingToken {
+  id              String    @id @default(uuid()) @db.Uuid
+  merchantId      Int       @map("merchant_id")
+  shopId          Int       @map("shop_id")
+  role            String    @db.VarChar(30)
+  codeHash        String    @unique @map("code_hash") @db.VarChar(64)
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+  usedAt          DateTime? @map("used_at") @db.Timestamptz
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  merchant        Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop            Branch    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, expiresAt])
+  @@map("crew_pairing_tokens")
+}
+
+model CrewDeviceSession {
+  id        String        @id @default(uuid()) @db.Uuid
+  deviceId  String        @map("device_id") @db.Uuid
+  staffId   Int           @map("staff_id")
+  tokenHash String        @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz
+  revokedAt DateTime?     @map("revoked_at") @db.Timestamptz
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  device    CrewDevice    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  staff     MerchantStaff @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@index([deviceId, staffId])
+  @@map("crew_device_sessions")
+}
+
+model DineInAuditLog {
+  id         String         @id @default(uuid()) @db.Uuid
+  merchantId Int            @map("merchant_id")
+  shopId     Int?           @map("shop_id")
+  staffId    Int?           @map("staff_id")
+  deviceId   String?        @map("device_id") @db.Uuid
+  action     String         @db.VarChar(80)
+  metadata   Json?
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  merchant   Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  staff      MerchantStaff? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  device     CrewDevice?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, createdAt])
+  @@map("dine_in_audit_logs")
+}
+
+model DineInChange {
+  id         BigInt    @id @default(autoincrement())
+  shopId     Int       @map("shop_id")
+  type       String    @db.VarChar(60)
+  entityId   String?   @map("entity_id") @db.VarChar(100)
+  payload    Json
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  shop       Branch    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  merchant   Merchant? @relation(fields: [merchantId], references: [id])
+  merchantId Int?      @map("merchant_id")
+
+  @@index([shopId, id])
+  @@index([merchantId])
+  @@map("dine_in_changes")
+}
+
+model DineInServiceRequest {
+  id                Int            @id @default(autoincrement())
+  orderId           Int            @map("order_id")
+  shopId            Int            @map("shop_id")
+  requestedByUserId String         @map("requested_by_user_id") @db.Uuid
+  type              String         @db.VarChar(40)
+  details           String?        @db.VarChar(250)
+  status            String         @default("pending") @db.VarChar(20)
+  assignedStaffId   Int?           @map("assigned_staff_id")
+  assignedAt        DateTime?      @map("assigned_at") @db.Timestamptz
+  completedAt       DateTime?      @map("completed_at") @db.Timestamptz
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  order             WkOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shop              Branch         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  assignedStaff     MerchantStaff? @relation(fields: [assignedStaffId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, status, createdAt])
+  @@index([orderId, createdAt])
+  @@index([assignedStaffId, status])
+  @@map("dine_in_service_requests")
 }
 
 // ═══════════════════════════════════════════════════════

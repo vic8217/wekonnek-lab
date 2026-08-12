@@ -20,6 +20,7 @@ import {
   Star,
   Ticket,
   WalletCards,
+  ReceiptText,
 } from "lucide-react";
 import { getToken, useAuth } from "@/hooks/use-auth";
 import ListingSummaryCard from "@/components/profile/ListingSummaryCard";
@@ -72,6 +73,13 @@ const metrics = [
 ];
 
 const accountItems = [
+  {
+    label: "E-Receipts",
+    detail: "View your saved electronic receipts",
+    icon: ReceiptText,
+    href: "/customer/e-receipts",
+    color: "text-green-600 bg-green-50",
+  },
   {
     label: "Addresses",
     detail: "Manage your saved addresses",

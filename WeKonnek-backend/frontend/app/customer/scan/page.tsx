@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+const TAMBOBBQ_IN_STORE_TEST_ROUTE = '/merchants/tambobbq?table=Table%201';
+
 /** Resolve a scanned QR value to a merchant route, preserving a table tag. */
 function resolveTarget(raw: string): string {
   const value = raw.trim();
@@ -180,6 +182,11 @@ export default function CustomerScanPage() {
     startCamera();
   };
 
+  const openTambobbqTestOrder = () => {
+    stopCamera();
+    router.push(TAMBOBBQ_IN_STORE_TEST_ROUTE);
+  };
+
   return (
     <>
       {/* Shared hidden file input for image upload decoding */}
@@ -204,6 +211,13 @@ export default function CustomerScanPage() {
 
         {/* Camera viewfinder area */}
         <div className="relative flex items-center justify-center" style={{ height: 'calc(100vh - 240px)' }}>
+          <button
+            type="button"
+            onClick={openTambobbqTestOrder}
+            className="absolute top-4 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-amber-300/60 bg-amber-400 px-4 py-2 text-xs font-bold text-gray-950 shadow-lg"
+          >
+            Test TambobBQ in-store order
+          </button>
           {scanning ? (
             <>
               <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline muted />
@@ -379,6 +393,13 @@ export default function CustomerScanPage() {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Enter Code Manually</h2>
             <p className="text-gray-600 text-sm mb-6">Can&apos;t scan? Enter the merchant code manually below.</p>
+            <button
+              type="button"
+              onClick={openTambobbqTestOrder}
+              className="mb-4 w-full rounded-lg border border-amber-300 bg-amber-100 px-4 py-3 text-sm font-bold text-amber-950 hover:bg-amber-200"
+            >
+              Test TambobBQ in-store order
+            </button>
             <form onSubmit={handleManualSubmit} className="space-y-4">
               <input
                 type="text"
