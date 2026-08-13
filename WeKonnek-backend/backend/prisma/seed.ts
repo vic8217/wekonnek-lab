@@ -152,19 +152,67 @@ async function main() {
   // ─── Merchant Taxonomy ────────────────────────
   // Merchant business classifications are intentionally separate from the
   // general catalogue taxonomy seeded above.
-  const [merchantFoodCat, merchantGroceryCat, merchantServicesCat] = await Promise.all([
-    prisma.merchantCategory.upsert({
-      where: { slug: 'food-beverages' },
-      update: { name: 'Food & Beverages', isActive: true, displayOrder: 1 },
-      create: {
-        name: 'Food & Beverages',
-        slug: 'food-beverages',
-        description: 'Restaurants, cafes, food stalls, and beverage shops',
-        icon: '🍔',
-        isActive: true,
-        displayOrder: 1,
-      },
-    }),
+  const merchantFoodRestaurantsCat = await prisma.merchantCategory.upsert({
+    where: { slug: 'food-restaurants' },
+    update: {
+      name: 'Food & Restaurants',
+      description: 'Food businesses, cafes, dining, and restaurants',
+      icon: '🍽️',
+      isActive: true,
+      displayOrder: 1,
+    },
+    create: {
+      name: 'Food & Restaurants',
+      slug: 'food-restaurants',
+      description: 'Food businesses, cafes, dining, and restaurants',
+      icon: '🍽️',
+      isActive: true,
+      displayOrder: 1,
+    },
+  });
+
+  // Consolidate the legacy Food, Restaurants, and Food & Beverages records.
+  // Merchant and subcategory references are moved before each old category is
+  // removed so this is safe for databases that already contain live mappings.
+  await prisma.$transaction(async (tx) => {
+    const legacyFoodCategories = await tx.merchantCategory.findMany({
+      where: { slug: { in: ['food', 'restaurants', 'food-beverages'] } },
+      include: { subCategories: true },
+    });
+    for (const legacyCategory of legacyFoodCategories) {
+      for (const legacySubCategory of legacyCategory.subCategories) {
+        const existingSubCategory = await tx.merchantSubCategory.findUnique({
+          where: {
+            categoryId_slug: {
+              categoryId: merchantFoodRestaurantsCat.id,
+              slug: legacySubCategory.slug,
+            },
+          },
+        });
+        if (existingSubCategory) {
+          await tx.merchant.updateMany({
+            where: { subCategoryId: legacySubCategory.id },
+            data: { subCategoryId: existingSubCategory.id },
+          });
+          await tx.merchantSubCategory.delete({
+            where: { id: legacySubCategory.id },
+          });
+        } else {
+          await tx.merchantSubCategory.update({
+            where: { id: legacySubCategory.id },
+            data: { categoryId: merchantFoodRestaurantsCat.id },
+          });
+        }
+      }
+      await tx.merchant.updateMany({
+        where: { categoryId: legacyCategory.id },
+        data: { categoryId: merchantFoodRestaurantsCat.id },
+      });
+      await tx.merchantCategory.delete({ where: { id: legacyCategory.id } });
+    }
+  });
+
+  const [merchantGroceryCat, merchantServicesCat] = await Promise.all([
     prisma.merchantCategory.upsert({
       where: { slug: 'groceries' },
       update: { name: 'Groceries', isActive: true, displayOrder: 2 },
@@ -193,19 +241,19 @@ async function main() {
 
   const [merchantFilipinoCuisine, merchantCoffeeTea, merchantStreetFood, merchantSariSari, merchantLaundry] = await Promise.all([
     prisma.merchantSubCategory.upsert({
-      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'filipino-cuisine' } },
+      where: { categoryId_slug: { categoryId: merchantFoodRestaurantsCat.id, slug: 'filipino-cuisine' } },
       update: { name: 'Filipino Cuisine', isActive: true, displayOrder: 1 },
-      create: { categoryId: merchantFoodCat.id, name: 'Filipino Cuisine', slug: 'filipino-cuisine', isActive: true, displayOrder: 1 },
+      create: { categoryId: merchantFoodRestaurantsCat.id, name: 'Filipino Cuisine', slug: 'filipino-cuisine', isActive: true, displayOrder: 1 },
     }),
     prisma.merchantSubCategory.upsert({
-      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'coffee-tea' } },
+      where: { categoryId_slug: { categoryId: merchantFoodRestaurantsCat.id, slug: 'coffee-tea' } },
       update: { name: 'Coffee & Tea', isActive: true, displayOrder: 2 },
-      create: { categoryId: merchantFoodCat.id, name: 'Coffee & Tea', slug: 'coffee-tea', isActive: true, displayOrder: 2 },
+      create: { categoryId: merchantFoodRestaurantsCat.id, name: 'Coffee & Tea', slug: 'coffee-tea', isActive: true, displayOrder: 2 },
     }),
     prisma.merchantSubCategory.upsert({
-      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'street-food' } },
+      where: { categoryId_slug: { categoryId: merchantFoodRestaurantsCat.id, slug: 'street-food' } },
       update: { name: 'Street Food', isActive: true, displayOrder: 3 },
-      create: { categoryId: merchantFoodCat.id, name: 'Street Food', slug: 'street-food', isActive: true, displayOrder: 3 },
+      create: { categoryId: merchantFoodRestaurantsCat.id, name: 'Street Food', slug: 'street-food', isActive: true, displayOrder: 3 },
     }),
     prisma.merchantSubCategory.upsert({
       where: { categoryId_slug: { categoryId: merchantGroceryCat.id, slug: 'sari-sari-store' } },
@@ -226,12 +274,12 @@ async function main() {
   const merchants = await Promise.all([
     prisma.merchant.upsert({
       where: { slug: 'mang-inasal-downtown' },
-      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantFilipinoCuisine.id },
+      update: { categoryId: merchantFoodRestaurantsCat.id, subCategoryId: merchantFilipinoCuisine.id },
       create: {
         name: "Mang Inasal Downtown",
         slug: 'mang-inasal-downtown',
         description: 'Authentic Filipino grilled chicken and unlimited rice',
-        categoryId: merchantFoodCat.id,
+        categoryId: merchantFoodRestaurantsCat.id,
         subCategoryId: merchantFilipinoCuisine.id,
         businessType: 'storefront',
         phone: '+639171234567',
@@ -250,12 +298,12 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'brew-haven-cafe' },
-      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantCoffeeTea.id },
+      update: { categoryId: merchantFoodRestaurantsCat.id, subCategoryId: merchantCoffeeTea.id },
       create: {
         name: 'Brew Haven Cafe',
         slug: 'brew-haven-cafe',
         description: 'Specialty coffee and artisan pastries',
-        categoryId: merchantFoodCat.id,
+        categoryId: merchantFoodRestaurantsCat.id,
         subCategoryId: merchantCoffeeTea.id,
         businessType: 'storefront',
         phone: '+639182345678',
@@ -297,12 +345,12 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'kuya-boy-bbq' },
-      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantStreetFood.id },
+      update: { categoryId: merchantFoodRestaurantsCat.id, subCategoryId: merchantStreetFood.id },
       create: {
         name: "Kuya Boy's BBQ",
         slug: 'kuya-boy-bbq',
         description: 'Best street-style BBQ and isaw in town',
-        categoryId: merchantFoodCat.id,
+        categoryId: merchantFoodRestaurantsCat.id,
         subCategoryId: merchantStreetFood.id,
         businessType: 'mobile_cart',
         phone: '+639204567890',

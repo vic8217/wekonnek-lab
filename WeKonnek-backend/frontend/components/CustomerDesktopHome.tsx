@@ -31,10 +31,8 @@ import {
 } from "lucide-react";
 import { useUserLocation } from "@/hooks/use-geolocation";
 import { type Merchant } from "@/lib/api";
-import {
-  fetchGlobalCategories,
-  type GlobalCategory,
-} from "@/lib/global-categories";
+import { type MerchantCategory } from "@/lib/api";
+import { fetchCustomerCategories } from "@/lib/customer-categories";
 import { publicAssetUrl } from "@/lib/public-asset-url";
 
 const categoryStyles: Array<{ icon: LucideIcon; gradient: string }> = [
@@ -56,7 +54,6 @@ type DisplayCategory = {
   id: number;
   icon: LucideIcon;
   adminIcon?: string;
-  imageUrl?: string;
   name: string;
   details: string;
   stat: string;
@@ -65,7 +62,7 @@ type DisplayCategory = {
 };
 
 function toDisplayCategory(
-  category: GlobalCategory,
+  category: MerchantCategory,
   index: number,
 ): DisplayCategory {
   const style = categoryStyles[index % categoryStyles.length];
@@ -74,7 +71,6 @@ function toDisplayCategory(
     id: category.id,
     icon: style.icon,
     adminIcon: category.icon?.trim(),
-    imageUrl: publicAssetUrl(category.imageUrl),
     name: category.name,
     details:
       category.description?.trim() ||
@@ -129,7 +125,7 @@ export default function CustomerDesktopHome() {
   useEffect(() => {
     const controller = new AbortController();
 
-    fetchGlobalCategories(controller.signal)
+    fetchCustomerCategories(controller.signal)
       .then((data) => {
         setCategories(data.map(toDisplayCategory));
       })
@@ -337,7 +333,6 @@ export default function CustomerDesktopHome() {
                 id,
                 icon: Icon,
                 adminIcon,
-                imageUrl,
                 name,
                 details,
                 stat,
@@ -352,9 +347,7 @@ export default function CustomerDesktopHome() {
                   <span
                     className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}
                   >
-                    {imageUrl ? (
-                      <img src={imageUrl} alt="" className="size-full rounded-full object-cover" />
-                    ) : adminIcon ? (
+                    {adminIcon ? (
                       <span className="text-2xl" aria-hidden="true">
                         {adminIcon}
                       </span>

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { fetchGlobalCategories, type GlobalCategory } from '@/lib/global-categories';
+import { fetchCustomerCategories } from '@/lib/customer-categories';
+import type { MerchantCategory } from '@/lib/api';
 import {
   UtensilsCrossed,
   ShoppingBasket,
@@ -53,7 +54,7 @@ const CATEGORY_STYLES = [
   { icon: House, bg: 'bg-gradient-to-br from-blue-500 to-indigo-700' },
 ];
 
-function managedService(category: GlobalCategory, index: number): Service {
+function managedService(category: MerchantCategory, index: number): Service {
   const style = CATEGORY_STYLES[index % CATEGORY_STYLES.length];
   const subcategories = category.subCategories || [];
   return {
@@ -82,7 +83,7 @@ export default function ServicesGrid({ className = '', variant = 'mobile' }: Ser
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchGlobalCategories(controller.signal)
+    fetchCustomerCategories(controller.signal)
       .then(data => setCategories(data.map(managedService)))
       .catch(error => {
         if (error instanceof Error && error.name === 'AbortError') return;

@@ -34,13 +34,20 @@ export class CategoriesService {
 
   async findAll(includeInactive = false) {
     return await this.prisma.category.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      // The public category catalogue contains platform-owned categories only.
+      // Merchant menu categories are available through findForMerchant().
+      where: includeInactive
+        ? {}
+        : { isActive: true, ownerMerchantId: null },
       include: {
         subCategories: includeInactive
           ? { orderBy: { displayOrder: 'asc' } }
-          : { where: { isActive: true }, orderBy: { displayOrder: 'asc' } },
+          : {
+              where: { isActive: true, ownerMerchantId: null },
+              orderBy: { displayOrder: 'asc' },
+            },
       },
-      orderBy: { displayOrder: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
     });
   }
 
