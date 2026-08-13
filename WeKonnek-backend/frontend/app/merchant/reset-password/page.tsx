@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, KeyRound, LockKeyhole } from 'lucide-react';
 
@@ -11,6 +11,11 @@ export default function MerchantResetPasswordPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get('key');
+    if (key) setRecoveryKey(key);
+  }, []);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -25,7 +30,7 @@ export default function MerchantResetPasswordPage() {
       const response = await fetch('/api/backend/merchant-applications/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recoveryKey: recoveryKey.trim(), newPassword }),
+        body: JSON.stringify({ recoveryKey: recoveryKey.trim().replace(/[‐‑‒–—−]/g, '-').replace(/\s+/g, ''), newPassword }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || 'Unable to change password');

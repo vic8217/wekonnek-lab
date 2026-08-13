@@ -743,16 +743,24 @@ export class MerchantApplicationsService {
   }
 
   async resetMerchantPassword(recoveryKey: string, newPassword: string) {
-    if (!recoveryKey || newPassword.length < 8) {
+    const normalizedRecoveryKey = String(recoveryKey || '')
+      .trim()
+      .replace(/[‐‑‒–—−]/g, '-')
+      .replace(/\s+/g, '');
+    if (!normalizedRecoveryKey || newPassword.length < 8) {
       throw new BadRequestException('A valid recovery key and password of at least 8 characters are required');
     }
     const application = await this.prisma.merchantApplication.findFirst({
-      where: { recoveryKey, userId: { not: null }, status: 'approved' },
+      where: {
+        recoveryKey: { equals: normalizedRecoveryKey, mode: 'insensitive' },
+        userId: { not: null },
+        status: 'approved',
+      },
     });
     if (!application?.userId) throw new BadRequestException('Recovery key is invalid');
     await this.prisma.user.update({
       where: { id: application.userId },
-      data: { password: await bcrypt.hash(newPassword, 10) },
+      data: { password: await bcrypt.hash(newPassword, 10), mustChangePassword: false },
     });
     return { message: 'Password changed successfully' };
   }

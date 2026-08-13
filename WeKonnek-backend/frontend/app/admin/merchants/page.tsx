@@ -571,12 +571,21 @@ function FeeBreakdown({ breakdown }: { breakdown: MerchantDetails['fee_breakdown
 }
 
 function MerchantDetailsModal({ details, generatingRecoveryKey, onGenerateRecoveryKey, onClose }: { details: MerchantDetails; generatingRecoveryKey: boolean; onGenerateRecoveryKey: () => void; onClose: () => void }) {
+  const copyRecoveryKey = async () => {
+    if (!details.recovery_key) return;
+    try {
+      await navigator.clipboard.writeText(details.recovery_key);
+      toast.success('Recovery key copied.');
+    } catch {
+      toast.error('Unable to copy the recovery key.');
+    }
+  };
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
     <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
       <div className="flex items-start justify-between border-b border-gray-200 p-6"><div><h3 className="text-xl font-black text-gray-900">{details.name}</h3><p className="mt-1 text-sm text-gray-500">{details.email || 'No email'} · {details.phone || 'No phone'}</p></div><button onClick={onClose} className="p-2 text-gray-500" aria-label="Close">✕</button></div>
       <div className="space-y-6 p-6">
         <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Account access</h4><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-gray-50 p-4"><p className="text-xs font-bold text-gray-500">Store ID / Merchant code</p><p className="mt-1 font-mono font-bold">{details.merchant_code || 'N/A'}</p></div><div className="rounded-lg bg-gray-50 p-4"><p className="text-xs font-bold text-gray-500">Temporary password</p><p className="mt-1 font-mono font-bold">{details.temporary_password || 'N/A'}</p></div></div>
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase text-amber-700">Recovery key</p><p className="mt-1 break-all font-mono text-sm font-bold text-amber-900">{details.recovery_key || 'Generate only when the merchant needs password recovery.'}</p></div><button onClick={onGenerateRecoveryKey} disabled={generatingRecoveryKey} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{generatingRecoveryKey ? 'Generating...' : details.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div>
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold uppercase text-amber-700">Recovery key</p><p className="mt-1 break-all font-mono text-sm font-bold text-amber-900">{details.recovery_key || 'Generate only when the merchant needs password recovery.'}</p></div><div className="flex gap-2">{details.recovery_key && <button type="button" onClick={copyRecoveryKey} className="rounded-lg border border-amber-600 bg-white px-4 py-2 text-sm font-bold text-amber-700">Copy key</button>}<button onClick={onGenerateRecoveryKey} disabled={generatingRecoveryKey} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{generatingRecoveryKey ? 'Generating...' : details.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div></div>
         </section>
         <section><h4 className="mb-3 text-sm font-black uppercase text-blue-700">Fee breakdown</h4><FeeBreakdown breakdown={details.fee_breakdown} /></section>
       </div>
