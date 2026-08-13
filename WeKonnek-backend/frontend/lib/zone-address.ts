@@ -2,13 +2,19 @@ import { NCR_COUNCIL_AREAS } from '@/lib/ncr-council-zones';
 
 export type ZoneAreaOption = { code: string; name: string };
 export type ZoneDistrictOption = { name: string; localCouncilDistrict?: string; areas: ZoneAreaOption[] };
-export type ZoneCityOption = { code: string; name: string; regionName?: string; provinceName?: string | null; districts: ZoneDistrictOption[] };
+export type ZoneCityOption = { code: string; name: string; regionCode?: string; regionName?: string; provinceCode?: string | null; provinceName?: string | null; districts: ZoneDistrictOption[] };
 
 export const zoneRegions = (cities: ZoneCityOption[]) =>
   Array.from(new Set(cities.map(city => city.regionName).filter((name): name is string => Boolean(name))));
 
 export const citiesInZoneRegion = (cities: ZoneCityOption[], region?: string | null) =>
   region ? cities.filter(city => normalizeZoneLabel(city.regionName) === normalizeZoneLabel(region)) : [];
+
+export const zoneProvinces = (cities: ZoneCityOption[], region?: string | null) =>
+  Array.from(new Set(citiesInZoneRegion(cities, region).map(city => city.provinceName || 'NCR (no province)'))).sort();
+
+export const citiesInZoneProvince = (cities: ZoneCityOption[], region?: string | null, province?: string | null) =>
+  citiesInZoneRegion(cities, region).filter(city => (city.provinceName || 'NCR (no province)') === province);
 
 export const normalizeZoneLabel = (value?: string | null) =>
   String(value || '')
@@ -69,7 +75,9 @@ export async function loadAdminZoneAddresses(signal?: AbortSignal): Promise<Zone
     return {
       code: locality.code,
       name: locality.name,
+      regionCode: locality.regionCode,
       regionName: regions.get(locality.regionCode)?.name || locality.regionCode,
+      provinceCode: locality.provinceCode || null,
       provinceName: locality.provinceCode ? provinces.get(locality.provinceCode) || null : null,
       districts: mappedDistricts
         ? Object.entries(mappedDistricts).map(([name, areas]) => ({ name, localCouncilDistrict: name, areas }))

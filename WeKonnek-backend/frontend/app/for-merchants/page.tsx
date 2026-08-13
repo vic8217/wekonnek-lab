@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { citiesInZoneRegion, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
+import { citiesInZoneProvince, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneProvinces, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
 
 const LocationMap = dynamic(() => import("@/components/LocationMap"), {
   ssr: false,
@@ -157,6 +157,7 @@ export default function ForMerchantsPage() {
   const [coverageLoading, setCoverageLoading] = useState(true);
   const [coverageError, setCoverageError] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("");
+  const [selectedProvince, setSelectedProvince] = useState("");
   const [selectedCity, setSelectedCity] = useState("");
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const [selectedArea, setSelectedArea] = useState("");
@@ -499,10 +500,14 @@ export default function ForMerchantsPage() {
                 className="min-w-0 flex-1 bg-transparent outline-none"
               />
             </label>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-              <select name="region" value={selectedRegion} onChange={(event) => { setSelectedRegion(event.target.value); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); }} required className="merchant-input bg-white">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <select name="region" value={selectedRegion} onChange={(event) => { setSelectedRegion(event.target.value); setSelectedProvince(""); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); }} required className="merchant-input bg-white">
                 <option value="">Region</option>
                 {zoneRegions(coverageOptions).map(region => <option key={region} value={region}>{region}</option>)}
+              </select>
+              <select name="province_district" value={selectedProvince} onChange={(event) => { setSelectedProvince(event.target.value); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); }} required disabled={!selectedRegion} className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+                <option value="">Province / District</option>
+                {zoneProvinces(coverageOptions, selectedRegion).map(province => <option key={province} value={province}>{province}</option>)}
               </select>
               <select
                 name="city_municipality"
@@ -513,7 +518,8 @@ export default function ForMerchantsPage() {
                   setSelectedArea("");
                 }}
                 required
-                className="merchant-input bg-white"
+                disabled={!selectedProvince}
+                className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">
                   {coverageLoading
@@ -522,7 +528,7 @@ export default function ForMerchantsPage() {
                       ? "Cities unavailable"
                       : "City / Municipality"}
                 </option>
-                {citiesInZoneRegion(coverageOptions, selectedRegion).map((city) => (
+                {citiesInZoneProvince(coverageOptions, selectedRegion, selectedProvince).map((city) => (
                   <option key={city.code} value={city.name}>
                     {city.name
                       .replace(/^City of /, "")
@@ -550,6 +556,10 @@ export default function ForMerchantsPage() {
                     </option>
                   ))}
               </select>
+              <select name="geographic_area" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} required={Boolean(selectedDistrictOption?.areas.length)} disabled={!selectedDistrict || !selectedDistrictOption?.areas.length} className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+                <option value="">{selectedDistrictOption && !selectedDistrictOption.areas.length ? "Whole district" : "Barangay / Area"}</option>
+                {selectedDistrictOption?.areas.map(area => <option key={area.code} value={area.name}>{area.name}</option>)}
+              </select>
             </div>
             {coverageError && (
               <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -564,27 +574,6 @@ export default function ForMerchantsPage() {
                 </button>
               </div>
             )}
-            <select
-              name="geographic_area"
-              value={selectedArea}
-              onChange={(event) => setSelectedArea(event.target.value)}
-              required={Boolean(selectedDistrictOption?.areas.length)}
-              disabled={
-                !selectedDistrict || !selectedDistrictOption?.areas.length
-              }
-              className="merchant-input w-full bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-            >
-              <option value="">
-                {selectedDistrictOption && !selectedDistrictOption.areas.length
-                  ? "Whole district — no named areas configured"
-                  : "Area within the council district"}
-              </option>
-              {selectedDistrictOption?.areas.map((area) => (
-                <option key={area.code} value={area.name}>
-                  {area.name}
-                </option>
-              ))}
-            </select>
             <div
               className={`grid min-w-0 gap-3 ${hasBranches === "yes" ? "sm:grid-cols-2" : ""}`}
             >

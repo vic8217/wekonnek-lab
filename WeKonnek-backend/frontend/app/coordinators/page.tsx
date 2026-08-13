@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import type L from 'leaflet';
 import toast from 'react-hot-toast';
 import { uploadApi } from '@/lib/api';
-import { findZoneCity, findZoneDistrict, loadAdminZoneAddresses, type ZoneCityOption } from '@/lib/zone-address';
+import { citiesInZoneProvince, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneProvinces, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
 import {
 	BadgeDollarSign, BriefcaseBusiness, CalendarDays, Check, CheckCircle2, ClipboardCheck,
 	Crosshair, GraduationCap, Handshake, MapPin, Megaphone, Network, Phone, Send,
@@ -91,7 +91,6 @@ function CoordinatorForm() {
 	const [locationMessage, setLocationMessage] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [openPolicy, setOpenPolicy] = useState<'terms' | 'privacy' | null>(null);
-	const locationEnabled = region === 'NCR';
 	const cityOption = findZoneCity(zoneCities, city);
 	const districtOption = findZoneDistrict(cityOption, district);
 	const setCoordinates = (latitude: number, longitude: number) => setSelectedLocation([latitude, longitude]);
@@ -176,9 +175,9 @@ function CoordinatorForm() {
 		<form onSubmit={submitApplication} className="mt-6 space-y-4">
 			<FormGroup icon={UserRound} title="PERSONAL INFORMATION"><div className="grid gap-3 sm:grid-cols-3"><Field name="fullName" label="Full Name" placeholder="Enter your full name" required /><Field name="mobileNumber" type="tel" label="Mobile Number" placeholder="09XXXXXXXXX" required /><Field name="email" type="email" label="Email Address" placeholder="you@example.com" required /><Field name="viberAccount" type="tel" label="Viber Account / Number" placeholder="Viber mobile number" /><Field name="whatsappNumber" type="tel" label="WhatsApp Number" placeholder="WhatsApp mobile number" /></div></FormGroup>
 			<FormGroup icon={MapPin} title="LOCATION COVERAGE"><div className="grid gap-3 sm:grid-cols-3">
-				<SelectField label="Region" text="Select region" name="region" value={region} options={[{ value: 'NCR', label: 'National Capital Region (NCR)' }]} onChange={value => { setRegion(value); setProvince(''); setCity(''); setSelectedLocation(null); }} />
-				<SelectField label="Province / District" text="Select province / district" name="provinceDistrict" value={province} disabled={!locationEnabled} options={locationEnabled ? [{ value: 'Metro Manila', label: 'Metro Manila' }] : []} onChange={value => { setProvince(value); setCity(''); setSelectedLocation(null); }} />
-				<SelectField label="City / Municipality" text="Select city / municipality" name="cityMunicipality" value={city} disabled={!province} options={province ? zoneCities.map(item => ({ value: item.name, label: item.name })) : []} onChange={value => { setCity(value); setDistrict(''); setBarangay(''); setSelectedLocation(null); }} />
+				<SelectField label="Region" text="Select region" name="region" value={region} options={zoneRegions(zoneCities).map(value => ({ value, label: value }))} onChange={value => { setRegion(value); setProvince(''); setCity(''); setDistrict(''); setBarangay(''); setSelectedLocation(null); }} />
+				<SelectField label="Province / District" text="Select province / district" name="provinceDistrict" value={province} disabled={!region} options={zoneProvinces(zoneCities, region).map(value => ({ value, label: value }))} onChange={value => { setProvince(value); setCity(''); setDistrict(''); setBarangay(''); setSelectedLocation(null); }} />
+				<SelectField label="City / Municipality" text="Select city / municipality" name="cityMunicipality" value={city} disabled={!province} options={citiesInZoneProvince(zoneCities, region, province).map(item => ({ value: item.name, label: item.name.replace(/^City of /, '').replace(/ \(City\)$/, '') }))} onChange={value => { setCity(value); setDistrict(''); setBarangay(''); setSelectedLocation(null); }} />
 			</div><div className="mt-3 grid gap-3 sm:grid-cols-3"><SelectField name="councilDistrict" label="Local Council District" text="Select council district" value={district} disabled={!cityOption} options={(cityOption?.districts || []).map(item => ({ value: item.name, label: item.name }))} onChange={value => { setDistrict(value); setBarangay(''); }} /><SelectField name="barangay" label="Barangay / Area" text="Select barangay / area" value={barangay} disabled={!districtOption} options={(districtOption?.areas || []).map(item => ({ value: item.name, label: item.name }))} onChange={setBarangay} /><div><Field name="preferredCoverageArea" label="Preferred Coverage Area" placeholder="Optional notes about the requested territory" /></div></div>
 				<div className="mt-4 overflow-hidden rounded-xl border border-[#ccd8e9] bg-slate-100">
 					<div className="relative h-64 sm:h-72"><LocationMap selectedLocation={selectedLocation} defaultCenter={[14.6091, 121.0223]} selectedZoom={17} onMapClick={setCoordinates} onMarkerDrag={handleMarkerDrag} /><button type="button" onClick={locateUser} disabled={locating} className="absolute right-3 top-3 z-[500] flex min-h-10 items-center gap-2 rounded-xl bg-white px-3 text-xs font-bold text-[#075cff] shadow-lg disabled:opacity-60"><Crosshair size={16} />{locating ? 'Locating…' : 'Use my location'}</button></div>
