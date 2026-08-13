@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_API_URL || 'http://localhost:3000';
+const BACKEND_URL = (
+  process.env.BACKEND_API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:3000'
+).replace(/\/$/, '');
 const REQUEST_TIMEOUT_MS = 10_000;
 
 async function proxyAuth(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
@@ -9,7 +13,8 @@ async function proxyAuth(request: NextRequest, context: { params: Promise<{ path
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const target = new URL(`/api/auth/${path.join('/')}`, BACKEND_URL);
+    const apiPrefix = BACKEND_URL.endsWith('/api') ? '' : '/api';
+    const target = new URL(`${BACKEND_URL}${apiPrefix}/auth/${path.join('/')}`);
     request.nextUrl.searchParams.forEach((value, key) => target.searchParams.append(key, value));
     const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.text();
     const response = await fetch(target, {
