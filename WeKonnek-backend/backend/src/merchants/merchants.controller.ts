@@ -16,6 +16,7 @@ import { MerchantsService } from './merchants.service';
 import { CreateMerchantDto } from './dto/create-merchant.dto';
 import { UpdateMerchantDto } from './dto/update-merchant.dto';
 import { SearchMerchantsDto } from './dto/search-merchants.dto';
+import { AddDemoWalletCreditDto } from './dto/add-demo-wallet-credit.dto';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
 import { UserRole } from '@prisma/client';
@@ -84,6 +85,19 @@ export class MerchantsController {
   @ApiBearerAuth()
   generateRecoveryKey(@Param('id', ParseIntPipe) id: number) {
     return this.merchantsService.generateRecoveryKey(id);
+  }
+
+  @Post('admin/:id/demo-wallet-credit')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add an audited demo credit to a merchant wallet' })
+  addDemoWalletCredit(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: AddDemoWalletCreditDto,
+    @Req() req: any,
+  ) {
+    return this.merchantsService.addDemoWalletCredit(id, body.amount, req.user.id);
   }
 
   @Get('search')

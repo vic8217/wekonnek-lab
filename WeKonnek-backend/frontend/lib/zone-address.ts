@@ -52,13 +52,42 @@ export async function loadZoneCityAreas(city: ZoneCityOption, signal?: AbortSign
 }
 
 export async function loadAdminZoneAddresses(signal?: AbortSignal): Promise<ZoneCityOption[]> {
-  const [locationsResponse, coverageResponse] = await Promise.all([
-    fetch('/api/backend/management-zones/philippine-locations', { signal, cache: 'force-cache' }),
-    fetch('/api/backend/merchant-applications/coverage-options', { signal, cache: 'no-store' }),
-  ]);
-  if (!locationsResponse.ok) throw new Error('Philippine address reference is unavailable');
+  const fetchWithTimeout = async (url: string, cache: RequestCache, timeoutMs: number) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    const timeout = window.setTimeout(abort, timeoutMs);
+    try {
+      return await fetch(url, { signal: controller.signal, cache });
+    } finally {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    }
+  };
+
+  // The imported admin coverage is the source of truth for public signup forms.
+  // Return it immediately instead of blocking on the external PSGC reference.
+  const coverageResponse = await fetchWithTimeout(
+    '/api/backend/merchant-applications/coverage-options',
+    'no-store',
+    8000,
+  ).catch(() => null);
+  const activeCoverage: ZoneCityOption[] = coverageResponse?.ok
+    ? await coverageResponse.json().then(body => Array.isArray(body) ? body : [])
+    : [];
+  if (activeCoverage.length) return activeCoverage.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Keep the national reference as a bounded fallback for fresh installations
+  // that do not have admin-imported coverage yet.
+  const locationsResponse = await fetchWithTimeout(
+    '/api/backend/management-zones/philippine-locations',
+    'force-cache',
+    8000,
+  ).catch(() => null);
+  if (!locationsResponse?.ok) {
+    throw new Error('Location reference and configured coverage are unavailable');
+  }
   const locations = await locationsResponse.json();
-  const activeCoverage: ZoneCityOption[] = coverageResponse.ok ? await coverageResponse.json() : [];
   const regions = new Map<string, { name: string }>(
     (Array.isArray(locations.regions) ? locations.regions : []).map((region: { code: string; name: string; regionName?: string }) => [
       region.code,
@@ -85,18 +114,5 @@ export async function loadAdminZoneAddresses(signal?: AbortSignal): Promise<Zone
     };
   });
 
-  // Admin coverage supplements the master reference but never hides locations.
-  activeCoverage.forEach(coveredCity => {
-    const city = master.find(item => item.code === coveredCity.code) || findZoneCity(master, coveredCity.name);
-    if (!city) {
-      master.push(coveredCity);
-      return;
-    }
-    coveredCity.districts.forEach(coveredDistrict => {
-      const district = findZoneDistrict(city, coveredDistrict.name);
-      if (!district) city.districts.push(coveredDistrict);
-      else if (!district.areas.length && coveredDistrict.areas.length) district.areas = coveredDistrict.areas;
-    });
-  });
   return master.sort((a, b) => a.name.localeCompare(b.name));
 }

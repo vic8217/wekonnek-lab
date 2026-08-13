@@ -323,6 +323,11 @@ export class MerchantsService {
       select: { id: true, amount: true },
     }) : [];
     const merchantIds = merchants.map(merchant => merchant.id);
+    const merchantUserIds = merchants.flatMap(merchant => merchant.userId ? [merchant.userId] : []);
+    const wallets = merchantUserIds.length ? await this.prisma.wallet.findMany({
+      where: { userId: { in: merchantUserIds } },
+      select: { userId: true, balance: true },
+    }) : [];
     const paidPayments = merchantIds.length ? await this.prisma.subscriptionPayment.groupBy({
       by: ['merchantId'],
       where: { merchantId: { in: merchantIds }, status: 'paid' },
@@ -330,6 +335,7 @@ export class MerchantsService {
     }) : [];
     const addOnAmounts = new Map(addOns.map(addOn => [addOn.id, Number(addOn.amount)]));
     const paidByMerchant = new Map(paidPayments.map(payment => [payment.merchantId, Number(payment._sum.amount || 0)]));
+    const walletByUser = new Map(wallets.map(wallet => [wallet.userId, Number(wallet.balance || 0)]));
     const credentials = new Map(applications.map(application => [application.merchantCode, application]));
     return merchants.map(merchant => {
       const application = merchant.merchantCode ? credentials.get(merchant.merchantCode) : undefined;
@@ -348,7 +354,8 @@ export class MerchantsService {
         recovery_key: application?.recoveryKey ?? null,
         total_subscription_fee: totalSubscriptionFee,
         total_fee: totalSubscriptionFee,
-        wallet_balance: Math.max(totalSubscriptionFee - paid, 0),
+        wallet_balance: merchant.userId ? walletByUser.get(merchant.userId) || 0 : 0,
+        ledger_unpaid: Math.max(totalSubscriptionFee - paid, 0),
       };
     });
   }
@@ -447,6 +454,51 @@ export class MerchantsService {
       data: { recoveryKey },
     });
     return { recovery_key: recoveryKey, merchant_code: merchant.merchantCode };
+  }
+
+  async addDemoWalletCredit(id: number, amount: number, adminUserId: string) {
+    const merchant = await this.prisma.merchant.findUnique({
+      where: { id },
+      select: { id: true, name: true, userId: true },
+    });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+    if (!merchant.userId) throw new NotFoundException('Merchant owner account not found');
+
+    const referenceNumber = `DEMO-${merchant.id}-${Date.now()}-${randomBytes(4).toString('hex').toUpperCase()}`;
+    const result = await this.prisma.$transaction(async tx => {
+      const wallet = await tx.wallet.upsert({
+        where: { userId: merchant.userId! },
+        update: { balance: { increment: amount } },
+        create: { userId: merchant.userId!, balance: amount, isActive: true },
+      });
+      await tx.walletTransaction.create({
+        data: {
+          referenceNumber,
+          walletId: wallet.id,
+          type: WalletTransactionType.top_up,
+          status: WalletTransactionStatus.completed,
+          gateway: WalletPaymentGateway.internal,
+          amount,
+          fee: 0,
+          netAmount: amount,
+          description: 'Demo wallet credit added by administrator',
+          metadata: {
+            purpose: 'demo_credit',
+            merchantId: merchant.id,
+            merchantName: merchant.name,
+            adminUserId,
+          },
+        },
+      });
+      return wallet;
+    });
+
+    return {
+      merchant_id: merchant.id,
+      amount,
+      wallet_balance: Number(result.balance),
+      reference_number: referenceNumber,
+    };
   }
 
   async search(searchDto: SearchMerchantsDto) {

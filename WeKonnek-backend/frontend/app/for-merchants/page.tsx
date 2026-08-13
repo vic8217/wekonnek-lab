@@ -9,7 +9,6 @@ import {
   BookOpen,
   BriefcaseBusiness,
   CalendarDays,
-  ChevronDown,
   LocateFixed,
   Mail,
   MapPin,
@@ -142,7 +141,6 @@ export default function ForMerchantsPage() {
   const geocodeSequence = useRef(0);
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [mapExpanded, setMapExpanded] = useState(false);
   const [mapDialogOpen, setMapDialogOpen] = useState(false);
   const [categoryName, setCategoryName] = useState("");
   const [subCategoryName, setSubCategoryName] = useState("");
@@ -150,6 +148,7 @@ export default function ForMerchantsPage() {
     BusinessCategory[]
   >([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesError, setCategoriesError] = useState("");
   const [businessAddress, setBusinessAddress] = useState("");
   const [hasBranches, setHasBranches] = useState("");
   const [geocodingAddress, setGeocodingAddress] = useState(false);
@@ -195,8 +194,12 @@ export default function ForMerchantsPage() {
     // Retry once after initial load; subsequent retries are user initiated.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => {
-    fetch("/api/backend/merchant-categories")
+  const loadBusinessCategories = useCallback(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    setCategoriesLoading(true);
+    setCategoriesError("");
+    fetch("/api/backend/merchant-categories", { signal: controller.signal, cache: "no-store" })
       .then((response) =>
         response.ok
           ? response.json()
@@ -217,9 +220,22 @@ export default function ForMerchantsPage() {
             ),
         );
       })
-      .catch(() => setBusinessCategories([]))
-      .finally(() => setCategoriesLoading(false));
+      .catch(() => {
+        setBusinessCategories([]);
+        setCategoriesError("Business categories are temporarily unavailable.");
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        setCategoriesLoading(false);
+      });
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
+  useEffect(() => {
+    return loadBusinessCategories();
+  }, [loadBusinessCategories]);
   useEffect(() => {
     if (!selectedCity) return;
 
@@ -236,6 +252,7 @@ export default function ForMerchantsPage() {
           selectedArea,
           district,
           selectedCity,
+          selectedProvince,
           "Philippines",
         ]
           .filter(Boolean)
@@ -278,7 +295,7 @@ export default function ForMerchantsPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [businessAddress, selectedArea, selectedCity, selectedDistrict]);
+  }, [businessAddress, selectedArea, selectedCity, selectedDistrict, selectedProvince]);
   useEffect(() => {
     if (!mapDialogOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -466,6 +483,14 @@ export default function ForMerchantsPage() {
                 ))}
               </select>
             </label>
+            {categoriesError && (
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <span>{categoriesError}</span>
+                <button type="button" onClick={loadBusinessCategories} disabled={categoriesLoading} className="font-bold underline disabled:opacity-60">
+                  {categoriesLoading ? "Loading…" : "Retry"}
+                </button>
+              </div>
+            )}
             <label className="merchant-input flex items-center gap-3">
               <Tag size={19} className="shrink-0 text-[#7187a8]" />
               <select
@@ -500,22 +525,25 @@ export default function ForMerchantsPage() {
                 className="min-w-0 flex-1 bg-transparent outline-none"
               />
             </label>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <select name="region" value={selectedRegion} onChange={(event) => { setSelectedRegion(event.target.value); setSelectedProvince(""); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); }} required className="merchant-input bg-white">
-                <option value="">Region</option>
+            <div className="rounded-xl border border-[#ccd8e9] bg-[#f8fbff] p-4">
+              <p className="mb-3 text-xs font-black uppercase tracking-wide text-[#075cff]">Location Coverage</p>
+              <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+              <label className="text-[11px] font-bold text-slate-700">Region<select name="region" value={selectedRegion} onChange={(event) => { setSelectedRegion(event.target.value); setSelectedProvince(""); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); setLocation(null); }} required className="merchant-input mt-2 bg-white">
+                <option value="">Select region</option>
                 {zoneRegions(coverageOptions).map(region => <option key={region} value={region}>{region}</option>)}
-              </select>
-              <select name="province_district" value={selectedProvince} onChange={(event) => { setSelectedProvince(event.target.value); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); }} required disabled={!selectedRegion} className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
-                <option value="">Province / District</option>
+              </select></label>
+              <label className="text-[11px] font-bold text-slate-700">Province / District<select name="province_district" value={selectedProvince} onChange={(event) => { setSelectedProvince(event.target.value); setSelectedCity(""); setSelectedDistrict(""); setSelectedArea(""); setLocation(null); }} required disabled={!selectedRegion} className="merchant-input mt-2 bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+                <option value="">Select province / district</option>
                 {zoneProvinces(coverageOptions, selectedRegion).map(province => <option key={province} value={province}>{province}</option>)}
-              </select>
-              <select
+              </select></label>
+              <label className="text-[11px] font-bold text-slate-700">City / Municipality<select
                 name="city_municipality"
                 value={selectedCity}
                 onChange={(event) => {
                   setSelectedCity(event.target.value);
                   setSelectedDistrict("");
                   setSelectedArea("");
+                  setLocation(null);
                 }}
                 required
                 disabled={!selectedProvince}
@@ -526,7 +554,7 @@ export default function ForMerchantsPage() {
                     ? "Loading cities…"
                     : coverageError
                       ? "Cities unavailable"
-                      : "City / Municipality"}
+                      : "Select city / municipality"}
                 </option>
                 {citiesInZoneProvince(coverageOptions, selectedRegion, selectedProvince).map((city) => (
                   <option key={city.code} value={city.name}>
@@ -535,8 +563,10 @@ export default function ForMerchantsPage() {
                       .replace(/ \(City\)$/, "")}
                   </option>
                 ))}
-              </select>
-              <select
+              </select></label>
+              </div>
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-3">
+              <label className="text-[11px] font-bold text-slate-700">Local Council District<select
                 name="council_district"
                 value={selectedDistrict}
                 onChange={(event) => {
@@ -547,19 +577,19 @@ export default function ForMerchantsPage() {
                 disabled={!selectedCity}
                 className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
               >
-                <option value="">City Council District</option>
-                {coverageOptions
-                  .find((city) => findZoneCity(coverageOptions, selectedCity)?.code === city.code)
-                  ?.districts.map((district) => (
+                <option value="">Select council district</option>
+                {findZoneCity(coverageOptions, selectedCity)?.districts.map((district) => (
                     <option key={district.name} value={district.name}>
                       {district.name}
                     </option>
                   ))}
-              </select>
-              <select name="geographic_area" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} required={Boolean(selectedDistrictOption?.areas.length)} disabled={!selectedDistrict || !selectedDistrictOption?.areas.length} className="merchant-input bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
-                <option value="">{selectedDistrictOption && !selectedDistrictOption.areas.length ? "Whole district" : "Barangay / Area"}</option>
+              </select></label>
+              <label className="text-[11px] font-bold text-slate-700">Barangay / Area<select name="geographic_area" value={selectedArea} onChange={(event) => setSelectedArea(event.target.value)} required={Boolean(selectedDistrictOption?.areas.length)} disabled={!selectedDistrict || !selectedDistrictOption?.areas.length} className="merchant-input mt-2 bg-white disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+                <option value="">{selectedDistrictOption && !selectedDistrictOption.areas.length ? "Whole district" : "Select barangay / area"}</option>
                 {selectedDistrictOption?.areas.map(area => <option key={area.code} value={area.name}>{area.name}</option>)}
-              </select>
+              </select></label>
+              <div className="hidden sm:block" aria-hidden="true" />
+              </div>
             </div>
             {coverageError && (
               <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -620,11 +650,7 @@ export default function ForMerchantsPage() {
             <div className="min-w-0 overflow-hidden rounded-xl border border-[#ccd8e9] bg-white">
               <div className="flex items-center gap-3 border-b border-[#dbe4f0] px-4 py-3">
                 <MapPin size={19} className="text-[#075cff]" />
-                <button
-                  type="button"
-                  onClick={() => setMapExpanded((current) => !current)}
-                  className="min-w-0 flex-1 text-left"
-                >
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-[#17223b]">
                     Pin your store location
                   </p>
@@ -633,9 +659,9 @@ export default function ForMerchantsPage() {
                       ? "Finding the selected address…"
                       : location
                         ? `${location[0].toFixed(6)}, ${location[1].toFixed(6)}`
-                        : "Use GPS or open the map to drop a pin."}
+                        : "Select an area, use GPS, or click the map."}
                   </p>
-                </button>
+                </div>
                 <button
                   type="button"
                   onClick={locateStore}
@@ -646,18 +672,13 @@ export default function ForMerchantsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMapExpanded((current) => !current)}
-                  aria-label={mapExpanded ? "Hide map" : "Open map"}
-                  className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                  onClick={() => setMapDialogOpen(true)}
+                  className="hidden rounded-lg border border-[#ccd8e9] px-3 py-2 text-xs font-bold text-[#075cff] hover:bg-blue-50 sm:block"
                 >
-                  <ChevronDown
-                    size={18}
-                    className={`transition-transform ${mapExpanded ? "rotate-180" : ""}`}
-                  />
+                  Expand map
                 </button>
               </div>
-              {mapExpanded && (
-                <div className="relative h-64 w-full">
+                <div className="relative h-64 w-full sm:h-72">
                   <LocationMap
                     selectedLocation={location}
                     defaultCenter={location ?? DEFAULT_MAP_CENTER}
@@ -668,15 +689,16 @@ export default function ForMerchantsPage() {
                   <button
                     type="button"
                     onClick={() => setMapDialogOpen(true)}
-                    className="absolute inset-0 z-[500] flex items-end justify-center bg-transparent p-3 focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[#075cff]"
-                    aria-label="Open larger map to choose exact store location"
+                    className="absolute bottom-3 right-3 z-[500] rounded-full bg-white/95 px-4 py-2 text-xs font-bold text-[#075cff] shadow-lg sm:hidden"
+                    aria-label="Open a larger store location map"
                   >
-                    <span className="rounded-full bg-white/95 px-4 py-2 text-xs font-bold text-[#075cff] shadow-lg">
-                      Click to choose the exact location
-                    </span>
+                    Expand map
                   </button>
                 </div>
-              )}
+              <div className="grid gap-3 border-t border-[#ccd8e9] bg-white p-3 sm:grid-cols-2">
+                <label className="text-xs font-bold text-slate-700">Latitude<input name="latitude" value={location?.[0].toFixed(7) ?? ""} required readOnly placeholder="Select an area or click the map" className="merchant-input mt-2 bg-slate-50" /></label>
+                <label className="text-xs font-bold text-slate-700">Longitude<input name="longitude" value={location?.[1].toFixed(7) ?? ""} required readOnly placeholder="Select an area or click the map" className="merchant-input mt-2 bg-slate-50" /></label>
+              </div>
             </div>
             {mapDialogOpen && (
               <div

@@ -21,6 +21,7 @@ interface Merchant {
   total_fee?: number;
   total_subscription_fee?: number;
   wallet_balance?: number;
+  ledger_unpaid?: number;
 }
 
 interface MerchantDetails extends Merchant {
@@ -51,6 +52,9 @@ export default function MerchantManagementPage() {
   const [ledger, setLedger] = useState<MerchantLedger | null>(null);
   const [dialogLoading, setDialogLoading] = useState(false);
   const [generatingRecoveryKey, setGeneratingRecoveryKey] = useState(false);
+  const [creditMerchant, setCreditMerchant] = useState<Merchant | null>(null);
+  const [creditAmount, setCreditAmount] = useState('500');
+  const [creditingWallet, setCreditingWallet] = useState(false);
 
   useEffect(() => {
     fetchMerchants();
@@ -225,6 +229,33 @@ export default function MerchantManagementPage() {
     } catch (error) {
       console.error('Error reinstating merchant:', error);
       toast.error('Failed to reinstate merchant');
+    }
+  };
+
+  const addDemoWalletCredit = async () => {
+    if (!creditMerchant) return;
+    const amount = Number(creditAmount);
+    if (!Number.isFinite(amount) || amount < 50 || amount > 50000) {
+      toast.error('Enter an amount from ₱50 to ₱50,000.');
+      return;
+    }
+    setCreditingWallet(true);
+    try {
+      const response = await fetch(`${API}/merchants/admin/${creditMerchant.id}/demo-wallet-credit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ amount }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Unable to add demo wallet credit');
+      toast.success(`₱${amount.toLocaleString()} added to ${creditMerchant.name}.`);
+      setCreditMerchant(null);
+      setCreditAmount('500');
+      await fetchMerchants();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add demo wallet credit');
+    } finally {
+      setCreditingWallet(false);
     }
   };
 
@@ -440,7 +471,7 @@ export default function MerchantManagementPage() {
                       <span className="font-mono text-sm text-gray-900">{merchant.merchant_code || 'N/A'}</span>
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-900">₱{Number(merchant.total_subscription_fee ?? merchant.total_fee ?? 0).toLocaleString()}</td>
-                    <td className="px-6 py-4"><span className="font-bold text-red-700">₱{Number(merchant.wallet_balance || 0).toLocaleString()}</span><p className="mt-1 text-xs text-gray-500">Ledger unpaid</p></td>
+                    <td className="px-6 py-4"><span className="font-bold text-red-700">₱{Number(merchant.wallet_balance || 0).toLocaleString()}</span><p className="mt-1 text-xs text-gray-500">Available balance</p></td>
                     <td className="px-6 py-4">
                       <div>
                         <p className="text-gray-900">{formatDate(merchant.created_at)}</p>
@@ -456,6 +487,7 @@ export default function MerchantManagementPage() {
                       <div className="flex flex-wrap gap-2">
                         <button onClick={() => openDetails(merchant)} disabled={dialogLoading} className="rounded-lg bg-blue-100 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-200">View</button>
                         <button onClick={() => openLedger(merchant)} disabled={dialogLoading} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200">Ledger</button>
+                        <button onClick={() => setCreditMerchant(merchant)} className="rounded-lg bg-emerald-100 px-3 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-200">Add balance</button>
                       {merchant.status === 'active' ? (
                         <button
                           onClick={() => handleSuspend(merchant)}
@@ -506,6 +538,22 @@ export default function MerchantManagementPage() {
       )}
       {details && <MerchantDetailsModal details={details} generatingRecoveryKey={generatingRecoveryKey} onGenerateRecoveryKey={generateRecoveryKey} onClose={() => setDetails(null)} />}
       {ledger && <MerchantLedgerModal ledger={ledger} onClose={() => setLedger(null)} />}
+      {creditMerchant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+            <div className="flex items-start justify-between border-b border-gray-200 p-6">
+              <div><h3 className="text-xl font-black text-gray-900">Add demo wallet balance</h3><p className="mt-1 text-sm text-gray-500">{creditMerchant.name}</p></div>
+              <button onClick={() => setCreditMerchant(null)} disabled={creditingWallet} className="p-2 text-gray-500" aria-label="Close">✕</button>
+            </div>
+            <div className="space-y-4 p-6">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Demo-period credit only. This creates a completed internal wallet transaction and is visible in the merchant wallet immediately.</div>
+              <div><label htmlFor="demo-credit-amount" className="mb-2 block text-sm font-bold text-gray-700">Amount (PHP)</label><input id="demo-credit-amount" type="number" min="50" max="50000" step="50" value={creditAmount} onChange={event => setCreditAmount(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200" /></div>
+              <p className="text-xs text-gray-500">Allowed amount: ₱50–₱50,000 per credit.</p>
+              <div className="flex justify-end gap-3 pt-2"><button onClick={() => setCreditMerchant(null)} disabled={creditingWallet} className="rounded-lg border border-gray-300 px-5 py-2 font-bold text-gray-700">Cancel</button><button onClick={addDemoWalletCredit} disabled={creditingWallet} className="rounded-lg bg-emerald-600 px-5 py-2 font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{creditingWallet ? 'Adding...' : 'Add demo balance'}</button></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
