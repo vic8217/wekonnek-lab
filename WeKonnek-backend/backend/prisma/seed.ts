@@ -129,17 +129,90 @@ async function main() {
 
   console.log(`  ✓ ${subCategories.length} sub-categories`);
 
+  // ─── Merchant Taxonomy ────────────────────────
+  // Merchant business classifications are intentionally separate from the
+  // general catalogue taxonomy seeded above.
+  const [merchantFoodCat, merchantGroceryCat, merchantServicesCat] = await Promise.all([
+    prisma.merchantCategory.upsert({
+      where: { slug: 'food-beverages' },
+      update: { name: 'Food & Beverages', isActive: true, displayOrder: 1 },
+      create: {
+        name: 'Food & Beverages',
+        slug: 'food-beverages',
+        description: 'Restaurants, cafes, food stalls, and beverage shops',
+        icon: '🍔',
+        isActive: true,
+        displayOrder: 1,
+      },
+    }),
+    prisma.merchantCategory.upsert({
+      where: { slug: 'groceries' },
+      update: { name: 'Groceries', isActive: true, displayOrder: 2 },
+      create: {
+        name: 'Groceries',
+        slug: 'groceries',
+        description: 'Supermarkets, sari-sari stores, and wet markets',
+        icon: '🛒',
+        isActive: true,
+        displayOrder: 2,
+      },
+    }),
+    prisma.merchantCategory.upsert({
+      where: { slug: 'services' },
+      update: { name: 'Services', isActive: true, displayOrder: 3 },
+      create: {
+        name: 'Services',
+        slug: 'services',
+        description: 'Laundry, repair, beauty, and professional services',
+        icon: '🔧',
+        isActive: true,
+        displayOrder: 3,
+      },
+    }),
+  ]);
+
+  const [merchantFilipinoCuisine, merchantCoffeeTea, merchantStreetFood, merchantSariSari, merchantLaundry] = await Promise.all([
+    prisma.merchantSubCategory.upsert({
+      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'filipino-cuisine' } },
+      update: { name: 'Filipino Cuisine', isActive: true, displayOrder: 1 },
+      create: { categoryId: merchantFoodCat.id, name: 'Filipino Cuisine', slug: 'filipino-cuisine', isActive: true, displayOrder: 1 },
+    }),
+    prisma.merchantSubCategory.upsert({
+      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'coffee-tea' } },
+      update: { name: 'Coffee & Tea', isActive: true, displayOrder: 2 },
+      create: { categoryId: merchantFoodCat.id, name: 'Coffee & Tea', slug: 'coffee-tea', isActive: true, displayOrder: 2 },
+    }),
+    prisma.merchantSubCategory.upsert({
+      where: { categoryId_slug: { categoryId: merchantFoodCat.id, slug: 'street-food' } },
+      update: { name: 'Street Food', isActive: true, displayOrder: 3 },
+      create: { categoryId: merchantFoodCat.id, name: 'Street Food', slug: 'street-food', isActive: true, displayOrder: 3 },
+    }),
+    prisma.merchantSubCategory.upsert({
+      where: { categoryId_slug: { categoryId: merchantGroceryCat.id, slug: 'sari-sari-store' } },
+      update: { name: 'Sari-Sari Store', isActive: true, displayOrder: 1 },
+      create: { categoryId: merchantGroceryCat.id, name: 'Sari-Sari Store', slug: 'sari-sari-store', isActive: true, displayOrder: 1 },
+    }),
+    prisma.merchantSubCategory.upsert({
+      where: { categoryId_slug: { categoryId: merchantServicesCat.id, slug: 'laundry' } },
+      update: { name: 'Laundry', isActive: true, displayOrder: 1 },
+      create: { categoryId: merchantServicesCat.id, name: 'Laundry', slug: 'laundry', isActive: true, displayOrder: 1 },
+    }),
+  ]);
+
+  console.log('  ✓ 3 merchant categories');
+  console.log('  ✓ 5 merchant sub-categories');
+
   // ─── Merchants ────────────────────────────────
   const merchants = await Promise.all([
     prisma.merchant.upsert({
       where: { slug: 'mang-inasal-downtown' },
-      update: {},
+      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantFilipinoCuisine.id },
       create: {
         name: "Mang Inasal Downtown",
         slug: 'mang-inasal-downtown',
         description: 'Authentic Filipino grilled chicken and unlimited rice',
-        categoryId: foodCat.id,
-        subCategoryId: subCategories[0].id,
+        categoryId: merchantFoodCat.id,
+        subCategoryId: merchantFilipinoCuisine.id,
         businessType: 'storefront',
         phone: '+639171234567',
         email: 'manginasal@example.com',
@@ -157,13 +230,13 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'brew-haven-cafe' },
-      update: {},
+      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantCoffeeTea.id },
       create: {
         name: 'Brew Haven Cafe',
         slug: 'brew-haven-cafe',
         description: 'Specialty coffee and artisan pastries',
-        categoryId: foodCat.id,
-        subCategoryId: subCategories[1].id,
+        categoryId: merchantFoodCat.id,
+        subCategoryId: merchantCoffeeTea.id,
         businessType: 'storefront',
         phone: '+639182345678',
         email: 'brewhaven@example.com',
@@ -181,13 +254,13 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'aling-nena-sari-sari' },
-      update: {},
+      update: { categoryId: merchantGroceryCat.id, subCategoryId: merchantSariSari.id },
       create: {
         name: "Aling Nena's Sari-Sari Store",
         slug: 'aling-nena-sari-sari',
         description: 'Your neighborhood sari-sari store with everyday essentials',
-        categoryId: groceryCat.id,
-        subCategoryId: subCategories[4].id,
+        categoryId: merchantGroceryCat.id,
+        subCategoryId: merchantSariSari.id,
         businessType: 'storefront',
         phone: '+639193456789',
         address: '78 Barangay St, Iloilo City',
@@ -204,13 +277,13 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'kuya-boy-bbq' },
-      update: {},
+      update: { categoryId: merchantFoodCat.id, subCategoryId: merchantStreetFood.id },
       create: {
         name: "Kuya Boy's BBQ",
         slug: 'kuya-boy-bbq',
         description: 'Best street-style BBQ and isaw in town',
-        categoryId: foodCat.id,
-        subCategoryId: subCategories[2].id,
+        categoryId: merchantFoodCat.id,
+        subCategoryId: merchantStreetFood.id,
         businessType: 'mobile_cart',
         phone: '+639204567890',
         address: 'Near SM City, Mandurriao',
@@ -227,13 +300,13 @@ async function main() {
     }),
     prisma.merchant.upsert({
       where: { slug: 'clean-express-laundry' },
-      update: {},
+      update: { categoryId: merchantServicesCat.id, subCategoryId: merchantLaundry.id },
       create: {
         name: 'Clean Express Laundry',
         slug: 'clean-express-laundry',
         description: 'Fast and affordable laundry service with pickup & delivery',
-        categoryId: servicesCat.id,
-        subCategoryId: subCategories[5].id,
+        categoryId: merchantServicesCat.id,
+        subCategoryId: merchantLaundry.id,
         businessType: 'storefront',
         phone: '+639215678901',
         email: 'cleanexpress@example.com',
