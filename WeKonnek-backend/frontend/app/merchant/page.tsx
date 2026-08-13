@@ -4,13 +4,15 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Eye, EyeOff, KeyRound, LockKeyhole, Mail, Store } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, KeyRound, LockKeyhole, Mail, Smartphone, Store } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
 
 export default function MerchantLoginPage() {
 	const router = useRouter();
 	const { refreshAuth } = useAuth();
 	const [email, setEmail] = useState('');
+	const [phone, setPhone] = useState('');
+	const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
 	const [password, setPassword] = useState('');
 	const [merchantCode, setMerchantCode] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
@@ -20,9 +22,10 @@ export default function MerchantLoginPage() {
 	async function handleSubmit(event: React.FormEvent) {
 		event.preventDefault(); setLoading(true); setError('');
 		try {
-			const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, merchantCode }) });
+			const identifier = loginMethod === 'phone' ? phone.trim() : email.trim();
+			const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password, merchantCode }) });
 			const body = await response.json();
-			if (!response.ok) throw new Error(body.message || 'Invalid email address or password');
+			if (!response.ok) throw new Error(body.message || 'Invalid login details or password');
 			const apiUser = body.user; const role = apiUser.role ?? apiUser.user_type;
 			if (role !== 'merchant') throw new Error('This account is not authorized for the Merchant Portal.');
 			const user: AuthUser = { id: apiUser.id, email: apiUser.email, phone: apiUser.phone, firstName: apiUser.firstName ?? apiUser.first_name ?? null, lastName: apiUser.lastName ?? apiUser.last_name ?? null, role, userType: role, mustChangePassword: Boolean(apiUser.mustChangePassword ?? apiUser.must_change_password) };
@@ -41,7 +44,8 @@ export default function MerchantLoginPage() {
 			<span className="flex size-12 items-center justify-center rounded-xl bg-blue-50 text-[#075cff]"><Store size={24} /></span><h2 className="mt-6 text-3xl font-black">Merchant Login</h2><p className="mt-2 text-sm text-slate-500">Sign in with your authorized merchant account.</p>
 			<form onSubmit={handleSubmit} className="mt-7 space-y-5">{error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 				<label className="block text-xs font-black text-slate-600">MERCHANT CODE<div className="relative mt-2"><KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" value={merchantCode} onChange={event => setMerchantCode(event.target.value.toUpperCase())} required autoComplete="off" placeholder="WKM-XXXXXXXX" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm font-semibold uppercase tracking-wider outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label>
-				<label className="block text-xs font-black text-slate-600">EMAIL ADDRESS<div className="relative mt-2"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} required autoComplete="email" placeholder="merchant@wekonnek.com" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label>
+				<div><p className="mb-2 text-xs font-black text-slate-600">SIGN IN WITH</p><div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1" role="group" aria-label="Choose merchant login method"><button type="button" onClick={() => { setLoginMethod('email'); setError(''); }} className={`flex h-10 items-center justify-center gap-2 rounded-lg text-xs font-bold transition ${loginMethod === 'email' ? 'bg-white text-[#075cff] shadow-sm' : 'text-slate-500'}`}><Mail size={16} />Email</button><button type="button" onClick={() => { setLoginMethod('phone'); setError(''); }} className={`flex h-10 items-center justify-center gap-2 rounded-lg text-xs font-bold transition ${loginMethod === 'phone' ? 'bg-white text-[#075cff] shadow-sm' : 'text-slate-500'}`}><Smartphone size={16} />Mobile number</button></div></div>
+				{loginMethod === 'email' ? <label className="block text-xs font-black text-slate-600">EMAIL ADDRESS<div className="relative mt-2"><Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="email" value={email} onChange={event => setEmail(event.target.value)} required autoComplete="email" placeholder="merchant@wekonnek.com" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label> : <label className="block text-xs font-black text-slate-600">MOBILE NUMBER<div className="relative mt-2"><Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="tel" inputMode="tel" value={phone} onChange={event => setPhone(event.target.value)} required autoComplete="tel" placeholder="09XX XXX XXXX" className="h-13 w-full rounded-xl border border-[#ccd8e9] pl-12 pr-4 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /></div></label>}
 				<label className="block text-xs font-black text-slate-600">PASSWORD<div className="relative mt-2"><LockKeyhole className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} required autoComplete="current-password" placeholder="Enter your password" className="h-13 w-full rounded-xl border border-[#ccd8e9] px-12 text-sm outline-none focus:border-[#075cff] focus:ring-2 focus:ring-blue-100" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
 				<div className="text-right"><Link href="/merchant/reset-password" className="text-xs font-bold text-[#075cff] hover:underline">Forgot password? Use recovery key</Link></div>
 				<button disabled={loading} className="flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#1749e8] font-black text-white shadow-md transition hover:bg-[#0b3bd0] disabled:opacity-60">{loading ? 'Signing In…' : 'Open Merchant Portal'} {!loading && <ArrowRight size={18} />}</button>

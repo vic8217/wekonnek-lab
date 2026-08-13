@@ -308,11 +308,12 @@ export default function CustomerDesktopHome() {
         </header>
 
         <div className="px-12 py-11">
-          <div className="mb-4 flex justify-end">
+          <div className="mb-5 flex justify-end">
             <Link
               href="/customer/categories"
-              className="min-h-12 rounded-full border border-slate-300 px-5 py-2.5 text-sm font-bold text-red-600 transition hover:border-red-200 hover:bg-red-50"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#ff0719] px-5 py-2.5 text-sm font-black text-white shadow-[0_8px_20px_rgba(255,7,25,.22)] transition hover:-translate-y-0.5 hover:bg-[#e60012] hover:shadow-[0_10px_24px_rgba(255,7,25,.3)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-200 active:translate-y-0"
             >
+              <LayoutGrid size={18} aria-hidden="true" />
               Show all categories
             </Link>
           </div>

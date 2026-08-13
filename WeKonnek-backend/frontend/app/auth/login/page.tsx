@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import AuthNavigation from '@/components/AuthNavigation';
 import Image from 'next/image';
 import { getToken, getUser, useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
+import { ArrowRight, CalendarDays, Eye, EyeOff, Mail, Moon, ShoppingBag, Sun, Sunrise, Tag, UserRound, UserRoundPlus, UtensilsCrossed } from 'lucide-react';
 
 // Keep backend addresses server-side so a bad build-time environment value
 // can never make a production browser connect to localhost.
@@ -21,6 +21,8 @@ function LoginForm() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [greeting, setGreeting] = useState({ title: 'Good Morning!', icon: 'morning' });
 
   // Sign In Form State
   const [signInData, setSignInData] = useState({
@@ -58,6 +60,15 @@ function LoginForm() {
     const authUser: AuthUser = { id: apiUser.id, email: apiUser.email ?? undefined, phone: apiUser.phone ?? undefined, firstName: apiUser.firstName ?? null, lastName: apiUser.lastName ?? null, role: apiUser.role ?? 'customer', userType: apiUser.role ?? 'customer' };
     setAuth(body.access_token ?? body.accessToken, authUser); await refreshAuth();
   };
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    setGreeting(hour >= 5 && hour < 12
+      ? { title: 'Good Morning!', icon: 'morning' }
+      : hour >= 12 && hour < 18
+        ? { title: 'Good Afternoon!', icon: 'afternoon' }
+        : { title: 'Good Evening!', icon: 'evening' });
+  }, []);
 
   useEffect(() => {
     const oauthCode = searchParams.get('oauth_code');
@@ -198,43 +209,53 @@ function LoginForm() {
   const pasteOtp = (event: React.ClipboardEvent) => { const digits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6); if (digits.length === 6) { event.preventDefault(); setOtp(digits.split('')); otpRefs.current[5]?.focus(); } };
 
   return (
-    <div className="min-h-screen bg-[#F5F5F0]">
-      <AuthNavigation />
-      
-      <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-        <div className="w-full max-w-md">
-          {/* Logo */}
-          <div className="flex justify-center mb-6">
-            <Image
-              src="/logo/weKonnekLogov1.png"
-              alt="WeKonnek Logo"
-              width={120}
-              height={80}
-              className="w-28 h-20 object-contain"
-            />
+    <main className="relative isolate min-h-screen overflow-hidden bg-[#071333] lg:grid lg:grid-cols-[minmax(520px,.92fr)_minmax(0,1.08fr)]">
+      <Image src="/images/customer-auth-storefront.png" alt="Local WeKonnek storefront connected to nearby dining, shopping, and community services" fill priority sizes="100vw" className="pointer-events-none -z-20 object-cover object-center" />
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-r from-white/35 via-[#d9e9ff]/10 to-transparent" />
+      <section className="relative order-2 hidden min-h-screen overflow-hidden px-10 py-9 text-white lg:flex lg:flex-col xl:px-16">
+        <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-1 flex-col">
+          <div className="flex flex-1 flex-col items-start pt-2 text-left">
+            <Image src="/images/weKonnekLogov1.png" alt="WeKonnek" width={1536} height={1024} priority className="h-24 w-28 object-contain drop-shadow-xl xl:h-28 xl:w-32" />
+            <h1 className="mt-1 text-5xl font-black leading-[1.02] tracking-tight drop-shadow-lg xl:text-6xl">Welcome to<br/><span className="text-[#2f71ff]">WeKonnek</span></h1>
+            <p className="mt-6 max-w-xl text-lg font-medium leading-8 text-white drop-shadow-md xl:text-xl">Discover local businesses, shop, dine,<br/>book services, and more — all in one place.</p>
           </div>
+          <div className="absolute inset-x-0 bottom-0 grid grid-cols-4 overflow-hidden rounded-3xl border border-white/60 bg-white/95 text-[#12192b] shadow-[0_18px_50px_rgba(0,0,0,.24)] backdrop-blur">
+            {[
+              [ShoppingBag, 'Shop Local', 'Find great products from nearby stores'],
+              [UtensilsCrossed, 'Dine & Order', 'Order food, reserve tables, and more'],
+              [CalendarDays, 'Book Services', 'Book appointments and services easily'],
+              [Tag, 'Exclusive Deals', 'Enjoy discounts and exclusive offers'],
+            ].map(([Icon, title, text], index) => <div key={String(title)} className={`p-5 text-center ${index ? 'border-l border-slate-200' : ''}`}><Icon className={`mx-auto ${index % 2 ? 'text-red-600' : 'text-[#075cff]'}`} size={29}/><h2 className="mt-3 text-sm font-black text-[#12192b]">{String(title)}</h2><p className="mt-2 text-xs leading-5 text-slate-600">{String(text)}</p></div>)}
+          </div>
+        </div>
+      </section>
 
-          {/* Welcome Text */}
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-blue-900 mb-2">Welcome to WeKonnek</h1>
-            <p className="text-gray-600">Sign in to start shopping local</p>
+      <section className="order-1 flex min-h-screen items-center justify-center px-4 py-7 sm:px-8 lg:px-10">
+        <div className="w-full max-w-[590px]">
+          <div className="mb-5 text-center lg:hidden"><Image src="/images/weKonnekLogov1.png" alt="WeKonnek" width={120} height={80} className="mx-auto h-20 w-24 object-contain"/><h1 className="text-3xl font-black text-[#071333]">Welcome to <span className="text-[#075cff]">WeKonnek</span></h1></div>
+          <div className="rounded-[28px] border border-white/80 bg-white p-6 shadow-[0_22px_60px_rgba(28,71,137,.16)] sm:p-9">
+          <div className="mb-7 text-center">
+            <span className="mx-auto flex size-14 items-center justify-center text-amber-500">{greeting.icon === 'morning' ? <Sunrise size={48}/> : greeting.icon === 'afternoon' ? <Sun size={46}/> : <Moon size={42}/>}</span>
+            <h2 className="mt-2 text-3xl font-black text-[#071333]">{greeting.title}</h2>
+            <p className="mt-1 text-base text-[#17223b]">Sign in to start shopping local</p>
           </div>
 
           {/* Tabs */}
-          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <div className="flex mb-6 bg-gray-100 rounded-lg p-1">
+          <div>
+            <div className="mb-7 flex rounded-xl bg-[#f1f3f8] p-1">
               <button
                 type="button"
                 onClick={() => {
                   setActiveTab('signin');
                   setError(null);
                 }}
-                className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+                className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg px-4 font-bold transition-colors ${
                   activeTab === 'signin'
-                    ? 'bg-white text-gray-900 shadow-sm'
+                    ? 'bg-white text-[#075cff] shadow-md'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
+                <UserRound size={18}/>
                 Sign In
               </button>
               <button
@@ -243,12 +264,13 @@ function LoginForm() {
                   setActiveTab('register');
                   setError(null);
                 }}
-                className={`flex-1 py-2 px-4 rounded-md font-medium transition-colors ${
+                className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-lg px-4 font-bold transition-colors ${
                   activeTab === 'register'
-                    ? 'bg-white text-gray-900 shadow-sm'
+                    ? 'bg-white text-[#075cff] shadow-md'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
+                <UserRoundPlus size={18}/>
                 Register
               </button>
             </div>
@@ -273,15 +295,16 @@ function LoginForm() {
                       type="button"
                       disabled={loading}
                       onClick={() => beginSocial(provider)}
-                      className="w-full min-h-12 rounded-lg border border-gray-300 bg-white font-semibold text-gray-800 capitalize transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                      className="relative flex min-h-14 w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-12 font-bold text-[#12192b] capitalize transition hover:border-blue-200 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
+                      <span className="absolute left-5 text-xl font-black normal-case">{provider === 'google' ? <span className="text-[#4285f4]">G</span> : provider === 'facebook' ? <span className="flex size-6 items-center justify-center rounded-full bg-[#1877f2] text-sm text-white">f</span> : <span className="text-black">●</span>}</span>
                       Continue with {provider}
                     </button>
                   ))}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500">
                   <span className="h-px flex-1 bg-gray-200" />
-                  <span>or sign in with password</span>
+                  <span>or sign in with email</span>
                   <span className="h-px flex-1 bg-gray-200" />
                 </div>
                 {process.env.NODE_ENV !== 'production' && (
@@ -298,7 +321,7 @@ function LoginForm() {
                   <label htmlFor="signin-email" className="block text-sm font-medium text-gray-700 mb-2">
                     Email or mobile number
                   </label>
-                  <input
+                  <div className="relative"><input
                     type="text"
                     id="signin-email"
                     name="email"
@@ -308,8 +331,8 @@ function LoginForm() {
                     inputMode="text"
                     autoComplete="username"
                     placeholder="juan@example.com or 0917 123 4567"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
+                    className="h-14 w-full rounded-xl border border-slate-300 px-4 pr-12 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  /><Mail className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/></div>
                 </div>
 
                 <div>
@@ -325,43 +348,27 @@ function LoginForm() {
                       onChange={handleSignInChange}
                       required
                       placeholder="Enter your password"
-                      className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      className="h-14 w-full rounded-xl border border-slate-300 px-4 pr-12 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showPassword ? (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      )}
+                      {showPassword ? <EyeOff size={20}/> : <Eye size={20}/>} 
                     </button>
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between gap-4 text-sm"><label className="flex cursor-pointer items-center gap-2 text-slate-700"><input type="checkbox" checked={rememberMe} onChange={event => setRememberMe(event.target.checked)} className="size-4 accent-[#075cff]"/>Remember me</label><button type="button" className="font-bold text-[#075cff] hover:underline">Forgot Password?</button></div>
+
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex h-14 w-full items-center justify-center gap-3 rounded-xl bg-[#f50012] font-black text-white shadow-[0_10px_24px_rgba(245,0,18,.24)] transition hover:bg-[#dc0010] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {loading ? 'Signing In...' : 'Sign In'}
+                  {loading ? 'Signing In...' : <>Sign In <ArrowRight size={20}/></>}
                 </button>
-
-                <div className="text-center">
-                  <button
-                    type="button"
-                    className="text-sm text-red-600 hover:text-red-700"
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
               </form>
             )}
 
@@ -530,9 +537,10 @@ function LoginForm() {
               </form>
             )}
           </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 

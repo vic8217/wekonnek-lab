@@ -56,16 +56,13 @@ export default function MerchantManagementPage() {
   const [creditAmount, setCreditAmount] = useState('500');
   const [creditingWallet, setCreditingWallet] = useState(false);
 
-  useEffect(() => {
-    fetchMerchants();
-  }, [selectedStatus]);
-
   const fetchMerchants = async () => {
     try {
       const token = getToken();
       const params = selectedStatus !== 'all' ? `?status=${selectedStatus}` : '';
       const res = await fetch(`${API}/merchants/admin${params}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       });
       if (!res.ok) throw new Error('Failed to fetch merchants');
       const data = await res.json();
@@ -77,10 +74,29 @@ export default function MerchantManagementPage() {
     }
   };
 
+  useEffect(() => {
+    void fetchMerchants();
+    const refresh = () => void fetchMerchants();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+    // Refresh handlers intentionally follow the selected status filter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStatus]);
+
   const getStatusCounts = async () => {
     const token = getToken();
     const res = await fetch(`${API}/merchants/admin`, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     });
     const data = res.ok ? await res.json() : [];
     const allMerchants = Array.isArray(data) ? data : data.data || [];

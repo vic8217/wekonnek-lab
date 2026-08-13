@@ -157,8 +157,8 @@ export default function MerchantDashboardPage() {
 
         const headers = { Authorization: `Bearer ${token}` };
         const [res, coverageRes] = await Promise.all([
-          fetch(`${API}/api/merchants/me`, { headers }),
-          fetch(`${API}/api/merchants/me/subscription-coverage`, { headers }),
+          fetch(`${API}/api/merchants/me`, { headers, cache: 'no-store' }),
+          fetch(`${API}/api/merchants/me/subscription-coverage`, { headers, cache: 'no-store' }),
         ]);
         if (!res.ok) return;
         const merchantData = await res.json();
@@ -225,6 +225,33 @@ export default function MerchantDashboardPage() {
 
     fetchMerchantData();
   }, [user]);
+
+  useEffect(() => {
+    const refreshWallet = async () => {
+      const token = getToken();
+      if (!token) return;
+      try {
+        const response = await fetch(`${API}/api/merchants/me/subscription-coverage`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (response.ok) setCoverage(await response.json());
+      } catch {
+        // Preserve the last known balance during a temporary connection failure.
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshWallet();
+    };
+    const interval = window.setInterval(() => void refreshWallet(), 15000);
+    window.addEventListener('focus', refreshWallet);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWallet);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeTab !== 'billing' || billingLoaded) return;
