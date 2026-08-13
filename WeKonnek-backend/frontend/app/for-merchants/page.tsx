@@ -247,25 +247,22 @@ export default function ForMerchantsPage() {
           .replace(/^3rd\b/i, "Third")
           .replace(/^2nd\b/i, "Second")
           .replace(/^1st\b/i, "First");
-        const query = [
-          businessAddress.trim(),
-          selectedArea,
-          district,
-          selectedCity,
-          selectedProvince,
-          "Philippines",
-        ]
-          .filter(Boolean)
-          .join(", ");
+        const province = /no province/i.test(selectedProvince) ? "" : selectedProvince;
+        const queries = [
+          [businessAddress.trim(), selectedArea, selectedCity, province, "Philippines"],
+          [selectedArea, selectedCity, province, "Philippines"],
+          [district, selectedCity, province, "Philippines"],
+          [selectedCity, province, "Philippines"],
+        ].map(parts => parts.filter(Boolean).join(", ")).filter((query, index, all) => query && all.indexOf(query) === index);
         setGeocodingAddress(true);
         try {
-          const encodedQuery = encodeURIComponent(query);
-          const response = await fetch(`/api/geocode?q=${encodedQuery}`, {
-            signal: controller.signal,
-          });
-          const body = response.ok ? await response.json() : null;
-          const result =
-            body?.status === "ok" ? (body.results?.[0] ?? null) : null;
+          let result = null;
+          for (const query of queries) {
+            const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+            const body = response.ok ? await response.json() : null;
+            result = body?.results?.[0] ?? null;
+            if (result) break;
+          }
           const latitude = Number(result?.location?.lat);
           const longitude = Number(result?.location?.lng);
           if (

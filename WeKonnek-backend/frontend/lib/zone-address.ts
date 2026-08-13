@@ -43,6 +43,23 @@ export const findZoneDistrict = (city: ZoneCityOption | undefined, value?: strin
 export const findZoneArea = (district: ZoneDistrictOption | undefined, value?: string | null) =>
   district?.areas.find(item => normalizeZoneLabel(item.name) === normalizeZoneLabel(value));
 
+const dedupeZoneCities = (cities: ZoneCityOption[]) => cities.map(city => ({
+  ...city,
+  districts: city.districts.reduce<ZoneDistrictOption[]>((districts, source) => {
+    let district = districts.find(item => normalizeZoneLabel(item.name) === normalizeZoneLabel(source.name));
+    if (!district) {
+      district = { ...source, areas: [] };
+      districts.push(district);
+    }
+    source.areas.forEach(area => {
+      if (!district!.areas.some(item => normalizeZoneLabel(item.name) === normalizeZoneLabel(area.name))) {
+        district!.areas.push(area);
+      }
+    });
+    return districts;
+  }, []),
+}));
+
 export async function loadZoneCityAreas(city: ZoneCityOption, signal?: AbortSignal): Promise<ZoneAreaOption[]> {
   if (city.districts.some(district => district.areas.length)) return [];
   const response = await fetch(`/api/backend/management-zones/philippine-locations/${city.code}/barangays`, { signal, cache: 'force-cache' });
@@ -75,7 +92,7 @@ export async function loadAdminZoneAddresses(signal?: AbortSignal): Promise<Zone
   const activeCoverage: ZoneCityOption[] = coverageResponse?.ok
     ? await coverageResponse.json().then(body => Array.isArray(body) ? body : [])
     : [];
-  if (activeCoverage.length) return activeCoverage.sort((a, b) => a.name.localeCompare(b.name));
+  if (activeCoverage.length) return dedupeZoneCities(activeCoverage).sort((a, b) => a.name.localeCompare(b.name));
 
   // Keep the national reference as a bounded fallback for fresh installations
   // that do not have admin-imported coverage yet.
@@ -114,5 +131,5 @@ export async function loadAdminZoneAddresses(signal?: AbortSignal): Promise<Zone
     };
   });
 
-  return master.sort((a, b) => a.name.localeCompare(b.name));
+  return dedupeZoneCities(master).sort((a, b) => a.name.localeCompare(b.name));
 }
