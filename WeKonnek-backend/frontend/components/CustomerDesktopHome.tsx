@@ -30,7 +30,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useUserLocation } from "@/hooks/use-geolocation";
-import { type Category, type Merchant } from "@/lib/api";
+import { type Merchant } from "@/lib/api";
+import {
+  fetchGlobalCategories,
+  type GlobalCategory,
+} from "@/lib/global-categories";
 import { publicAssetUrl } from "@/lib/public-asset-url";
 
 const categoryStyles: Array<{ icon: LucideIcon; gradient: string }> = [
@@ -61,7 +65,7 @@ type DisplayCategory = {
 };
 
 function toDisplayCategory(
-  category: Category & { imageUrl?: string | null },
+  category: GlobalCategory,
   index: number,
 ): DisplayCategory {
   const style = categoryStyles[index % categoryStyles.length];
@@ -87,8 +91,6 @@ function toDisplayCategory(
     gradient: style.gradient,
   };
 }
-
-type ApiCategory = Category & { imageUrl?: string | null };
 
 function merchantImage(merchant: Merchant) {
   return publicAssetUrl(merchant.coverImageUrl || merchant.logoUrl);
@@ -127,18 +129,9 @@ export default function CustomerDesktopHome() {
   useEffect(() => {
     const controller = new AbortController();
 
-    fetch("/api/categories", { cache: "no-store", signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("Failed to load categories");
-        return response.json() as Promise<ApiCategory[]>;
-      })
+    fetchGlobalCategories(controller.signal)
       .then((data) => {
-        const active = Array.isArray(data)
-          ? data
-              .filter((category) => category.isActive)
-              .sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name))
-          : [];
-        setCategories(active.map(toDisplayCategory));
+        setCategories(data.map(toDisplayCategory));
       })
       .catch((error) => {
         if (error instanceof Error && error.name === "AbortError") return;

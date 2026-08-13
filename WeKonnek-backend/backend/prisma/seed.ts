@@ -80,6 +80,26 @@ async function main() {
         displayOrder: 5,
       },
     }),
+    prisma.category.upsert({
+      where: { slug: 'property' },
+      update: {
+        name: 'Property',
+        description: 'Homes, condominiums, lots and commercial spaces for sale or rent',
+        icon: '🏠',
+        isActive: true,
+        displayOrder: 6,
+        ownerMerchantId: null,
+      },
+      create: {
+        name: 'Property',
+        slug: 'property',
+        description: 'Homes, condominiums, lots and commercial spaces for sale or rent',
+        icon: '🏠',
+        isActive: true,
+        displayOrder: 6,
+        ownerMerchantId: null,
+      },
+    }),
   ]);
 
   console.log(`  ✓ ${categories.length} categories`);
