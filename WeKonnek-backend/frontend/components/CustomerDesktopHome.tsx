@@ -30,7 +30,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useUserLocation } from "@/hooks/use-geolocation";
-import { merchantCategoriesApi, type MerchantCategory } from "@/lib/api";
+import { type Category, type Merchant } from "@/lib/api";
+import { publicAssetUrl } from "@/lib/public-asset-url";
 
 const categoryStyles: Array<{ icon: LucideIcon; gradient: string }> = [
   { icon: UtensilsCrossed, gradient: "from-orange-400 to-red-500" },
@@ -51,6 +52,7 @@ type DisplayCategory = {
   id: number;
   icon: LucideIcon;
   adminIcon?: string;
+  imageUrl?: string;
   name: string;
   details: string;
   stat: string;
@@ -59,7 +61,7 @@ type DisplayCategory = {
 };
 
 function toDisplayCategory(
-  category: MerchantCategory,
+  category: Category & { imageUrl?: string | null },
   index: number,
 ): DisplayCategory {
   const style = categoryStyles[index % categoryStyles.length];
@@ -68,6 +70,7 @@ function toDisplayCategory(
     id: category.id,
     icon: style.icon,
     adminIcon: category.icon?.trim(),
+    imageUrl: publicAssetUrl(category.imageUrl),
     name: category.name,
     details:
       category.description?.trim() ||
@@ -85,64 +88,21 @@ function toDisplayCategory(
   };
 }
 
-const partners = [
-  {
-    name: "Green Market",
-    kind: "FRESH PRODUCE",
-    meta: "organic  •  0.5 km",
-    rating: "4.6",
-    image: "/images/partner-green-market.png",
-  },
-  {
-    name: "Wellness Spa",
-    kind: "RELAXATION",
-    meta: "spa  •  2.1 km",
-    rating: "4.7",
-    image: "/images/partner-wellness-spa.png",
-  },
-  {
-    name: "Sakura Garden",
-    kind: "DINING",
-    meta: "japanese  •  0.8 km",
-    rating: "4.8",
-    image: "/images/partner-sakura-garden.png",
-  },
-  {
-    name: "Le Petit Bistro",
-    kind: "BISTRO",
-    meta: "french  •  1.2 km",
-    rating: "4.9",
-    image: "/images/partner-le-petit-bistro.png",
-  },
-  {
-    name: "Daily Fresh",
-    kind: "GROCERY",
-    meta: "market  •  1.4 km",
-    rating: "4.7",
-    image: "/images/merchantPickupOrder.png",
-  },
-  {
-    name: "Corner Cafe",
-    kind: "CAFE",
-    meta: "coffee  •  0.9 km",
-    rating: "4.8",
-    image: "/images/merchantReservedImage.png",
-  },
-  {
-    name: "Home Essentials",
-    kind: "RETAIL",
-    meta: "home  •  2.5 km",
-    rating: "4.5",
-    image: "/images/merchantTakeOutOrder.png",
-  },
-  {
-    name: "City Services",
-    kind: "SERVICES",
-    meta: "local  •  1.8 km",
-    rating: "4.6",
-    image: "/images/weKonnekPickupOrders.png",
-  },
-];
+type ApiCategory = Category & { imageUrl?: string | null };
+
+function merchantImage(merchant: Merchant) {
+  return publicAssetUrl(merchant.coverImageUrl || merchant.logoUrl);
+}
+
+function merchantKind(merchant: Merchant) {
+  return (merchant.subCategory?.name || merchant.category?.name || "Local merchant").toUpperCase();
+}
+
+function merchantMeta(merchant: Merchant) {
+  return [merchant.category?.name, merchant.subCategory?.name, merchant.city]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(" • ");
+}
 
 const nav = [
   [Home, "Home", "/customer/dashboard"],
@@ -157,16 +117,61 @@ export default function CustomerDesktopHome() {
   const { coords, status } = useUserLocation();
   const [deliveryLocation, setDeliveryLocation] = useState("Your City");
   const [categories, setCategories] = useState<DisplayCategory[]>([]);
-  const [showCategories, setShowCategories] = useState(false);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesFailed, setCategoriesFailed] = useState(false);
+  const [partners, setPartners] = useState<Merchant[]>([]);
+  const [partnersLoading, setPartnersLoading] = useState(true);
+  const [partnersFailed, setPartnersFailed] = useState(false);
   const [showPartners, setShowPartners] = useState(false);
 
   useEffect(() => {
-    merchantCategoriesApi
-      .getAll()
-      .then((data) => setCategories((data || []).map(toDisplayCategory)))
-      .catch((error) =>
-        console.error("Failed to load managed categories:", error),
-      );
+    const controller = new AbortController();
+
+    fetch("/api/categories", { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Failed to load categories");
+        return response.json() as Promise<ApiCategory[]>;
+      })
+      .then((data) => {
+        const active = Array.isArray(data)
+          ? data
+              .filter((category) => category.isActive)
+              .sort((a, b) => a.displayOrder - b.displayOrder || a.name.localeCompare(b.name))
+          : [];
+        setCategories(active.map(toDisplayCategory));
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setCategoriesFailed(true);
+      })
+      .finally(() => setCategoriesLoading(false));
+
+    fetch("/api/merchants", { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Failed to load merchants");
+        return response.json() as Promise<Merchant[]>;
+      })
+      .then((data) => {
+        const active = Array.isArray(data)
+          ? data
+              .filter((merchant) => merchant.isActive)
+              .sort(
+                (a, b) =>
+                  Number(b.isVerified) - Number(a.isVerified) ||
+                  Number(b.rating || 0) - Number(a.rating || 0) ||
+                  a.name.localeCompare(b.name),
+              )
+              .slice(0, 8)
+          : [];
+        setPartners(active);
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setPartnersFailed(true);
+      })
+      .finally(() => setPartnersLoading(false));
+
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -192,16 +197,15 @@ export default function CustomerDesktopHome() {
   }, [coords]);
 
   useEffect(() => {
-    if (!showCategories && !showPartners) return;
+    if (!showPartners) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setShowCategories(false);
         setShowPartners(false);
       }
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [showCategories, showPartners]);
+  }, [showPartners]);
 
   return (
     <div className="hidden min-h-screen bg-white text-[#12192b] xl:grid xl:grid-cols-[254px_minmax(0,1fr)]">
@@ -316,23 +320,31 @@ export default function CustomerDesktopHome() {
 
         <div className="px-12 py-11">
           <div className="mb-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowCategories(true)}
+            <Link
+              href="/customer/categories"
               className="min-h-12 rounded-full border border-slate-300 px-5 py-2.5 text-sm font-bold text-red-600 transition hover:border-red-200 hover:bg-red-50"
             >
               Show all categories
-            </button>
+            </Link>
           </div>
           <section
             aria-label="Category listings"
             className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-5"
           >
-            {categories.map(
+            {categoriesLoading ? (
+              [1, 2, 3, 4, 5].map((item) => (
+                <div key={item} className="min-h-[218px] w-[176px] shrink-0 animate-pulse rounded-[22px] bg-slate-100" />
+              ))
+            ) : categories.length === 0 ? (
+              <div className="flex min-h-[150px] w-full items-center justify-center rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 text-sm text-slate-500">
+                {categoriesFailed ? "Categories are temporarily unavailable." : "No categories are available yet."}
+              </div>
+            ) : categories.map(
               ({
                 id,
                 icon: Icon,
                 adminIcon,
+                imageUrl,
                 name,
                 details,
                 stat,
@@ -347,7 +359,9 @@ export default function CustomerDesktopHome() {
                   <span
                     className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}
                   >
-                    {adminIcon ? (
+                    {imageUrl ? (
+                      <img src={imageUrl} alt="" className="size-full rounded-full object-cover" />
+                    ) : adminIcon ? (
                       <span className="text-2xl" aria-hidden="true">
                         {adminIcon}
                       </span>
@@ -376,46 +390,46 @@ export default function CustomerDesktopHome() {
                 See All ›
               </button>
             </div>
-            <div className="grid grid-cols-4 gap-3">
-              {partners.slice(0, 4).map((partner) => (
+            {partnersLoading ? (
+              <div className="grid grid-cols-4 gap-3">
+                {[1, 2, 3, 4].map((item) => <div key={item} className="h-56 animate-pulse rounded-2xl bg-slate-100" />)}
+              </div>
+            ) : partners.length === 0 ? (
+              <div className="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+                {partnersFailed ? "Featured partners are temporarily unavailable." : "No active merchants are available yet."}
+              </div>
+            ) : <div className="grid grid-cols-4 gap-3">
+              {partners.slice(0, 4).map((partner) => {
+                const image = merchantImage(partner);
+                const meta = merchantMeta(partner);
+                return (
                 <Link
-                  href="/merchants"
-                  key={partner.name}
+                  href={`/merchants/${partner.slug}`}
+                  key={partner.id}
                   className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_25px_rgba(15,23,42,.08)] transition duration-200 hover:-translate-y-1 hover:shadow-xl"
                 >
                   <div className="relative h-36 overflow-hidden p-3 text-white">
-                    <Image
-                      src={partner.image}
-                      alt={partner.name}
-                      fill
-                      sizes="25vw"
-                      className="object-cover transition duration-300 group-hover:scale-105"
-                    />
+                    {image ? <img src={image} alt={partner.name} className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-105" /> : <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-600 to-slate-900"><Store size={42} /></div>}
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
-                    <span className="relative rounded-xl bg-[#ff0719] px-3 py-2 text-xs font-bold">
-                      Featured
-                    </span>
+                    {partner.isVerified && <span className="relative rounded-xl bg-[#ff0719] px-3 py-2 text-xs font-bold">Verified</span>}
                     <Heart
                       className="absolute right-3 top-3 rounded-full bg-white p-2 text-red-600"
                       size={42}
                     />
                     <p className="absolute bottom-12 text-xs font-bold">
-                      {partner.kind}
+                      {merchantKind(partner)}
                     </p>
-                    <span className="absolute bottom-3 rounded-xl bg-[#ff0719] px-3 py-2 text-xs font-bold">
-                      15% OFF
-                    </span>
                   </div>
                   <div className="p-4">
                     <h3 className="text-lg font-black">{partner.name}</h3>
                     <p className="mt-4 text-xs text-slate-500">
-                      <span className="text-amber-500">★</span> {partner.rating}{" "}
-                      &nbsp;•&nbsp; {partner.meta}
+                      {Number(partner.rating) > 0 ? <><span className="text-amber-500">★</span> {Number(partner.rating).toFixed(1)}</> : "Not rated"}
+                      {meta && <> &nbsp;•&nbsp; {meta}</>}
                     </p>
                   </div>
                 </Link>
-              ))}
-            </div>
+              )})}
+            </div>}
           </section>
 
           <section className="mt-12">
@@ -449,88 +463,6 @@ export default function CustomerDesktopHome() {
         </div>
       </main>
 
-      {showCategories && (
-        <div
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setShowCategories(false);
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-6 backdrop-blur-sm"
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="all-categories-title"
-            className="max-h-[88vh] w-full max-w-6xl overflow-y-auto rounded-[28px] bg-[#fafbfc] p-7 shadow-2xl sm:p-9"
-          >
-            <div className="flex items-start justify-between gap-5">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-[.16em] text-blue-700">
-                  Explore WeKonnek
-                </p>
-                <h2
-                  id="all-categories-title"
-                  className="mt-1 text-3xl font-black"
-                >
-                  All categories
-                </h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Discover nearby merchants, services, offers, and local
-                  experiences.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCategories(false)}
-                aria-label="Close all categories"
-                className="flex size-12 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"
-              >
-                <X size={22} />
-              </button>
-            </div>
-            <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {categories.map(
-                ({
-                  id,
-                  icon: Icon,
-                  adminIcon,
-                  name,
-                  details,
-                  stat,
-                  href,
-                  gradient,
-                }) => (
-                  <Link
-                    key={id}
-                    href={href}
-                    onClick={() => setShowCategories(false)}
-                    className="group relative min-h-[205px] rounded-[22px] border border-[#edf2f7] bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,.07)] transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_18px_38px_rgba(15,23,42,.14)]"
-                  >
-                    <span
-                      className={`flex size-14 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-white shadow-lg transition duration-200 group-hover:scale-110 group-hover:brightness-110`}
-                    >
-                      {adminIcon ? (
-                        <span className="text-2xl" aria-hidden="true">
-                          {adminIcon}
-                        </span>
-                      ) : (
-                        <Icon size={27} strokeWidth={1.8} />
-                      )}
-                    </span>
-                    <h3 className="mt-5 text-[17px] font-black">{name}</h3>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                      {details}
-                    </p>
-                    <p className="mt-4 text-sm font-bold text-blue-700">
-                      {stat}
-                    </p>
-                  </Link>
-                ),
-              )}
-            </div>
-          </section>
-        </div>
-      )}
       {showPartners && (
         <div
           role="presentation"
@@ -571,45 +503,37 @@ export default function CustomerDesktopHome() {
               </button>
             </div>
             <div className="mt-8 grid grid-cols-2 gap-5 lg:grid-cols-4">
-              {partners.map((partner) => (
+              {partners.map((partner) => {
+                const image = merchantImage(partner);
+                const meta = merchantMeta(partner);
+                return (
                 <Link
-                  href="/merchants"
-                  key={partner.name}
+                  href={`/merchants/${partner.slug}`}
+                  key={partner.id}
                   onClick={() => setShowPartners(false)}
                   className="group overflow-hidden rounded-[22px] border border-[#edf2f7] bg-white shadow-[0_8px_24px_rgba(15,23,42,.07)] transition-all duration-200 hover:-translate-y-1.5 hover:shadow-xl"
                 >
                   <div className="relative h-44 overflow-hidden">
-                    <Image
-                      src={partner.image}
-                      alt={partner.name}
-                      fill
-                      sizes="(max-width:1024px) 50vw, 25vw"
-                      className="object-cover transition duration-300 group-hover:scale-105"
-                    />
+                    {image ? <img src={image} alt={partner.name} className="size-full object-cover transition duration-300 group-hover:scale-105" /> : <div className="flex size-full items-center justify-center bg-gradient-to-br from-slate-600 to-slate-900 text-white"><Store size={48} /></div>}
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent" />
-                    <span className="absolute left-3 top-3 rounded-full bg-[#ff0719] px-3 py-1.5 text-xs font-bold text-white">
-                      Featured
-                    </span>
+                    {partner.isVerified && <span className="absolute left-3 top-3 rounded-full bg-[#ff0719] px-3 py-1.5 text-xs font-bold text-white">Verified</span>}
                     <Heart
                       className="absolute right-3 top-3 rounded-full bg-white p-2 text-red-600"
                       size={42}
                     />
                     <p className="absolute bottom-4 left-4 text-xs font-bold text-white">
-                      {partner.kind}
+                      {merchantKind(partner)}
                     </p>
                   </div>
                   <div className="p-5">
                     <h3 className="text-lg font-black">{partner.name}</h3>
                     <p className="mt-3 text-sm text-slate-500">
-                      <span className="text-amber-500">★</span> {partner.rating}{" "}
-                      &nbsp;•&nbsp; {partner.meta}
+                      {Number(partner.rating) > 0 ? <><span className="text-amber-500">★</span> {Number(partner.rating).toFixed(1)}</> : "Not rated"}
+                      {meta && <> &nbsp;•&nbsp; {meta}</>}
                     </p>
-                    <span className="mt-4 inline-flex rounded-full bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600">
-                      15% OFF
-                    </span>
                   </div>
                 </Link>
-              ))}
+              )})}
             </div>
           </section>
         </div>
