@@ -145,7 +145,7 @@ const CHEVRON = (
 export default function PortalBackButton() {
   const pathname = usePathname();
   const router = useRouter();
-  const target = pathname ? resolveTarget(pathname) : null;
+  const target = pathname === '/admin/coordinators' ? null : pathname ? resolveTarget(pathname) : null;
 
   if (!target) return null;
 

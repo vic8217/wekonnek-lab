@@ -19,6 +19,21 @@ export class CoordinatorApplicationsController {
   @UseGuards(JwtAuthGuard)
   stats() { return this.service.stats(); }
 
+  @Get('commission-settings')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  commissionSettings() { return this.service.getCommissionSettings(); }
+
+  @Patch('commission-settings')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin)
+  updateCommissionSettings(@Body() body: { rate?: number }) { return this.service.updateCommissionSettings(body.rate); }
+
+  @Get(':id/commission-ledger')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  commissionLedger(@Param('id', ParseIntPipe) id: number) { return this.service.commissionLedger(id); }
+
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.admin, UserRole.staff)

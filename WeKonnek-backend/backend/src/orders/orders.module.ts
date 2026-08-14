@@ -7,9 +7,10 @@ import { NotificationsModule } from '../modules/notifications/notifications.modu
 import { VouchersModule } from '../modules/vouchers/vouchers.module';
 import { InvoicesModule } from '../modules/invoices/invoices.module';
 import { DineInCrewModule } from '../dine-in-crew/dine-in-crew.module';
+import { CoordinatorApplicationsModule } from '../coordinator-applications/coordinator-applications.module';
 
 @Module({
-  imports: [NotificationsModule, VouchersModule, InvoicesModule, DineInCrewModule],
+  imports: [NotificationsModule, VouchersModule, InvoicesModule, DineInCrewModule, CoordinatorApplicationsModule],
   controllers: [OrdersController, PaymentsWebhookController],
   providers: [OrdersService, PaymentGatewayService],
   exports: [OrdersService],

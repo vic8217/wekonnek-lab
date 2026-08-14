@@ -277,6 +277,14 @@ model CoordinatorApplication {
   @@map("coordinator_applications")
 }
 
+model CoordinatorCommissionSetting {
+  id        Int      @id @default(1)
+  rate      Decimal  @default(0) @db.Decimal(5, 2)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("coordinator_commission_settings")
+}
+
 model SubscriptionPayment {
   id              Int       @id @default(autoincrement())
   merchantId      Int       @map("merchant_id")

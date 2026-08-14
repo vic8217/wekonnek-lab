@@ -8,6 +8,112 @@ import { UserRole } from '@prisma/client';
 export class CoordinatorApplicationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getCommissionSettings() {
+    const setting = await this.prisma.coordinatorCommissionSetting.upsert({
+      where: { id: 1 },
+      update: {},
+      create: { id: 1, rate: 0 },
+    });
+    return { rate: Number(setting.rate), updatedAt: setting.updatedAt };
+  }
+
+  async updateCommissionSettings(rate?: number) {
+    const value = Number(rate);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      throw new BadRequestException('Commission rate must be between 0 and 100');
+    }
+    const setting = await this.prisma.coordinatorCommissionSetting.upsert({
+      where: { id: 1 },
+      update: { rate: value },
+      create: { id: 1, rate: value },
+    });
+    return { rate: Number(setting.rate), updatedAt: setting.updatedAt };
+  }
+
+  async creditOrderCommission(orderId: number) {
+    const order = await this.prisma.wkOrder.findUnique({
+        where: { id: orderId },
+        select: { id: true, totalAmount: true, merchant: { select: { id: true, name: true, subscriptionTier: true } } },
+      });
+    if (!order) return null;
+    const plan = await this.prisma.subscriptionPlanDefinition.findUnique({
+      where: { audience_tier: { audience: 'merchant', tier: order.merchant.subscriptionTier.toLowerCase() } },
+      select: { variableOrderPercent: true },
+    });
+    const variableRate = Number(plan?.variableOrderPercent || 0);
+    if (variableRate <= 0) return null;
+    const orderTotal = Number(order.totalAmount);
+    const netOfVatSales = orderTotal / 1.12;
+    const systemFee = Math.round((netOfVatSales * variableRate / 100) * 100) / 100;
+    return this.creditMerchantFeeCommission({
+      merchantId: order.merchant.id,
+      systemFee,
+      sourceReference: `ORDER-${order.id}`,
+      orderId: String(order.id),
+      description: `Variable order-fee commission from ${order.merchant.name}`,
+      metadata: { fee_type: 'variable_order_fee', order_total: orderTotal, net_of_vat_sales: netOfVatSales, merchant_variable_rate: variableRate },
+    });
+  }
+
+  async creditFixedFeeCommission(merchantId: number, systemFee: number, chargeReference: string) {
+    return this.creditMerchantFeeCommission({
+      merchantId,
+      systemFee,
+      sourceReference: chargeReference,
+      description: 'Fixed daily subscription-fee commission',
+      metadata: { fee_type: 'fixed_daily_fee' },
+    });
+  }
+
+  private async creditMerchantFeeCommission(input: { merchantId: number; systemFee: number; sourceReference: string; orderId?: string; description: string; metadata?: Record<string, unknown> }) {
+    const referenceNumber = `COORD-COMM-${input.sourceReference}`;
+    const existing = await this.prisma.walletTransaction.findUnique({ where: { referenceNumber } });
+    if (existing) return existing;
+    const [setting, merchant] = await Promise.all([
+      this.prisma.coordinatorCommissionSetting.findUnique({ where: { id: 1 } }),
+      this.prisma.merchant.findUnique({ where: { id: input.merchantId }, select: { id: true, name: true, merchantCode: true } }),
+    ]);
+    const rate = Number(setting?.rate || 0);
+    if (!merchant?.merchantCode || rate <= 0 || input.systemFee <= 0) return null;
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { merchantCode: merchant.merchantCode },
+      select: { assignedCoordinatorId: true },
+    });
+    if (!application?.assignedCoordinatorId) return null;
+    const coordinator = await this.prisma.coordinatorApplication.findUnique({
+      where: { userId: application.assignedCoordinatorId },
+      select: { userId: true, status: true },
+    });
+    if (!coordinator?.userId || coordinator.status !== 'approved') return null;
+    const amount = Math.round((input.systemFee * rate / 100) * 100) / 100;
+    if (amount <= 0) return null;
+
+    return this.prisma.$transaction(async tx => {
+      const duplicate = await tx.walletTransaction.findUnique({ where: { referenceNumber } });
+      if (duplicate) return duplicate;
+      const wallet = await tx.wallet.upsert({
+        where: { userId: coordinator.userId! },
+        update: { balance: { increment: amount } },
+        create: { userId: coordinator.userId!, balance: amount },
+      });
+      return tx.walletTransaction.create({
+        data: {
+          referenceNumber,
+          walletId: wallet.id,
+          type: 'earning',
+          status: 'completed',
+          gateway: 'internal',
+          amount,
+          fee: 0,
+          netAmount: amount,
+          orderId: input.orderId,
+          description: input.description,
+          metadata: { merchant_id: merchant.id, merchant_name: merchant.name, coordinator_commission_rate: rate, system_fee: input.systemFee, ...input.metadata },
+        },
+      });
+    });
+  }
+
   create(input: Record<string, unknown>) {
     const required = ['fullName', 'mobileNumber', 'email', 'region', 'provinceDistrict', 'cityMunicipality', 'latitude', 'longitude'];
     for (const field of required) {
@@ -36,10 +142,52 @@ export class CoordinatorApplicationsService {
   }
 
   async findAll() {
-    return this.prisma.coordinatorApplication.findMany({
+    const coordinators = await this.prisma.coordinatorApplication.findMany({
       include: { managementZone: { include: { coverages: true } } },
       orderBy: { submittedAt: 'desc' },
     });
+    const userIds = coordinators.flatMap(coordinator => coordinator.userId ? [coordinator.userId] : []);
+    const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const wallets = userIds.length ? await this.prisma.wallet.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, transactions: { where: { type: 'earning', status: 'completed', createdAt: { gte: monthStart } }, select: { amount: true } } },
+    }) : [];
+    const commissionByUser = new Map(wallets.map(wallet => [wallet.userId, wallet.transactions.reduce((sum, transaction) => sum + transaction.amount, 0)]));
+    return coordinators.map(coordinator => ({ ...coordinator, currentMonthCommission: coordinator.userId ? commissionByUser.get(coordinator.userId) || 0 : 0 }));
+  }
+
+  async commissionLedger(id: number) {
+    const coordinator = await this.prisma.coordinatorApplication.findUnique({ where: { id } });
+    if (!coordinator?.userId) throw new BadRequestException('Approved coordinator account not found');
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId: coordinator.userId },
+      select: { transactions: { where: { type: 'earning', status: 'completed' }, orderBy: { createdAt: 'desc' }, select: { id: true, amount: true, netAmount: true, orderId: true, description: true, metadata: true, referenceNumber: true, createdAt: true } } },
+    });
+    const transactions = wallet?.transactions || [];
+    const orderIds = [...new Set(transactions.flatMap(transaction => transaction.orderId && /^\d+$/.test(transaction.orderId) ? [Number(transaction.orderId)] : []))];
+    const orders = orderIds.length ? await this.prisma.wkOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderCode: true, merchant: { select: { id: true, name: true } } } }) : [];
+    const orderById = new Map(orders.map(order => [order.id, order]));
+    const months = new Map<string, { key: string; label: string; total: number; merchants: Map<string, { merchant_id: number | null; merchant_name: string; amount: number; transactions: number }> }>();
+    transactions.forEach(transaction => {
+      const date = new Date(transaction.createdAt);
+      const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+      const month = months.get(key) || { key, label: date.toLocaleDateString('en-PH', { month: 'long', year: 'numeric', timeZone: 'Asia/Manila' }), total: 0, merchants: new Map() };
+      const order = transaction.orderId && /^\d+$/.test(transaction.orderId) ? orderById.get(Number(transaction.orderId)) : undefined;
+      const metadata = transaction.metadata && typeof transaction.metadata === 'object' && !Array.isArray(transaction.metadata) ? transaction.metadata as Record<string, unknown> : {};
+      const merchantId = order?.merchant.id ?? (Number(metadata.merchant_id ?? metadata.merchantId) || null);
+      const merchantName = order?.merchant.name ?? String(metadata.merchant_name ?? metadata.merchantName ?? transaction.description ?? 'Unattributed commission');
+      const merchantKey = merchantId ? String(merchantId) : merchantName;
+      const merchant = month.merchants.get(merchantKey) || { merchant_id: merchantId, merchant_name: merchantName, amount: 0, transactions: 0 };
+      merchant.amount += transaction.amount;
+      merchant.transactions += 1;
+      month.total += transaction.amount;
+      month.merchants.set(merchantKey, merchant);
+      months.set(key, month);
+    });
+    const monthRows = [...months.values()].sort((a, b) => b.key.localeCompare(a.key)).map(month => ({ ...month, merchants: [...month.merchants.values()].sort((a, b) => b.amount - a.amount) }));
+    const now = new Date();
+    const currentKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    return { coordinator: { id: coordinator.id, full_name: coordinator.fullName, coordinator_code: coordinator.coordinatorCode }, current_month: monthRows.find(month => month.key === currentKey)?.total || 0, all_time: monthRows.reduce((sum, month) => sum + month.total, 0), months: monthRows };
   }
 
   async stats() {

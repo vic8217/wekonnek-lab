@@ -13,6 +13,7 @@ import { VouchersService } from '../modules/vouchers/vouchers.service';
 import { InvoicesService } from '../modules/invoices/invoices.service';
 import { DineInSyncService } from '../dine-in-crew/dine-in-sync.service';
 import { WalletPaymentGateway, NotificationType } from '@prisma/client';
+import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 
 interface OrderItemInput {
   product_id?: number;
@@ -147,6 +148,7 @@ export class OrdersService {
     private readonly vouchers: VouchersService,
     private readonly invoices: InvoicesService,
     private readonly dineInSync: DineInSyncService,
+    private readonly coordinatorApplications: CoordinatorApplicationsService,
   ) {}
 
   private generateOrderCode(): string {
@@ -495,6 +497,9 @@ export class OrdersService {
         merchant: { include: { category: true } },
       },
     });
+    if (!wasFinalized && willFinalize) {
+      await this.coordinatorApplications.creditOrderCommission(order.id);
+    }
     if (willFinalize && ['dine_in', 'in_store'].includes(existing.orderType)) {
       await this.invoices.generateFromDineInOrder(Number(id));
       if (existing.shopId && existing.tableNumber) {

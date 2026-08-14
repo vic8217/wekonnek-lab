@@ -11,6 +11,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { operationState } from '../branches/branch-operation';
+import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 
 function addOnQuantity(quantities: unknown, id: string) {
   if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
@@ -114,7 +115,10 @@ function normalizeMerchantInput(input: Record<string, any>): Record<string, any>
 
 @Injectable()
 export class MerchantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly coordinatorApplications: CoordinatorApplicationsService,
+  ) {}
 
   async create(createMerchantDto: CreateMerchantDto) {
     const merchant = await this.prisma.merchant.create({
@@ -243,6 +247,20 @@ export class MerchantsService {
             if (!charged) console.error('Daily subscription charge failed:', error);
           }
         }
+      }
+    }
+
+    if (isDailyPlan && dailySubscriptionFee > 0) {
+      const paidCharge = await this.prisma.walletTransaction.findUnique({
+        where: { referenceNumber: chargeReference },
+        select: { status: true },
+      });
+      if (paidCharge?.status === WalletTransactionStatus.completed) {
+        await this.coordinatorApplications.creditFixedFeeCommission(
+          merchant.id,
+          dailySubscriptionFee,
+          chargeReference,
+        );
       }
     }
 
