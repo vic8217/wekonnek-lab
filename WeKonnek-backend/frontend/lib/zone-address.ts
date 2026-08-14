@@ -4,11 +4,32 @@ export type ZoneAreaOption = { code: string; name: string };
 export type ZoneDistrictOption = { name: string; localCouncilDistrict?: string; areas: ZoneAreaOption[] };
 export type ZoneCityOption = { code: string; name: string; regionCode?: string; regionName?: string; provinceCode?: string | null; provinceName?: string | null; districts: ZoneDistrictOption[] };
 
-export const zoneRegions = (cities: ZoneCityOption[]) =>
-  Array.from(new Set(cities.map(city => city.regionName).filter((name): name is string => Boolean(name))));
+const canonicalRegionName = (value?: string | null) => {
+  const normalized = normalizeZoneLabel(value);
+  if (normalized === 'ncr' || normalized.includes('national capital region')) {
+    return 'national capital region';
+  }
+  return normalized;
+};
+
+export const zoneRegions = (cities: ZoneCityOption[]) => {
+  const regions = new Map<string, string>();
+  cities.forEach(city => {
+    if (!city.regionName) return;
+    const identity = city.regionCode || canonicalRegionName(city.regionName);
+    if (!identity || regions.has(identity)) return;
+    regions.set(
+      identity,
+      canonicalRegionName(city.regionName) === 'national capital region'
+        ? 'National Capital Region (NCR)'
+        : city.regionName,
+    );
+  });
+  return [...regions.values()];
+};
 
 export const citiesInZoneRegion = (cities: ZoneCityOption[], region?: string | null) =>
-  region ? cities.filter(city => normalizeZoneLabel(city.regionName) === normalizeZoneLabel(region)) : [];
+  region ? cities.filter(city => canonicalRegionName(city.regionName) === canonicalRegionName(region)) : [];
 
 export const zoneProvinces = (cities: ZoneCityOption[], region?: string | null) =>
   Array.from(new Set(citiesInZoneRegion(cities, region).map(city => city.provinceName || 'NCR (no province)'))).sort();

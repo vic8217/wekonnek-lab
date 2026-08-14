@@ -4,8 +4,8 @@
 //   - Next.js static assets   → cache-first (immutable, content-hashed)
 //   - Other same-origin GET   → stale-while-revalidate
 //   - /api/ GET               → network-first (offline → cache → JSON error)
-const CACHE_NAME = 'wekonnek-v5';
-const API_CACHE_NAME = 'wekonnek-api-v5';
+const CACHE_NAME = 'wekonnek-v6';
+const API_CACHE_NAME = 'wekonnek-api-v6';
 
 // Minimal app shell. Kept small & resilient so one missing file can't break install.
 const PRECACHE_URLS = [
@@ -60,6 +60,18 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   if (request.method !== 'GET' || !url.protocol.startsWith('http')) return;
+
+  // Next App Router client navigations request an RSC payload rather than a
+  // document. Never serve those payloads (or authenticated portal routes)
+  // stale: doing so can render the previous deployment until a hard refresh.
+  const isRscRequest =
+    request.headers.get('rsc') === '1' ||
+    request.headers.has('next-router-state-tree') ||
+    url.searchParams.has('_rsc');
+  const isAuthenticatedPortal = /^(?:\/admin|\/merchant|\/shop|\/coordinator)(?:\/|$)/.test(
+    url.pathname,
+  );
+  if (isRscRequest || isAuthenticatedPortal) return;
 
   // ── API: network-first ──────────────────────────────
   if (url.pathname.startsWith('/api/')) {

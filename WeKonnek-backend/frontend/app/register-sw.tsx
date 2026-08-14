@@ -11,6 +11,7 @@ export default function RegisterSW() {
         );
         return;
       }
+      let refreshing = false;
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })
         .then((registration) => {
@@ -27,14 +28,16 @@ export default function RegisterSW() {
             if (newWorker) {
               newWorker.addEventListener('statechange', () => {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('New service worker available. Refresh to update.');
-                  // Optionally show a notification to the user
-                  if (window.confirm('A new version is available. Reload to update?')) {
-                    window.location.reload();
-                  }
+                  console.log('New service worker installed. Activating update.');
                 }
               });
             }
+          });
+
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
           });
         })
         .catch((error) => {

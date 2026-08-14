@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
 import L from 'leaflet';
 import { useMapEvents } from 'react-leaflet';
+import { usePathname } from 'next/navigation';
 import 'leaflet/dist/leaflet.css';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -124,6 +125,8 @@ function formatHours(hours: Record<string, unknown> | null, key: string) {
 }
 
 export default function MerchantBranchesPage() {
+  const pathname = usePathname();
+  const portalRoot = pathname.startsWith('/shop') ? '/shop' : '/merchant';
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [merchantId, setMerchantId] = useState<number | null>(null);
@@ -505,6 +508,12 @@ export default function MerchantBranchesPage() {
               </div>
 
               <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+                <Link
+                  href={`${portalRoot}/branches/${branch.id}`}
+                  className="flex-1 px-3 py-2 text-center bg-red-50 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-100 transition-colors"
+                >
+                  Sales
+                </Link>
                 <Link
                   href={`/merchant/branches/${branch.id}/products`}
                   className="flex-1 px-3 py-2 text-center bg-blue-50 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-100 transition-colors"

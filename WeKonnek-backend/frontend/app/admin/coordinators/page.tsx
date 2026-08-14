@@ -23,7 +23,6 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { getToken } from "@/hooks/use-auth";
 import toast from "react-hot-toast";
 
@@ -146,8 +145,10 @@ export default function CoordinatorManagementPage() {
   const [commissionLedgerLoading, setCommissionLedgerLoading] = useState(false);
   const [commissionSettingsOpen, setCommissionSettingsOpen] = useState(false);
   const [commissionRate, setCommissionRate] = useState("");
+  const [currentCommissionRate, setCurrentCommissionRate] = useState<number | null>(null);
   const [commissionSettingsLoading, setCommissionSettingsLoading] = useState(false);
   const [commissionSettingsSaving, setCommissionSettingsSaving] = useState(false);
+  const [applicationSummaryOpen, setApplicationSummaryOpen] = useState(false);
 
   const openCommissionSettings = async () => {
     setCommissionSettingsOpen(true);
@@ -159,7 +160,9 @@ export default function CoordinatorManagementPage() {
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.message || "Unable to load commission settings");
-      setCommissionRate(String(body.rate ?? 0));
+      const rate = Number(body.rate ?? 0);
+      setCurrentCommissionRate(rate);
+      setCommissionRate(String(rate));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to load commission settings");
       setCommissionSettingsOpen(false);
@@ -183,7 +186,9 @@ export default function CoordinatorManagementPage() {
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.message || "Unable to save commission settings");
-      setCommissionRate(String(body.rate));
+      const savedRate = Number(body.rate);
+      setCurrentCommissionRate(savedRate);
+      setCommissionRate(String(savedRate));
       setCommissionSettingsOpen(false);
       toast.success(`Coordinator commission set to ${body.rate}%`);
     } catch (error) {
@@ -243,11 +248,15 @@ export default function CoordinatorManagementPage() {
       try {
         setLoadError("");
         const headers = { Authorization: `Bearer ${getToken()}` };
-        const [applicationsResponse, statsResponse, zonesResponse] =
+        const [applicationsResponse, statsResponse, zonesResponse, commissionResponse] =
           await Promise.all([
             fetch("/api/backend/coordinator-applications", { headers }),
             fetch("/api/backend/coordinator-applications/stats", { headers }),
             fetch("/api/backend/management-zones", { headers }),
+            fetch("/api/backend/coordinator-applications/commission-settings", {
+              headers,
+              cache: "no-store",
+            }),
           ]);
         if (!applicationsResponse.ok || !statsResponse.ok || !zonesResponse.ok)
           throw new Error("Unable to load coordinator applications");
@@ -256,6 +265,12 @@ export default function CoordinatorManagementPage() {
         setApplications(loadedApplications);
         setStats(await statsResponse.json());
         setZones(await zonesResponse.json());
+        if (commissionResponse.ok) {
+          const commission = await commissionResponse.json();
+          const rate = Number(commission.rate ?? 0);
+          setCurrentCommissionRate(rate);
+          setCommissionRate(String(rate));
+        }
         setZoneSelections(
           Object.fromEntries(
             loadedApplications
@@ -448,6 +463,10 @@ export default function CoordinatorManagementPage() {
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * rowsPerPage;
   const visible = filtered.slice(pageStart, pageStart + rowsPerPage);
+  const pendingApplications = useMemo(
+    () => applications.filter((application) => application.status === "pending"),
+    [applications],
+  );
   useEffect(() => setPage(1), [search, status, rowsPerPage]);
 
   const cards = [
@@ -495,10 +514,15 @@ export default function CoordinatorManagementPage() {
         </div>
         <div className="flex flex-wrap gap-3">
           <button type="button" onClick={openCommissionSettings} className="inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-[#e60012] bg-white px-6 font-bold text-[#e60012] transition hover:bg-red-50">
-            <BadgePercent size={20} /> Commission
+            <BadgePercent size={20} />
+            <span>Commission</span>
+            <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black tabular-nums">
+              {currentCommissionRate === null ? "Loading…" : `${currentCommissionRate}%`}
+            </span>
           </button>
-          <Link
-            href="/coordinators"
+          <button
+            type="button"
+            onClick={() => setApplicationSummaryOpen(true)}
             className="relative inline-flex h-14 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#e60012] px-6 font-bold text-white shadow-lg shadow-red-200 transition hover:bg-red-700"
           >
             <UserPlus size={20} />
@@ -508,7 +532,7 @@ export default function CoordinatorManagementPage() {
                 {stats.pending > 99 ? "99+" : stats.pending}
               </span>
             )}
-          </Link>
+          </button>
         </div>
       </header>
       {loadError && (
@@ -820,6 +844,17 @@ export default function CoordinatorManagementPage() {
           onClose={() => setSelectedApplication(null)}
         />
       )}
+      {applicationSummaryOpen && (
+        <CoordinatorApplicationSummaryModal
+          applications={pendingApplications}
+          loading={loading}
+          onClose={() => setApplicationSummaryOpen(false)}
+          onReview={(application) => {
+            setApplicationSummaryOpen(false);
+            openReview(application);
+          }}
+        />
+      )}
       {generatedAccess && (
         <GeneratedAccessModal
           data={generatedAccess}
@@ -844,7 +879,13 @@ export default function CoordinatorManagementPage() {
               <button type="button" onClick={() => setCommissionSettingsOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close commission settings"><X size={22} /></button>
             </header>
             <div className="p-6">
-              <label htmlFor="coordinator-commission-rate" className="text-sm font-bold text-slate-700">Commission rate</label>
+              <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Current commission</p>
+                <p className="mt-1 text-2xl font-black tabular-nums text-[#101a33]">
+                  {currentCommissionRate === null ? "—" : `${currentCommissionRate}%`}
+                </p>
+              </div>
+              <label htmlFor="coordinator-commission-rate" className="text-sm font-bold text-slate-700">Edit commission rate</label>
               <div className="relative mt-2"><input id="coordinator-commission-rate" type="number" min="0" max="100" step="0.01" value={commissionRate} disabled={commissionSettingsLoading} onChange={(event) => setCommissionRate(event.target.value)} className="h-14 w-full rounded-xl border border-slate-300 px-4 pr-12 text-lg font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /><span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-slate-500">%</span></div>
               <p className="mt-3 text-sm leading-6 text-slate-500">This percentage is paid from WEKONNEK&apos;s merchant fee revenue—not gross merchant sales. It applies to collected fixed daily tier fees and variable tier fees on completed system orders net of VAT. It affects future eligible fees only.</p>
               <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setCommissionSettingsOpen(false)} className="h-11 rounded-xl border border-slate-300 px-5 font-bold text-slate-700">Cancel</button><button type="button" onClick={saveCommissionSettings} disabled={commissionSettingsLoading || commissionSettingsSaving} className="h-11 rounded-xl bg-[#e60012] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">{commissionSettingsSaving ? "Saving…" : "Save commission"}</button></div>
@@ -852,6 +893,151 @@ export default function CoordinatorManagementPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CoordinatorApplicationSummaryModal({
+  applications,
+  loading,
+  onClose,
+  onReview,
+}: {
+  applications: CoordinatorApplication[];
+  loading: boolean;
+  onClose: () => void;
+  onReview: (application: CoordinatorApplication) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[950] flex items-center justify-center bg-slate-950/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="coordinator-applications-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <header className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <h2
+                id="coordinator-applications-title"
+                className="text-2xl font-black text-[#101a33]"
+              >
+                Coordinator applications
+              </h2>
+              {!loading && (
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
+                  {applications.length} for review
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Review applicants awaiting admin action and open their full
+              application details.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+            aria-label="Close coordinator applications"
+          >
+            <X size={22} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[0, 1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="h-44 animate-pulse rounded-xl bg-slate-100"
+                />
+              ))}
+            </div>
+          ) : applications.length === 0 ? (
+            <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 text-center">
+              <UserCheck size={34} className="text-emerald-600" />
+              <h3 className="mt-3 text-lg font-black text-[#101a33]">
+                No applications awaiting review
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                New coordinator applications will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {applications.map((application) => {
+                const area = [
+                  application.barangay || application.preferredCoverageArea,
+                  application.cityMunicipality,
+                ]
+                  .filter(Boolean)
+                  .join(", ");
+                return (
+                  <article
+                    key={application.id}
+                    className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-lg font-black text-[#101a33]">
+                          {application.fullName}
+                        </h3>
+                        <p className="mt-1 truncate text-sm text-slate-500">
+                          {application.email}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase text-amber-800">
+                        Pending
+                      </span>
+                    </div>
+                    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-xs font-bold uppercase text-slate-400">
+                          Mobile
+                        </dt>
+                        <dd className="mt-1 font-medium text-slate-700">
+                          {application.mobileNumber || "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-bold uppercase text-slate-400">
+                          Submitted
+                        </dt>
+                        <dd className="mt-1 font-medium text-slate-700">
+                          {application.submittedAt
+                            ? new Date(application.submittedAt).toLocaleDateString()
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div className="col-span-2">
+                        <dt className="text-xs font-bold uppercase text-slate-400">
+                          Requested coverage
+                        </dt>
+                        <dd className="mt-1 font-medium text-slate-700">
+                          {area || "Not specified"}
+                        </dd>
+                      </div>
+                    </dl>
+                    <button
+                      type="button"
+                      onClick={() => onReview(application)}
+                      className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 font-bold text-white transition hover:bg-blue-700"
+                    >
+                      <Eye size={17} /> Review application
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

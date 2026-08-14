@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import type L from "leaflet";
+import { usePortalUrl } from "@/hooks/use-portal-url";
 import {
   BookOpen,
   BriefcaseBusiness,
@@ -943,6 +944,7 @@ export default function ForMerchantsPage() {
 }
 
 function MerchantHeader() {
+  const portalUrl = usePortalUrl("merchant");
   return (
     <header className="relative z-30 flex h-[114px] items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-9">
       <Link href="/" aria-label="WeKonnek home">
@@ -966,12 +968,12 @@ function MerchantHeader() {
         <Link href="/coordinators">For Coordinators</Link>
         <Link href="/contact">Contact</Link>
       </nav>
-      <Link
-        href="/merchant"
+      <a
+        href={portalUrl}
         className="inline-flex h-[50px] items-center gap-2 rounded-xl bg-[#075cff] px-7 text-sm font-black text-white shadow-[0_12px_24px_rgba(0,86,255,0.24)]"
       >
         <Store size={17} /> Merchant Portal
-      </Link>
+      </a>
     </header>
   );
 }
