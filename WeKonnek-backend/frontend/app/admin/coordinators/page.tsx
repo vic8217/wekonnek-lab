@@ -645,10 +645,6 @@ export default function CoordinatorManagementPage() {
                       />
                     </td>
                     <td className="px-4 py-5">
-                      <p className="font-black text-emerald-700">₱{Number(application.currentMonthCommission || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                      <p className="mt-1 text-xs text-slate-500">Commission allotted</p>
-                    </td>
-                    <td className="px-4 py-5">
                       <div className="flex min-w-[190px] items-center gap-3">
                         <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-blue-100 font-black text-blue-600">
                           {application.fullName
@@ -712,6 +708,10 @@ export default function CoordinatorManagementPage() {
                           {application.cityMunicipality}
                         </p>
                       </div>
+                    </td>
+                    <td className="px-4 py-5">
+                      <p className="font-black text-emerald-700">₱{Number(application.currentMonthCommission || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      <p className="mt-1 text-xs text-slate-500">Commission allotted</p>
                     </td>
                     <td className="px-4 py-5">
                       <span
