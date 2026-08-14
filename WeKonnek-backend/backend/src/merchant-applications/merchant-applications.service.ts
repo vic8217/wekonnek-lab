@@ -257,14 +257,20 @@ export class MerchantApplicationsService {
       orderBy: { submittedAt: 'desc' },
     });
     const reviewerIds = [...new Set(apps.map(app => app.reviewedBy).filter(Boolean))] as string[];
+    const coordinatorIds = [...new Set(apps.map(app => app.assignedCoordinatorId).filter(Boolean))] as string[];
     const addOnIds = [...new Set(apps.flatMap(app => app.selectedAddOnIds))];
-    const [reviewers, addOns]: [
+    const [reviewers, coordinators, addOns]: [
       Array<{ id: string; firstName: string | null; lastName: string | null; email: string | null }>,
+      Array<{ userId: string | null; fullName: string; email: string; mobileNumber: string; coordinatorCode: string | null; managementZone: { name: string } | null }>,
       Array<{ id: string; name: string; amount: unknown; billingUnit: string; amountBasis: string | null }>,
     ] = await Promise.all([
       reviewerIds.length ? this.prisma.user.findMany({
         where: { id: { in: reviewerIds } },
         select: { id: true, firstName: true, lastName: true, email: true },
+      }) : [],
+      coordinatorIds.length ? this.prisma.coordinatorApplication.findMany({
+        where: { userId: { in: coordinatorIds } },
+        select: { userId: true, fullName: true, email: true, mobileNumber: true, coordinatorCode: true, managementZone: { select: { name: true } } },
       }) : [],
       addOnIds.length ? this.prisma.subscriptionAddOnPackage.findMany({
         where: { id: { in: addOnIds } },
@@ -276,9 +282,11 @@ export class MerchantApplicationsService {
       user.id,
       [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Admin staff',
     ));
+    const coordinatorById = new Map(coordinators.flatMap(coordinator => coordinator.userId ? [[coordinator.userId, coordinator] as const] : []));
     const addOnById = new Map<string, (typeof addOns)[number]>();
     addOns.forEach(addOn => addOnById.set(addOn.id, addOn));
     return apps.map(app => {
+      const coordinator = app.assignedCoordinatorId ? coordinatorById.get(app.assignedCoordinatorId) : undefined;
       const selectedAddOns = app.selectedAddOnIds.flatMap(id => {
         const addOn = addOnById.get(id);
         const quantity = addOnQuantity(app.selectedAddOnQuantities, id);
@@ -289,6 +297,14 @@ export class MerchantApplicationsService {
         selected_add_ons: selectedAddOns,
         total_fee: Number(app.subscriptionAmount) + selectedAddOns.reduce((sum, addOn) => sum + addOn.subtotal, 0),
         reviewed_by_name: app.reviewedBy ? reviewerById.get(app.reviewedBy) || 'Admin staff' : null,
+        onboarding_coordinator: coordinator ? {
+          user_id: coordinator.userId,
+          full_name: coordinator.fullName,
+          email: coordinator.email,
+          mobile_number: coordinator.mobileNumber,
+          coordinator_code: coordinator.coordinatorCode,
+          zone_name: coordinator.managementZone?.name ?? null,
+        } : null,
       };
     });
   }
