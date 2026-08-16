@@ -25,6 +25,9 @@
     "prisma:db:push": "prisma db push",
     "prisma:db:pull": "prisma db pull",
     "prisma:seed": "npx tsx prisma/seed.ts",
+    "db:seed:dev": "npx tsx prisma/seed-dev.ts",
+    "db:reference:counts": "npx tsx prisma/reference-counts.ts",
+    "db:seed:verify-safety": "node prisma/verify-seed-safety.mjs",
     "prisma:seed:test-customer": "npx tsx prisma/seed-test-customer.ts"
   },
   "dependencies": {

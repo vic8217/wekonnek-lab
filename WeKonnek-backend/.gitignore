@@ -44,6 +44,7 @@ pnpm-debug.log*
 # ─── Documentation ─────────────────────────────────────────
 *.md
 *.MD
+!backend/docs/database-initialization.md
 
 # ─── OS files ──────────────────────────────────────────────
 .DS_Store
