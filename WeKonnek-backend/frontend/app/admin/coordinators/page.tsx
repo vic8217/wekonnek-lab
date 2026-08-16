@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { getToken } from "@/hooks/use-auth";
+import { publicAssetUrl } from "@/lib/public-asset-url";
 import toast from "react-hot-toast";
 
 interface CoordinatorApplication {
@@ -92,6 +93,7 @@ type GeneratedAccess = {
 };
 type ManagedMerchant = {
   id: number;
+  merchant_id?: number;
   business_name: string;
   contact_name?: string;
   email: string;
@@ -102,6 +104,7 @@ type ManagedMerchant = {
   status: string;
   assigned_coordinator_id?: string;
   merchant_code?: string;
+  recovery_key?: string;
 };
 type CommissionLedger = { coordinator: { id: number; full_name: string; coordinator_code?: string }; current_month: number; all_time: number; months: Array<{ key: string; label: string; total: number; merchants: Array<{ merchant_id: number | null; merchant_name: string; amount: number; transactions: number }> }> };
 
@@ -217,20 +220,48 @@ export default function CoordinatorManagementPage() {
     setManagedMerchants([]);
     setManagedMerchantsLoading(true);
     try {
-      const response = await fetch("/api/backend/merchant-applications", {
-        headers: { Authorization: `Bearer ${getToken()}` },
-        cache: "no-store",
-      });
+      const headers = { Authorization: `Bearer ${getToken()}` };
+      const [response, adminMerchantsResponse] = await Promise.all([
+        fetch("/api/backend/merchant-applications", { headers, cache: "no-store" }),
+        fetch("/api/backend/merchants/admin", { headers, cache: "no-store" }),
+      ]);
       const body = await response.json().catch(() => []);
+      const adminMerchantsBody = await adminMerchantsResponse.json().catch(() => []);
       if (!response.ok)
         throw new Error(body?.message || "Unable to load managed merchants");
       const all = (
         Array.isArray(body) ? body : body?.data || []
       ) as ManagedMerchant[];
+      const adminMerchants: Array<{
+        id: number;
+        merchant_code?: string;
+        recovery_key?: string;
+      }> = Array.isArray(adminMerchantsBody)
+        ? adminMerchantsBody
+        : adminMerchantsBody?.data || [];
+      const accountsByCode = new Map<string, {
+        id: number;
+        merchant_code?: string;
+        recovery_key?: string;
+      }>();
+      adminMerchants.forEach((merchant) => {
+        if (merchant.merchant_code) {
+          accountsByCode.set(merchant.merchant_code, merchant);
+        }
+      });
       setManagedMerchants(
         all.filter(
           (merchant) => merchant.assigned_coordinator_id === coordinator.userId,
-        ),
+        ).map((merchant) => {
+          const account = merchant.merchant_code
+            ? accountsByCode.get(merchant.merchant_code)
+            : undefined;
+          return {
+            ...merchant,
+            merchant_id: account?.id,
+            recovery_key: account?.recovery_key,
+          };
+        }),
       );
     } catch (error) {
       toast.error(
@@ -1062,11 +1093,44 @@ function CoordinatorAction({
 }
 
 function ManagedMerchantsModal({ coordinator, merchants, loading, onClose }: { coordinator: CoordinatorApplication; merchants: ManagedMerchant[]; loading: boolean; onClose: () => void }) {
+  const [recoveryMerchant, setRecoveryMerchant] = useState<ManagedMerchant | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const generateRecoveryKey = async () => {
+    if (!recoveryMerchant?.merchant_id) return;
+    setGenerating(true);
+    try {
+      const response = await fetch(
+        `/api/backend/merchants/admin/${recoveryMerchant.merchant_id}/recovery-key`,
+        { method: "POST", headers: { Authorization: `Bearer ${getToken()}` } },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "Unable to generate recovery key");
+      setRecoveryMerchant((current) => current ? { ...current, recovery_key: body.recovery_key } : current);
+      toast.success("Merchant recovery key generated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate recovery key");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const copyRecoveryKey = async () => {
+    if (!recoveryMerchant?.recovery_key) return;
+    try {
+      await navigator.clipboard.writeText(recoveryMerchant.recovery_key);
+      toast.success("Recovery key copied.");
+    } catch {
+      toast.error("Unable to copy the recovery key.");
+    }
+  };
+
   return <div className="fixed inset-0 z-[1050] flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="managed-merchants-title">
-    <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
       <header className="flex items-start justify-between border-b border-slate-200 px-6 py-5"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Managed merchants</p><h2 id="managed-merchants-title" className="mt-1 text-xl font-black text-[#101a33]">{coordinator.fullName}</h2><p className="mt-1 text-sm text-slate-500">{coordinator.coordinatorCode || 'Coordinator ID unavailable'} · {merchants.length} merchant{merchants.length === 1 ? '' : 's'}</p></div><button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close managed merchants"><X size={22} /></button></header>
-      <div className="min-h-0 overflow-y-auto p-5">{loading ? <div className="p-12 text-center text-sm text-slate-500">Loading managed merchants…</div> : merchants.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center"><BookOpen className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-700">No merchants assigned</p><p className="mt-1 text-sm text-slate-500">Merchants onboarded or assigned to this coordinator will appear here.</p></div> : <div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{['Merchant', 'Contact', 'Category', 'Coverage', 'Status'].map(label => <th key={label} className="px-4 py-3 font-bold">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{merchants.map(merchant => <tr key={merchant.id}><td className="px-4 py-4"><p className="font-bold text-[#101a33]">{merchant.business_name}</p><p className="mt-1 font-mono text-xs text-blue-700">{merchant.merchant_code || 'Awaiting Store ID'}</p></td><td className="px-4 py-4"><p className="text-slate-700">{merchant.email || 'N/A'}</p><p className="mt-1 text-xs text-slate-500">{merchant.phone || 'N/A'}</p></td><td className="px-4 py-4 text-slate-700">{merchant.category_name || 'N/A'}</td><td className="px-4 py-4"><p className="text-slate-700">{merchant.geographic_area || 'Area unavailable'}</p><p className="mt-1 text-xs text-slate-500">{merchant.city_municipality || 'City unavailable'}</p></td><td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${merchant.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : merchant.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{merchant.status.replaceAll('_', ' ')}</span></td></tr>)}</tbody></table></div>}</div>
+      <div className="min-h-0 overflow-y-auto p-5">{loading ? <div className="p-12 text-center text-sm text-slate-500">Loading managed merchants…</div> : merchants.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center"><BookOpen className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-700">No merchants assigned</p><p className="mt-1 text-sm text-slate-500">Merchants onboarded or assigned to this coordinator will appear here.</p></div> : <div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{['Merchant', 'Contact', 'Category', 'Coverage', 'Status', 'Action'].map(label => <th key={label} className="px-4 py-3 font-bold">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{merchants.map(merchant => <tr key={merchant.id}><td className="px-4 py-4"><p className="font-bold text-[#101a33]">{merchant.business_name}</p><p className="mt-1 font-mono text-xs text-blue-700">{merchant.merchant_code || 'Awaiting Store ID'}</p></td><td className="px-4 py-4"><p className="text-slate-700">{merchant.email || 'N/A'}</p><p className="mt-1 text-xs text-slate-500">{merchant.phone || 'N/A'}</p></td><td className="px-4 py-4 text-slate-700">{merchant.category_name || 'N/A'}</td><td className="px-4 py-4"><p className="text-slate-700">{merchant.geographic_area || 'Area unavailable'}</p><p className="mt-1 text-xs text-slate-500">{merchant.city_municipality || 'City unavailable'}</p></td><td className="px-4 py-4"><span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${merchant.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : merchant.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>{merchant.status.replaceAll('_', ' ')}</span></td><td className="px-4 py-4"><button type="button" disabled={!merchant.merchant_id || merchant.status !== 'approved'} onClick={() => setRecoveryMerchant(merchant)} title={merchant.status === 'approved' ? 'Merchant password recovery key' : 'Available after merchant approval'} className="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"><KeyRound size={16} /> Recovery key</button></td></tr>)}</tbody></table></div>}</div>
     </div>
+    {recoveryMerchant && <div className="fixed inset-0 z-[1060] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="merchant-recovery-title"><div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"><header className="flex items-start justify-between border-b border-slate-200 px-6 py-5"><div><p className="text-xs font-bold uppercase text-amber-700">Password recovery</p><h3 id="merchant-recovery-title" className="mt-1 text-xl font-black text-[#101a33]">{recoveryMerchant.business_name}</h3><p className="mt-1 font-mono text-xs text-slate-500">{recoveryMerchant.merchant_code}</p></div><button type="button" onClick={() => setRecoveryMerchant(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close recovery key"><X size={21} /></button></header><div className="p-6"><p className="text-xs font-bold uppercase text-slate-500">Current recovery key</p><div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-4"><p className="break-all font-mono text-sm font-bold text-amber-900">{recoveryMerchant.recovery_key || 'No recovery key has been generated.'}</p></div><p className="mt-3 text-xs leading-5 text-slate-500">Generating a new key immediately invalidates the merchant&apos;s previous recovery key.</p><div className="mt-6 flex flex-wrap justify-end gap-3">{recoveryMerchant.recovery_key && <button type="button" onClick={copyRecoveryKey} className="h-11 rounded-xl border border-amber-500 px-5 font-bold text-amber-700">Copy key</button>}<button type="button" onClick={generateRecoveryKey} disabled={generating} className="h-11 rounded-xl bg-amber-600 px-5 font-bold text-white disabled:opacity-60">{generating ? 'Generating…' : recoveryMerchant.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div></div></div>}
   </div>;
 }
 
@@ -1191,7 +1255,7 @@ function ApplicationReviewModal({
                   url ? (
                     <a
                       key={label}
-                      href={url}
+                      href={publicAssetUrl(url)}
                       target="_blank"
                       rel="noreferrer"
                       className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-blue-700 hover:border-blue-300"

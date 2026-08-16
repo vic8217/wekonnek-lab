@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 const APPLICATIONS_API = '/api/backend/merchant-applications';
 
@@ -649,6 +650,6 @@ function ApplicationDocuments({ application }: { application: MerchantApplicatio
   const submitted = documents.filter((item): item is [string, string] => Boolean(item[1]));
   return <section>
     <h4 className="mb-3 text-sm font-bold uppercase tracking-wide text-blue-700">Submitted documents</h4>
-    {submitted.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{submitted.map(([label, url]) => <a key={`${label}-${url}`} href={url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-blue-700 hover:border-blue-300 hover:bg-blue-50"><span>{label}</span><span aria-hidden="true">↗</span></a>)}</div> : <div className="rounded-xl border border-dashed border-gray-300 p-5 text-center text-sm text-gray-500">No documents were submitted with this application.</div>}
+    {submitted.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{submitted.map(([label, url]) => <a key={`${label}-${url}`} href={publicAssetUrl(url)} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-sm font-bold text-blue-700 hover:border-blue-300 hover:bg-blue-50"><span>{label}</span><span aria-hidden="true">↗</span></a>)}</div> : <div className="rounded-xl border border-dashed border-gray-300 p-5 text-center text-sm text-gray-500">No documents were submitted with this application.</div>}
   </section>;
 }

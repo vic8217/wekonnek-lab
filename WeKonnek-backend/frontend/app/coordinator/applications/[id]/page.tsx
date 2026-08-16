@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Check, ExternalLink, FileUp, Pencil, Save, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getToken } from '@/hooks/use-auth';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 type Application = {
   id: number;
@@ -304,7 +305,7 @@ export default function CoordinatorMerchantReviewPage() {
 
     <section className="rounded-2xl border border-[#d2ddea] bg-white p-5 shadow-sm">
       <h3 className="text-base font-black text-[#071d43]">Merchant documents</h3>
-      {submittedDocuments.length > 0 && <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{submittedDocuments.map(([label, url]) => <a key={`${label}-${url}`} href={url} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-[#d2ddea] px-4 py-3 text-sm font-bold text-[#075cff] hover:bg-blue-50"><span>{label}</span><ExternalLink size={16} /></a>)}</div>}
+      {submittedDocuments.length > 0 && <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{submittedDocuments.map(([label, url]) => <a key={`${label}-${url}`} href={publicAssetUrl(url)} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-[#d2ddea] px-4 py-3 text-sm font-bold text-[#075cff] hover:bg-blue-50"><span>{label}</span><ExternalLink size={16} /></a>)}</div>}
       {canEdit && <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {documentFields.filter(([field]) => !application[field]).map(([field, label]) => <label key={field} className="rounded-xl border border-dashed border-[#b8c8dc] bg-[#f8faff] p-4">
           <span className="flex items-center gap-2 text-sm font-black text-[#365078]"><FileUp size={17} /> Add {label}</span>

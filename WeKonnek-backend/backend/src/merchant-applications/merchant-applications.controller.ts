@@ -31,8 +31,9 @@ export class MerchantApplicationsController {
 
   @Post('reset-password')
   @ApiOperation({ summary: 'Reset an approved merchant password with a recovery key' })
-  resetPassword(@Body() body: { recoveryKey?: string; recovery_key?: string; newPassword?: string; new_password?: string }) {
+  resetPassword(@Body() body: { merchantId?: string; merchant_id?: string; merchantCode?: string; merchant_code?: string; recoveryKey?: string; recovery_key?: string; newPassword?: string; new_password?: string }) {
     return this.applicationsService.resetMerchantPassword(
+      body.merchantId || body.merchant_id || body.merchantCode || body.merchant_code || '',
       body.recoveryKey || body.recovery_key || '',
       body.newPassword || body.new_password || '',
     );
