@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getToken, useRequireAuth } from "@/hooks/use-auth";
 import MerchantHeader from "@/components/MerchantHeader";
 import MerchantSidebar from "@/components/MerchantSidebar";
+import MerchantMobileSidebarDrawer from "@/components/MerchantMobileSidebarDrawer";
 import {
   hasPlatinumAccess,
   merchantSubscriptionFromProfile,
@@ -25,6 +26,9 @@ function ProtectedShopLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useRequireAuth(["merchant"], "/shop");
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const openMobileMenu = useCallback(() => setMobileMenuOpen(true), []);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
   const [subscription, setSubscription] = useState<MerchantSubscription | null>(
     null,
   );
@@ -76,9 +80,9 @@ function ProtectedShopLayout({ children }: { children: React.ReactNode }) {
       </div>
     );
   return (
-    <div className="min-h-screen bg-gray-50">
-      <MerchantHeader />
-      <div className="flex">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50">
+      <MerchantHeader onMenuOpen={openMobileMenu} />
+      <div className="flex min-w-0">
         <div className="hidden lg:block">
           <MerchantSidebar
             subscriptionTier={subscription.tier}
@@ -86,8 +90,17 @@ function ProtectedShopLayout({ children }: { children: React.ReactNode }) {
             basePath="/shop"
           />
         </div>
-        <main className="flex-1 p-3 pb-20 lg:p-6">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 lg:p-6">
+          {children}
+        </main>
       </div>
+      <MerchantMobileSidebarDrawer
+        open={mobileMenuOpen}
+        onClose={closeMobileMenu}
+        subscriptionTier={subscription.tier}
+        subscriptionActive={subscription.active}
+        basePath="/shop"
+      />
     </div>
   );
 }

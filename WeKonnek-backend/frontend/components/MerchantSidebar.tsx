@@ -7,10 +7,12 @@ export default function MerchantSidebar({
   subscriptionTier,
   subscriptionActive = true,
   basePath = "/merchant",
+  className = "w-64",
 }: {
   subscriptionTier: string;
   subscriptionActive?: boolean;
   basePath?: "/merchant" | "/shop";
+  className?: string;
 }) {
   const pathname = usePathname();
   const hasPlatinum = subscriptionActive && subscriptionTier === "platinum";
@@ -435,7 +437,7 @@ export default function MerchantSidebar({
   };
 
   return (
-    <div className="w-64 bg-white border-r border-gray-200 min-h-screen">
+    <div className={`${className} min-h-screen border-r border-gray-200 bg-white`}>
       <div className="p-2 "></div>
       <nav className="px-4 py-6 space-y-1">
         {menuItems.map((item) => {

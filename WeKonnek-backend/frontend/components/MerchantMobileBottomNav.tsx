@@ -7,7 +7,7 @@ import { getToken } from '@/hooks/use-auth';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-export default function MerchantMobileBottomNav({ subscriptionTier }: { subscriptionTier: string }) {
+export default function MerchantMobileBottomNav({ subscriptionTier, onMore }: { subscriptionTier: string; onMore: () => void }) {
   const pathname = usePathname();
   const hasPlatinum = subscriptionTier === 'platinum';
   const [orderCount, setOrderCount] = useState(0);
@@ -152,13 +152,15 @@ export default function MerchantMobileBottomNav({ subscriptionTier }: { subscrip
         </Link>
 
         {/* More */}
-        <Link
-          href="/merchant/profile"
-          className={`flex flex-col items-center justify-center flex-1 py-1 mobile-press transition-all duration-200 ${isActive('/merchant/profile') ? 'scale-105' : ''}`}
+        <button
+          type="button"
+          onClick={onMore}
+          aria-label="Open all merchant navigation"
+          className="flex flex-1 flex-col items-center justify-center py-1 mobile-press transition-all duration-200"
         >
-          <div className={`p-1 rounded-xl transition-colors duration-200 ${isActive('/merchant/profile') ? 'bg-red-50' : ''}`}>
+          <div className="rounded-xl p-1 transition-colors duration-200">
             <svg
-              className={`w-6 h-6 transition-colors duration-200 ${isActive('/merchant/profile') ? 'text-[#DB0002]' : 'text-gray-400'}`}
+              className="h-6 w-6 text-gray-500 transition-colors duration-200"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -166,10 +168,10 @@ export default function MerchantMobileBottomNav({ subscriptionTier }: { subscrip
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </div>
-          <span className={`text-[9px] mt-0.5 font-semibold transition-colors duration-200 ${isActive('/merchant/profile') ? 'text-[#DB0002]' : 'text-gray-400'}`}>
+          <span className="mt-0.5 text-[9px] font-semibold text-gray-500 transition-colors duration-200">
             More
           </span>
-        </Link>
+        </button>
       </div>
     </nav>
   );

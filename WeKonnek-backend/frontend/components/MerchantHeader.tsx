@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import ChangePasswordModal from './ChangePasswordModal';
 import MerchantNotificationBell from './MerchantNotificationBell';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -24,7 +25,7 @@ interface ActiveShop {
   merchant_name?: string;
 }
 
-export default function MerchantHeader() {
+export default function MerchantHeader({ onMenuOpen }: { onMenuOpen?: () => void }) {
   const pathname = usePathname();
   const isShopPortal = pathname.startsWith('/shop');
   const portalBase = isShopPortal ? '/shop' : '/merchant';
@@ -98,9 +99,11 @@ export default function MerchantHeader() {
     <>
       {/* ============ MOBILE HEADER ============ */}
       <header className="lg:hidden bg-gradient-to-r from-[#DB0002] to-[#A50002] text-white px-3 py-2.5">
-        <div className="flex items-center justify-between">
+        <div className="flex min-w-0 items-center justify-between gap-2">
           {/* Left: Logo + Gateway Title */}
-          <Link href={`${portalBase}/dashboard`} className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {onMenuOpen && <button type="button" onClick={onMenuOpen} aria-label="Open navigation menu" aria-haspopup="dialog" className="grid size-10 shrink-0 place-items-center rounded-lg bg-white/15 hover:bg-white/25"><svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg></button>}
+          <Link href={`${portalBase}/dashboard`} className="flex min-w-0 items-center gap-1.5">
             <Image
               src="/logo/weKonnekLogov1.png"
               alt="WeKonnek Logo"
@@ -108,15 +111,16 @@ export default function MerchantHeader() {
               height={32}
               className="w-10 h-7 bg-white rounded-md p-0.5 object-contain"
             />
-            <div>
+            <div className="hidden min-[380px]:block">
               <p className="text-[8px] font-bold uppercase tracking-wider opacity-80 leading-tight">{isShopPortal ? 'Shop' : 'Merchant Admin'}</p>
               <p className="text-xs font-bold leading-tight">Gateway</p>
             </div>
           </Link>
+          </div>
 
           {/* Center: Business Type Badge */}
-          <div className="bg-white/20 rounded-full px-3 py-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider">{categoryLabel}{subcategoryLabel ? ` · ${subcategoryLabel}` : ''}</span>
+          <div className="min-w-0 flex-1 rounded-full bg-white/20 px-2.5 py-1 text-center">
+            <span className="block truncate text-[9px] font-bold uppercase tracking-wide">{categoryLabel}{subcategoryLabel ? ` · ${subcategoryLabel}` : ''}</span>
           </div>
 
           {/* Right: Store name + Actions */}
@@ -136,7 +140,7 @@ export default function MerchantHeader() {
           <div className="flex items-center gap-2">
             {merchant?.logo_url ? (
               <Image
-                src={merchant.logo_url}
+                src={publicAssetUrl(merchant.logo_url)!}
                 alt={merchant?.name || 'Store'}
                 width={24}
                 height={24}

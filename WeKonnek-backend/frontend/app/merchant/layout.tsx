@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getToken, useRequireAuth } from "@/hooks/use-auth";
 import MerchantSidebar from "@/components/MerchantSidebar";
 import MerchantHeader from "@/components/MerchantHeader";
 import MerchantMobileBottomNav from "@/components/MerchantMobileBottomNav";
+import MerchantMobileSidebarDrawer from "@/components/MerchantMobileSidebarDrawer";
 import PortalBackButton from "@/components/PortalBackButton";
 import {
   hasPlatinumAccess,
@@ -30,6 +31,9 @@ function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useRequireAuth(["merchant"], "/merchant");
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const openMobileMenu = useCallback(() => setMobileMenuOpen(true), []);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
   const [subscription, setSubscription] = useState<MerchantSubscription | null>(
     null,
   );
@@ -104,16 +108,16 @@ function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <MerchantHeader />
-      <div className="flex">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50">
+      <MerchantHeader onMenuOpen={openMobileMenu} />
+      <div className="flex min-w-0">
         <div className="hidden lg:block">
           <MerchantSidebar
             subscriptionTier={subscription.tier}
             subscriptionActive={subscription.active}
           />
         </div>
-        <main className="flex-1 p-3 pb-20 lg:p-6 lg:pb-6">
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 lg:p-6 lg:pb-6">
           <PortalBackButton />
           {children}
         </main>
@@ -122,6 +126,13 @@ function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
         subscriptionTier={
           hasPlatinumAccess(subscription) ? "platinum" : "basic"
         }
+        onMore={openMobileMenu}
+      />
+      <MerchantMobileSidebarDrawer
+        open={mobileMenuOpen}
+        onClose={closeMobileMenu}
+        subscriptionTier={subscription.tier}
+        subscriptionActive={subscription.active}
       />
     </div>
   );
