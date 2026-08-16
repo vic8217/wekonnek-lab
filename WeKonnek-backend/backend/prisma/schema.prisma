@@ -34,6 +34,35 @@ model Category {
   @@map("categories")
 }
 
+model MediaAsset {
+  id                    String    @id @default(uuid()) @db.Uuid
+  mediaType             String    @map("media_type") @db.VarChar(50)
+  ownerType             String    @map("owner_type") @db.VarChar(50)
+  ownerId               String    @map("owner_id") @db.VarChar(100)
+  objectKey             String    @unique @map("object_key") @db.VarChar(500)
+  thumbnailKey          String?   @map("thumbnail_key") @db.VarChar(500)
+  url                   String    @db.VarChar(1000)
+  thumbnailUrl          String?   @map("thumbnail_url") @db.VarChar(1000)
+  mimeType              String    @map("mime_type") @db.VarChar(100)
+  width                 Int?
+  height                Int?
+  sizeBytes             Int?      @map("size_bytes")
+  thumbnailWidth        Int?      @map("thumbnail_width")
+  thumbnailHeight       Int?      @map("thumbnail_height")
+  thumbnailSizeBytes    Int?      @map("thumbnail_size_bytes")
+  status                String    @default("active") @db.VarChar(30)
+  createdById           String?   @map("created_by_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@index([ownerType, ownerId])
+  @@index([mediaType])
+  @@index([createdById])
+  @@index([deletedAt])
+  @@map("media_assets")
+}
+
 model SubCategory {
   id              Int      @id @default(autoincrement())
   categoryId      Int      @map("category_id")

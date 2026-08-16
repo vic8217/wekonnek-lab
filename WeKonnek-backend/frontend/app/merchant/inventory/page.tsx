@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { getToken } from "@/hooks/use-auth";
 import { Category, Product, categoriesApi, productsApi } from "@/lib/api";
 import ProductCsvTools from "@/components/ProductCsvTools";
+import { publicAssetUrl } from "@/lib/public-asset-url";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 const STATUSES = ["Available", "Unavailable", "Draft", "Archived"];
@@ -382,19 +383,11 @@ function variantLabel(product: Product) {
 }
 
 function mediaUrl(value?: string) {
-  if (!value) return "";
-  if (value.startsWith("/api/uploads/")) return `${API}${value}`;
-  if (value.startsWith("/uploads/")) return `${API}/api${value}`;
-  if (!/^https?:\/\//i.test(value)) return `${API}/api/uploads/${value.replace(/^\/+/, "")}`;
-  try {
-    const url = new URL(value);
-    if (url.pathname.startsWith("/uploads/")) url.pathname = `/api${url.pathname}`;
-    return url.toString();
-  } catch { return value; }
+  return publicAssetUrl(value) || "";
 }
 
 function ProductThumbnail({ product }: { product: Product }) {
-  const candidates = [product.imageUrl, ...(product.variants || []).map(variant => variant.imageUrl)].map(mediaUrl).filter(Boolean);
+  const candidates = [product.thumbnailUrl, product.imageUrl, ...(product.variants || []).map(variant => variant.imageUrl)].map(mediaUrl).filter(Boolean);
   const [index, setIndex] = useState(0);
   const src = candidates[index];
   return <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-gray-100">

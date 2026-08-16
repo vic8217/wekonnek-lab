@@ -114,14 +114,14 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
     try {
       let imageUrl = preview || undefined;
       if (fileRef.current?.files?.[0]) {
-        imageUrl = await uploadApi.uploadFile(fileRef.current.files[0], 'establishment');
+        imageUrl = await uploadApi.uploadFile(fileRef.current.files[0], 'product');
         draftPreview = imageUrl;
         setPreview(imageUrl);
       }
       const savedNotes = await Promise.all(notes.filter(note => note.title.trim() || note.text.trim()).map(async note => ({
         title: note.title.trim(),
         text: note.text.trim() || undefined,
-        iconUrl: note.iconFile ? await uploadApi.uploadFile(note.iconFile, 'establishment') : note.iconUrl || undefined,
+        iconUrl: note.iconFile ? await uploadApi.uploadFile(note.iconFile, 'product') : note.iconUrl || undefined,
       })));
       const payload: CreateProductData = {
         name: form.name, description: form.description || undefined, notes: savedNotes, brand: form.brand || undefined,

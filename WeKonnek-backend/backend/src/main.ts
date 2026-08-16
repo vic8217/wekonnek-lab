@@ -17,12 +17,11 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Serve static files from uploads directory
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
-    // UploadService returns /api/uploads URLs, so the public static route must
-    // use the same prefix (static middleware is not affected by setGlobalPrefix).
-    prefix: '/api/uploads',
-  });
+  // Legacy read compatibility only. New uploads always use object storage.
+  // Both historical URL shapes remain readable without moving local files.
+  for (const prefix of ['/uploads', '/api/uploads']) {
+    app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix });
+  }
 
   // Global exception filter — consistent JSON error responses
   app.useGlobalFilters(new AllExceptionsFilter());

@@ -54,3 +54,5 @@ Thumbs.db
 # --------docs upload----------
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/uploads/temp/
+*.log

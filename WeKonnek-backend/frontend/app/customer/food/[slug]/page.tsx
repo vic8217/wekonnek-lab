@@ -272,7 +272,7 @@ export default function StoreDetailPage() {
                 >
                   {product.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
+                    <img src={product.thumbnailUrl || product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-[#DB0002]/10 to-orange-50 flex items-center justify-center">
                       <span className="text-2xl">{PRODUCT_EMOJIS[idx % PRODUCT_EMOJIS.length]}</span>

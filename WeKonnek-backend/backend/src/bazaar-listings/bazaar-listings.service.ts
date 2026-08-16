@@ -3,10 +3,11 @@ import { PrismaService } from '../prisma';
 import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
 import { WalletPaymentGateway } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { MediaService } from '../modules/media/media.service';
 
 @Injectable()
 export class BazaarListingsService {
-  constructor(private readonly prisma: PrismaService, private readonly payments: PaymentGatewayService) {}
+  constructor(private readonly prisma: PrismaService, private readonly payments: PaymentGatewayService, private readonly media: MediaService) {}
 
   async createDraft(userId: string, body: any) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -150,7 +151,9 @@ export class BazaarListingsService {
     const ids = [...new Set(rows.map(row => row.subCategoryId))];
     const categories = await this.prisma.merchantSubCategory.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     const names = new Map(categories.map(item => [item.id, item.name]));
-    return rows.map(row => ({ ...row, subCategoryName: names.get(row.subCategoryId) || 'Unknown' }));
+    const urls = rows.flatMap(row => Array.isArray((row as any).imageUrls) ? (row as any).imageUrls.filter((url: unknown): url is string => typeof url === 'string') : []);
+    const thumbnails = await this.media.thumbnailMap(urls);
+    return rows.map(row => ({ ...row, subCategoryName: names.get(row.subCategoryId) || 'Unknown', thumbnailUrls: Array.isArray((row as any).imageUrls) ? (row as any).imageUrls.map((url: string) => thumbnails.get(url) || url) : [] }));
   }
 
   private async owned(userId: string, id: string) {

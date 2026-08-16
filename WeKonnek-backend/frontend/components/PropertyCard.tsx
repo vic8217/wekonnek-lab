@@ -5,7 +5,7 @@ import type { PropertyListing } from '@/lib/property';
 const money = (value: string|number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(Number(value));
 
 export default function PropertyCard({ listing }: { listing: PropertyListing }) {
-  const image = listing.images?.[0]?.imageUrl;
+  const image = listing.images?.[0]?.thumbnailUrl || listing.images?.[0]?.imageUrl;
   return <Link href={`/property/${listing.slug || listing.id}`} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
     <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">{image ? <img src={image} alt={listing.title} className="size-full object-cover transition duration-500 group-hover:scale-105"/> : <div className="flex size-full items-center justify-center text-slate-300"><Building2 size={52}/></div>}
       <span className="absolute left-3 top-3 rounded-full bg-slate-950/85 px-3 py-1 text-[11px] font-black text-white">{listing.transactionType === 'FOR_RENT' ? 'FOR RENT' : 'FOR SALE'}</span>

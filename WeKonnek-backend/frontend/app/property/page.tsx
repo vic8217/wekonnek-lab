@@ -334,7 +334,7 @@ export default function PropertyPage() {
                   <div className="relative size-24 shrink-0 overflow-hidden rounded-xl bg-slate-100 md:aspect-[4/3] md:h-auto md:w-full md:rounded-none xl:size-24 xl:rounded-xl">
                     {item.images?.[0]?.imageUrl ? (
                       <img
-                        src={item.images[0].imageUrl}
+                        src={item.images[0].thumbnailUrl || item.images[0].imageUrl}
                         alt={item.title}
                         className="size-full object-cover"
                       />

@@ -11,10 +11,8 @@ export interface ImageUploadOptions {
 
 const DEFAULT_ACCEPT = [
   'image/jpeg',
-  'image/jpg',
   'image/png',
   'image/webp',
-  'image/gif',
 ];
 
 export async function uploadImage(
@@ -39,6 +37,7 @@ export async function uploadImage(
   formData.append('file', file);
   if (options.bucket) formData.append('bucket', options.bucket);
   if (options.folder) formData.append('folder', options.folder);
+  formData.append('type', 'category');
 
   const token = getToken();
   const res = await fetch(`${API}/api/upload`, {

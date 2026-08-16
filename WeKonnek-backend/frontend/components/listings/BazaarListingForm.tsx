@@ -92,7 +92,7 @@ export default function BazaarListingForm({ displayMode='pwa', mode='create', li
       const data = new FormData(form);
       const uploadData = new FormData();
       photos.forEach(photo => { if(photo.file) uploadData.append('files', photo.file); });
-      uploadData.append('type', 'document');
+      uploadData.append('type', 'bazaar');
       let uploadedUrls:string[]=[];
       if(photos.some(photo=>photo.file)){
         const uploadResponse = await fetch('/api/backend/upload/multiple', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: uploadData });

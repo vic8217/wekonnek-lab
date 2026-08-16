@@ -362,10 +362,11 @@ export default function MerchantProfilePage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('type', type === 'banner' ? 'establishment' : 'establishment');
+      formData.append('type', type);
 
       const response = await fetch('/api/backend/upload', {
         method: 'POST',
+        headers: { Authorization: `Bearer ${sessionStorage.getItem('wk_merchant_token') || localStorage.getItem('wk_token') || ''}` },
         body: formData,
       });
 

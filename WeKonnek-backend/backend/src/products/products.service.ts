@@ -4,6 +4,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { productTypesForCategory } from './product-types';
 import { operationState } from '../branches/branch-operation';
+import { MediaService } from '../modules/media/media.service';
 
 /** Add snake_case aliases so the storefront and merchant inventory read consistently. */
 function serializeProduct<T extends Record<string, any> | null>(product: T): T {
@@ -32,7 +33,7 @@ function serializeProduct<T extends Record<string, any> | null>(product: T): T {
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly media: MediaService) {}
 
   private async assertCategoryAccess(merchantId: number, categoryId?: number | null, subCategoryId?: number | null) {
     if (!categoryId) {
@@ -140,7 +141,8 @@ export class ProductsService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return products.map(serializeProduct);
+    const thumbnails = await this.media.thumbnailMap(products.map(product => product.imageUrl));
+    return products.map(product => ({ ...serializeProduct(product), thumbnailUrl: product.imageUrl ? thumbnails.get(product.imageUrl) || product.imageUrl : null }));
   }
 
   async findForShop(merchantId: number, shopId: number) {
@@ -219,7 +221,8 @@ export class ProductsService {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
 
-    return serializeProduct(product);
+    const thumbnails = await this.media.thumbnailMap([product.imageUrl]);
+    return { ...serializeProduct(product), thumbnailUrl: product.imageUrl ? thumbnails.get(product.imageUrl) || product.imageUrl : null };
   }
 
   async update(id: number, updateProductDto: UpdateProductDto, merchantId: number) {

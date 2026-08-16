@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { getToken } from "@/hooks/use-auth";
 import { propertyApi, type PropertyListing } from "@/lib/property";
 import { listerTypeLabel } from "@/lib/property-classification";
+import { publicAssetUrl } from "@/lib/public-asset-url";
 
 type BazaarListing = {
   id: string;
@@ -14,6 +15,7 @@ type BazaarListing = {
   status: string;
   subCategoryName: string;
   imageUrls: string[];
+  thumbnailUrls?: string[];
 };
 export default function MyListingsPage() {
   const router = useRouter(),
@@ -78,7 +80,7 @@ export default function MyListingsPage() {
             <article key={item.id} className="rounded-xl border bg-white p-4">
               <div className="flex gap-3">
                 <img
-                  src={item.imageUrls?.[0] || ""}
+                  src={publicAssetUrl(item.thumbnailUrls?.[0] || item.imageUrls?.[0]) || ""}
                   alt=""
                   className="size-16 rounded-lg bg-slate-100 object-cover"
                 />

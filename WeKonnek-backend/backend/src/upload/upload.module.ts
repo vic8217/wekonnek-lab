@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { UploadController } from './upload.controller';
-import { UploadService } from './upload.service';
+import { MediaModule } from '../modules/media/media.module';
 
+// Compatibility wrapper retained for AppModule and older module imports.
+// Upload routes and implementation are provided exclusively by MediaModule.
 @Module({
-  controllers: [UploadController],
-  providers: [UploadService],
-  exports: [UploadService],
+  imports: [MediaModule],
+  exports: [MediaModule],
 })
 export class UploadModule {}

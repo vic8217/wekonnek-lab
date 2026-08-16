@@ -46,7 +46,7 @@ export type PropertyListing = {
   expiresAt?: string;
   viewCount: number;
   propertyType: PropertyType;
-  images: { id: string; imageUrl: string; isPrimary: boolean }[];
+  images: { id: string; imageUrl: string; thumbnailUrl?: string; isPrimary: boolean }[];
   owner?: {
     id: string;
     firstName?: string;

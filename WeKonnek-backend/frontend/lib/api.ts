@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getToken } from "@/hooks/use-auth";
 
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
@@ -309,6 +310,7 @@ export interface Product {
   price: number;
   quantity: number;
   imageUrl?: string;
+  thumbnailUrl?: string;
   isAvailable: boolean;
   lowStockThreshold?: number;
   categoryId?: number;
@@ -692,43 +694,43 @@ export const staffPostsApi = {
 export const uploadApi = {
   uploadFile: async (
     file: File,
-    type: "establishment" | "authorized-person" | "document" | "review",
+    type: "establishment" | "authorized-person" | "document" | "review" | "product" | "menu" | "logo" | "banner" | "bazaar" | "property" | "profile" | "category",
   ): Promise<string> => {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
     const formData = new FormData();
     formData.append("file", file);
     formData.append("type", type);
 
-    const uploadUrl =
-      typeof window !== "undefined"
-        ? "/api/backend/upload"
-        : `${API_BASE_URL}/upload`;
-    const response = await axios.post(uploadUrl, formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+    const response = await fetch('/api/backend/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
     });
-    return response.data.url;
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.message || 'Unable to upload file');
+    return body.url;
   },
   uploadMultipleFiles: async (
     files: File[],
     type: "document",
   ): Promise<string[]> => {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
     const formData = new FormData();
     files.forEach((file) => {
       formData.append("files", file);
     });
     formData.append("type", type);
 
-    const uploadUrl =
-      typeof window !== "undefined"
-        ? "/api/backend/upload/multiple"
-        : `${API_BASE_URL}/upload/multiple`;
-    const response = await axios.post(uploadUrl, formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+    const response = await fetch('/api/backend/upload/multiple', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
     });
-    return response.data.urls;
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.message || 'Unable to upload files');
+    return body.urls;
   },
 };
 

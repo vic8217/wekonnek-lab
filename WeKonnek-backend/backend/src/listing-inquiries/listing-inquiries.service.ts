@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma';
+import { MediaService } from '../modules/media/media.service';
 
 type InquiryType = 'BAZAAR' | 'PROPERTY';
 
 @Injectable()
 export class ListingInquiriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly media: MediaService) {}
 
   async summary(userId: string) {
     await Promise.all([
@@ -37,10 +38,14 @@ export class ListingInquiriesService {
     return Promise.all(rows.map(async (row: any) => {
       if (row.listingType === 'BAZAAR') {
         const listing = await this.prisma.bazaarListing.findUnique({ where: { id: row.listingId }, select: { id: true, title: true, status: true, imageUrls: true } });
-        return { ...row, listing };
+        const imageUrls = Array.isArray(listing?.imageUrls) ? listing.imageUrls.filter((url): url is string => typeof url === 'string') : [];
+        const thumbnails = await this.media.thumbnailMap(imageUrls);
+        return { ...row, listing: listing ? { ...listing, imageUrls, thumbnailUrls: imageUrls.map(url => thumbnails.get(url) || url) } : null };
       }
       const listing = await this.prisma.propertyListing.findUnique({ where: { id: row.listingId }, select: { id: true, title: true, listingStatus: true, images: { take: 1, orderBy: { sortOrder: 'asc' } } } });
-      return { ...row, listing: listing ? { ...listing, status: listing.listingStatus, imageUrls: listing.images.map(image => image.imageUrl) } : null };
+      const imageUrls = listing?.images.map(image => image.imageUrl) || [];
+      const thumbnails = await this.media.thumbnailMap(imageUrls);
+      return { ...row, listing: listing ? { ...listing, status: listing.listingStatus, imageUrls, thumbnailUrls: imageUrls.map(url => thumbnails.get(url) || url) } : null };
     }));
   }
 

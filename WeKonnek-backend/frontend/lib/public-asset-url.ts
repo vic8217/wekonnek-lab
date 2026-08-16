@@ -5,15 +5,14 @@
  */
 export function publicAssetUrl(value?: string | null): string | undefined {
   if (!value) return undefined;
+  const proxyLegacyPath = (pathname: string, search = '') => {
+    const match = pathname.match(/^\/(?:api\/)?uploads\/(.+)$/);
+    return match ? `/api/backend/uploads/${match[1]}${search}` : undefined;
+  };
   try {
     const url = new URL(value);
-    if (url.pathname.startsWith("/api/uploads/")) {
-      return `/api/backend/uploads/${url.pathname.slice("/api/uploads/".length)}${url.search}`;
-    }
+    return proxyLegacyPath(url.pathname, url.search) || value;
   } catch {
-    if (value.startsWith("/api/uploads/")) {
-      return `/api/backend/uploads/${value.slice("/api/uploads/".length)}`;
-    }
+    return proxyLegacyPath(value) || value;
   }
-  return value;
 }

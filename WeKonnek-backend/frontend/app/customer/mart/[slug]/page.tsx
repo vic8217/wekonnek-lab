@@ -242,7 +242,7 @@ export default function MartStoreDetailPage() {
                   <div className="aspect-square relative overflow-hidden">
                     {product.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
+                      <img src={product.thumbnailUrl || product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-gradient-to-br from-emerald-50 to-teal-50 flex items-center justify-center">
                         <span className="text-4xl">{PRODUCT_EMOJIS[idx % PRODUCT_EMOJIS.length]}</span>

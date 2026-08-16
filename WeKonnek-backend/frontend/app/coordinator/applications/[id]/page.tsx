@@ -178,7 +178,13 @@ export default function CoordinatorMerchantReviewPage() {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('type', 'document');
-    const response = await fetch('/api/backend/upload', { method: 'POST', body: formData });
+    const token = getToken();
+    if (!token) throw new Error('Your session has expired. Please sign in again.');
+    const response = await fetch('/api/backend/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
     const body = await readResponseBody(response);
     if (!response.ok) throw new Error(body.message || 'Document upload failed');
     return String(body.url);

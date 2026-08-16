@@ -14,6 +14,7 @@ import {
 } from "@prisma/client";
 import { PrismaService } from "../prisma";
 import { PaymentGatewayService } from "../modules/wallet/payment-gateway.service";
+import { MediaService } from "../modules/media/media.service";
 
 const PUBLIC = [PropertyListingStatus.ACTIVE, PropertyListingStatus.RESERVED];
 const REPORT_REASONS = [
@@ -31,6 +32,7 @@ export class PropertyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly payments: PaymentGatewayService,
+    private readonly media: MediaService,
   ) {}
 
   async types(includeInactive = false) {
@@ -121,8 +123,10 @@ export class PropertyService {
     const lat = Number(q.latitude),
       lng = Number(q.longitude),
       distance = Number(q.distance);
+    const thumbnails = await this.media.thumbnailMap(rows.flatMap(row => row.images.map(image => image.imageUrl)));
     const mapped = rows.map((row) => ({
       ...row,
+      images: row.images.map(image => ({ ...image, thumbnailUrl: thumbnails.get(image.imageUrl) || image.imageUrl })),
       distanceKm:
         Number.isFinite(lat) &&
         Number.isFinite(lng) &&
