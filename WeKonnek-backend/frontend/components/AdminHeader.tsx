@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import Link from 'next/link';
 import Image from 'next/image';
 import ChangePasswordModal from './ChangePasswordModal';
+import NotificationInboxBell from './NotificationInboxBell';
 
 export default function AdminHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   const { user: authUser, signOut } = useAuth();
@@ -57,6 +58,7 @@ export default function AdminHeader({ onMenuClick }: { onMenuClick?: () => void 
           </Link>
         </div>
         <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
+          <NotificationInboxBell />
           <div className="relative settings-button">
             <button
               onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}

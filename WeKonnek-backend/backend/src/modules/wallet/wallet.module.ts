@@ -3,9 +3,10 @@ import { ConfigModule } from '@nestjs/config';
 import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';
 import { PaymentGatewayService } from './payment-gateway.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, NotificationsModule],
   controllers: [WalletController],
   providers: [WalletService, PaymentGatewayService],
   exports: [WalletService, PaymentGatewayService],

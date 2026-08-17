@@ -133,6 +133,7 @@ export class ReservationsService {
               kind: 'new_booking',
               reservationId: String(reservation.id),
               reservationCode: reservation.reservationCode,
+              url: '/merchant/reservations',
             },
           })
           .catch(() => undefined);
@@ -200,6 +201,15 @@ export class ReservationsService {
       data: { status },
       include: { merchant: { include: { category: true } } },
     });
+    if (existing.status !== status && ['confirmed', 'rejected', 'cancelled'].includes(status)) {
+      await this.notifications.notify({
+        userId: existing.userId,
+        title: status === 'confirmed' ? 'Reservation confirmed' : 'Reservation not accepted',
+        body: `${r.reservationCode} was ${status}.`,
+        type: NotificationType.system,
+        data: { kind: `reservation_${status}`, reservationId: String(r.id), url: '/customer/orders?tab=reservations' },
+      }).catch(() => undefined);
+    }
     return serializeReservation(r);
   }
 }

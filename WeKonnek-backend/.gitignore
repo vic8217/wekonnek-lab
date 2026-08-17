@@ -50,6 +50,9 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 *.pem
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
 
 # --------docs upload----------
 backend/uploads/*

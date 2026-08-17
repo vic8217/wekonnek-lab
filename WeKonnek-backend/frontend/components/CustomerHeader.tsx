@@ -8,6 +8,7 @@ import Link from 'next/link';
 import ChangePasswordModal from './ChangePasswordModal';
 import VoiceSearchButton from './VoiceSearchButton';
 import { getTotalCartCount, getActiveCartMerchantIds, onCartChange } from '@/lib/cart';
+import NotificationInboxBell from './NotificationInboxBell';
 
 export default function CustomerHeader({
   hideMobileSearch = false,
@@ -78,6 +79,7 @@ export default function CustomerHeader({
               </span>
             </Link>
             <div className="flex items-center">
+              {authUser && <NotificationInboxBell />}
               {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
                 <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
@@ -149,6 +151,7 @@ export default function CustomerHeader({
           <div className="flex items-center space-x-4">
             {authUser ? (
               <>
+                <NotificationInboxBell />
                 <div className="relative settings-button">
                   <button
                     onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}

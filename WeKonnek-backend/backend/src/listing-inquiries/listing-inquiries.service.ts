@@ -1,12 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma';
 import { MediaService } from '../modules/media/media.service';
+import { NotificationsService } from '../modules/notifications/notifications.service';
+import { NotificationType } from '@prisma/client';
 
 type InquiryType = 'BAZAAR' | 'PROPERTY';
 
 @Injectable()
 export class ListingInquiriesService {
-  constructor(private readonly prisma: PrismaService, private readonly media: MediaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly media: MediaService, private readonly notifications: NotificationsService) {}
 
   async summary(userId: string) {
     await Promise.all([
@@ -58,7 +60,15 @@ export class ListingInquiriesService {
       : (await this.prisma.propertyListing.findFirst({ where: { id: listingId, listingStatus: { in: ['ACTIVE', 'RESERVED'] } }, select: { ownerId: true } }))?.ownerId;
     if (!ownerId) throw new NotFoundException('Listing not found');
     if (ownerId === userId) throw new BadRequestException('You cannot inquire about your own listing');
-    return (this.prisma as any).listingInquiry.create({ data: { listingId, listingType: type, listingOwnerId: ownerId, inquirerId: userId, message } });
+    const inquiry = await (this.prisma as any).listingInquiry.create({ data: { listingId, listingType: type, listingOwnerId: ownerId, inquirerId: userId, message } });
+    await this.notifications.notify({
+      userId: ownerId,
+      title: `New ${type === 'BAZAAR' ? 'Bazaar' : 'Property'} inquiry`,
+      body: 'Someone sent an inquiry about your listing.',
+      type: NotificationType.system,
+      data: { kind: `${type.toLowerCase()}_inquiry`, inquiryId: String(inquiry.id), listingId, url: '/my/inquiries' },
+    }).catch(() => undefined);
+    return inquiry;
   }
 
   async markRead(userId: string, id: string) {

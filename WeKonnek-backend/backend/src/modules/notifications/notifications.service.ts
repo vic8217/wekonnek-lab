@@ -1,289 +1,78 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../prisma/prisma.service';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Notification, NotificationType } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { FirebasePushService, safeInternalPath } from './firebase-push.service';
 
-interface PushNotification {
-  token: string;
-  title: string;
-  body: string;
-  data?: Record<string, string>;
-}
+type NotifyInput = { userId: string; title: string; body: string; type?: NotificationType; data?: Record<string, string>; orderId?: string };
 
 @Injectable()
-export class NotificationsService implements OnModuleInit {
-  private readonly logger = new Logger(NotificationsService.name);
-  private firebaseApp: any = null;
+export class NotificationsService {
+  constructor(private readonly prisma: PrismaService, private readonly firebase: FirebasePushService) {}
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
-
-  onModuleInit() {
-    const projectId = this.config.get<string>('FIREBASE_PROJECT_ID');
-    const privateKey = this.config.get<string>('FIREBASE_PRIVATE_KEY');
-    const clientEmail = this.config.get<string>('FIREBASE_CLIENT_EMAIL');
-
-    if (!projectId || !privateKey || !clientEmail) {
-      this.logger.warn(
-        'Firebase credentials not set — push notifications disabled. ' +
-          'Set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in .env',
-      );
-      return;
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const admin = require('firebase-admin');
-
-      if (!admin.apps.length) {
-        this.firebaseApp = admin.initializeApp({
-          credential: admin.credential.cert({
-            projectId,
-            privateKey: privateKey.replace(/\\n/g, '\n'),
-            clientEmail,
-          }),
-        });
-        this.logger.log('Firebase Admin SDK initialized successfully');
-      } else {
-        this.firebaseApp = admin.app();
-      }
-    } catch (err) {
-      this.logger.error(
-        `Failed to initialize Firebase Admin SDK: ${err.message}`,
-      );
-    }
-  }
-
-  // ═══════════════════════════════════════════════════
-  //  PERSISTENCE (in-app notification inbox)
-  // ═══════════════════════════════════════════════════
-
-  async createNotification(data: {
-    userId: string;
-    title: string;
-    body: string;
-    type?: NotificationType;
-    data?: Record<string, string>;
-    orderId?: string;
-  }): Promise<Notification> {
-    return this.prisma.notification.create({
-      data: {
-        userId: data.userId,
-        title: data.title,
-        body: data.body,
-        type: data.type ?? NotificationType.system,
-        data: data.data ?? undefined,
-        orderId: data.orderId,
-      },
+  async registerDevice(userId: string, input: { fcmToken: string; platform?: string; deviceName?: string; browser?: string; operatingSystem?: string }) {
+    const token = input.fcmToken?.trim();
+    if (!token || token.length < 20 || token.length > 4096) throw new BadRequestException('A valid push token is required');
+    const device = await this.prisma.pushDevice.upsert({
+      where: { fcmToken: token },
+      create: { userId, fcmToken: token, platform: input.platform || 'web', deviceName: input.deviceName, browser: input.browser, operatingSystem: input.operatingSystem },
+      update: { userId, platform: input.platform || 'web', deviceName: input.deviceName, browser: input.browser, operatingSystem: input.operatingSystem, isActive: true, lastSeenAt: new Date() },
     });
+    return { id: device.id, platform: device.platform, deviceName: device.deviceName, browser: device.browser, operatingSystem: device.operatingSystem, isActive: device.isActive, lastSeenAt: device.lastSeenAt, createdAt: device.createdAt };
   }
 
-  async getForUser(
-    userId: string,
-    opts: { limit?: number; offset?: number; unreadOnly?: boolean },
-  ): Promise<{ data: Notification[]; total: number; unreadCount: number }> {
-    const where: any = { userId };
-    if (opts.unreadOnly) where.isRead = false;
+  getDevices(userId: string) {
+    return this.prisma.pushDevice.findMany({ where: { userId, isActive: true }, select: { id: true, platform: true, deviceName: true, browser: true, operatingSystem: true, lastSeenAt: true, createdAt: true }, orderBy: { lastSeenAt: 'desc' } });
+  }
 
+  async deactivateCurrentDevice(userId: string, fcmToken: string) {
+    if (!fcmToken) throw new BadRequestException('Push token is required');
+    const result = await this.prisma.pushDevice.updateMany({ where: { userId, fcmToken, isActive: true }, data: { isActive: false, lastSeenAt: new Date() } });
+    return { deactivated: result.count };
+  }
+
+  createNotification(data: NotifyInput): Promise<Notification> {
+    return this.prisma.notification.create({ data: { userId: data.userId, title: data.title, body: data.body, type: data.type ?? NotificationType.system, data: data.data, orderId: data.orderId } });
+  }
+
+  async getForUser(userId: string, opts: { limit?: number; offset?: number; unreadOnly?: boolean }) {
+    const limit = Math.max(1, Math.min(100, opts.limit ?? 30));
+    const offset = Math.max(0, opts.offset ?? 0);
+    const where = { userId, ...(opts.unreadOnly ? { isRead: false } : {}) };
     const [data, total, unreadCount] = await Promise.all([
-      this.prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: opts.limit ?? 30,
-        skip: opts.offset ?? 0,
-      }),
+      this.prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit, skip: offset }),
       this.prisma.notification.count({ where }),
-      this.prisma.notification.count({
-        where: { userId, isRead: false },
-      }),
+      this.prisma.notification.count({ where: { userId, isRead: false } }),
     ]);
-
-    return { data, total, unreadCount };
+    return { data, total, unreadCount, limit, offset };
   }
 
-  async getUnreadCount(userId: string): Promise<{ count: number }> {
-    const count = await this.prisma.notification.count({
-      where: { userId, isRead: false },
-    });
-    return { count };
-  }
+  async getUnreadCount(userId: string) { return { count: await this.prisma.notification.count({ where: { userId, isRead: false } }) }; }
 
-  async markAsRead(id: string): Promise<Notification> {
-    return this.prisma.notification.update({
-      where: { id },
-      data: { isRead: true },
-    });
-  }
-
-  async markAllAsRead(userId: string): Promise<{ updated: number }> {
-    const result = await this.prisma.notification.updateMany({
-      where: { userId, isRead: false },
-      data: { isRead: true },
-    });
+  async markAsRead(userId: string, id: string) {
+    const result = await this.prisma.notification.updateMany({ where: { id, userId }, data: { isRead: true } });
     return { updated: result.count };
   }
 
-  // ═══════════════════════════════════════════════════
-  //  PUSH (Firebase Cloud Messaging)
-  // ═══════════════════════════════════════════════════
-
-  async sendPushNotification(notification: PushNotification): Promise<void> {
-    if (!this.firebaseApp) {
-      this.logger.debug(
-        `[DEV] Push skipped (Firebase not configured): [${notification.title}] ${notification.body}`,
-      );
-      return;
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const admin = require('firebase-admin');
-      await admin.messaging().send({
-        token: notification.token,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        data: notification.data ?? {},
-        android: {
-          priority: 'high',
-          notification: {
-            sound: 'default',
-            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-          },
-        },
-        apns: {
-          payload: { aps: { sound: 'default', badge: 1 } },
-        },
-      });
-      this.logger.log(
-        `Push sent to ${notification.token.substring(0, 20)}...`,
-      );
-    } catch (error) {
-      this.logger.error(`Push notification failed: ${error.message}`);
-    }
+  async markAllAsRead(userId: string) {
+    const result = await this.prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+    return { updated: result.count };
   }
 
-  async sendToMultiple(
-    tokens: string[],
-    title: string,
-    body: string,
-    data?: Record<string, string>,
-  ): Promise<void> {
-    await Promise.all(
-      tokens.map((token) =>
-        this.sendPushNotification({ token, title, body, data }),
-      ),
-    );
+  async notify(params: NotifyInput): Promise<Notification> {
+    const notification = await this.createNotification(params);
+    await this.deliver(params).catch(() => undefined);
+    return notification;
   }
 
-  // ═══════════════════════════════════════════════════
-  //  COMBINED — persist + push in one call
-  // ═══════════════════════════════════════════════════
-
-  async notify(params: {
-    userId: string;
-    fcmToken?: string;
-    title: string;
-    body: string;
-    type?: NotificationType;
-    data?: Record<string, string>;
-    orderId?: string;
-  }): Promise<Notification> {
-    const notif = await this.createNotification({
-      userId: params.userId,
-      title: params.title,
-      body: params.body,
-      type: params.type,
-      data: params.data,
-      orderId: params.orderId,
-    });
-
-    if (params.fcmToken) {
-      await this.sendPushNotification({
-        token: params.fcmToken,
-        title: params.title,
-        body: params.body,
-        data: params.data,
-      });
-    }
-
-    return notif;
+  notifyUsers(userIds: string[], input: Omit<NotifyInput, 'userId'>) {
+    return Promise.all([...new Set(userIds)].map(userId => this.notify({ ...input, userId })));
   }
 
-  // ═══════════════════════════════════════════════════
-  //  CONVENIENCE METHODS (order lifecycle)
-  // ═══════════════════════════════════════════════════
-
-  async notifyOrderPlaced(
-    userId: string,
-    fcmToken: string,
-    orderNumber: string,
-    orderId: string,
-  ) {
-    return this.notify({
-      userId,
-      fcmToken,
-      title: 'Order Placed!',
-      body: `Your order ${orderNumber} has been placed successfully.`,
-      type: NotificationType.order_update,
-      data: { type: 'order_placed', orderNumber },
-      orderId,
-    });
-  }
-
-  async notifyRiderAssigned(
-    userId: string,
-    fcmToken: string,
-    orderNumber: string,
-    riderName: string,
-    orderId: string,
-  ) {
-    return this.notify({
-      userId,
-      fcmToken,
-      title: 'Rider On The Way!',
-      body: `${riderName} is heading to pick up your order ${orderNumber}.`,
-      type: NotificationType.order_update,
-      data: { type: 'rider_assigned', orderNumber },
-      orderId,
-    });
-  }
-
-  async notifyOrderDelivered(
-    userId: string,
-    fcmToken: string,
-    orderNumber: string,
-    orderId: string,
-  ) {
-    return this.notify({
-      userId,
-      fcmToken,
-      title: 'Order Delivered!',
-      body: `Your order ${orderNumber} has been delivered. Enjoy!`,
-      type: NotificationType.order_update,
-      data: { type: 'order_delivered', orderNumber },
-      orderId,
-    });
-  }
-
-  async notifyNewDeliveryJob(
-    riderId: string,
-    fcmToken: string,
-    orderNumber: string,
-    storeName: string,
-    orderId: string,
-  ) {
-    return this.notify({
-      userId: riderId,
-      fcmToken,
-      title: 'New Delivery Job!',
-      body: `New delivery from ${storeName} (${orderNumber}). Accept now!`,
-      type: NotificationType.order_update,
-      data: { type: 'new_job', orderNumber },
-      orderId,
-    });
+  private async deliver(params: NotifyInput) {
+    const devices = await this.prisma.pushDevice.findMany({ where: { userId: params.userId, isActive: true }, select: { fcmToken: true } });
+    const data = Object.fromEntries(Object.entries(params.data || {}).map(([key, value]) => [key, String(value)]));
+    data.url = safeInternalPath(data.url);
+    const result = await this.firebase.send(devices.map(device => ({ token: device.fcmToken, title: params.title, body: params.body, data })));
+    if (result.invalidTokens.length) await this.prisma.pushDevice.updateMany({ where: { fcmToken: { in: result.invalidTokens } }, data: { isActive: false } });
   }
 }

@@ -4,14 +4,13 @@
 //   - Next.js static assets   → cache-first (immutable, content-hashed)
 //   - Other same-origin GET   → stale-while-revalidate
 //   - /api/ GET               → network-first (offline → cache → JSON error)
-const CACHE_NAME = 'wekonnek-v6';
-const API_CACHE_NAME = 'wekonnek-api-v6';
+const CACHE_NAME = 'wekonnek-v7';
+const API_CACHE_NAME = 'wekonnek-api-v7';
 
 // Minimal app shell. Kept small & resilient so one missing file can't break install.
 const PRECACHE_URLS = [
   '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/images/weKonnekLogov1.png',
   '/favicon.ico',
   '/logo/weKonnekLogov1.png',
 ];
@@ -47,6 +46,36 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function safeNotificationPath(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+  try { const url = new URL(value, self.location.origin); return url.origin === self.location.origin ? `${url.pathname}${url.search}${url.hash}` : '/'; }
+  catch { return '/'; }
+}
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = { notification: { title: 'WeKonnek', body: event.data?.text() || 'You have a new notification.' } }; }
+  const notification = payload.notification || {};
+  const data = payload.data || {};
+  event.waitUntil(self.registration.showNotification(notification.title || 'WeKonnek', {
+    body: notification.body || 'You have a new notification.',
+    icon: '/images/weKonnekLogov1.png',
+    badge: '/images/weKonnekLogov1.png',
+    data: { url: safeNotificationPath(data.url) },
+    tag: payload.fcmMessageId || data.notificationId || undefined,
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = safeNotificationPath(event.notification.data?.url);
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+    const existing = clients.find(client => new URL(client.url).origin === self.location.origin);
+    if (existing) { existing.navigate(target); return existing.focus(); }
+    return self.clients.openWindow(target);
+  }));
+});
+
 function isStaticAsset(url) {
   return (
     url.pathname.startsWith('/_next/static/') ||
@@ -75,6 +104,9 @@ self.addEventListener('fetch', (event) => {
 
   // ── API: network-first ──────────────────────────────
   if (url.pathname.startsWith('/api/')) {
+    // Never persist authenticated API responses in a shared browser cache.
+    // This prevents account A's private data from appearing after account B logs in.
+    if (request.headers.has('authorization')) return;
     event.respondWith(
       fetch(request)
         .then((response) => {
