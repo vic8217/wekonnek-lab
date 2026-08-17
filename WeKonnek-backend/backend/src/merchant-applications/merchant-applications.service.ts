@@ -8,6 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { computeExpiry } from '../subscriptions/subscription-plans';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
+import { NotificationType } from '@prisma/client';
+import { NotificationsService } from '../modules/notifications/notifications.service';
 
 function serializeApplication(a: any) {
   if (!a) return a;
@@ -123,7 +125,7 @@ function coverageMatchesApplication(
 
 @Injectable()
 export class MerchantApplicationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly notifications: NotificationsService) {}
 
   private async approvedCoordinator(user: { id: string; email?: string | null }) {
     const coordinator = await this.prisma.coordinatorApplication.findFirst({
@@ -688,6 +690,7 @@ export class MerchantApplicationsService {
         status: 'reviewing',
       },
     });
+    await this.notifications.notify({ userId: coordinatorUserId, title: 'Merchant application assigned', body: `${application.businessName} is ready for onboarding review.`, type: NotificationType.system, data: { kind: 'merchant_application_assigned', applicationId: String(id), url: `/coordinator/applications/${id}` } }).catch(() => undefined);
     return serializeApplication(updated);
   }
 
@@ -697,6 +700,7 @@ export class MerchantApplicationsService {
     if (!lead) throw new ForbiddenException('This merchant is outside your approved coverage area');
     if (lead.assigned_coordinator_id && lead.assigned_coordinator_id !== user.id) throw new BadRequestException('Merchant is already assigned');
     const updated = await this.prisma.merchantApplication.update({ where: { id }, data: { assignedCoordinatorId: user.id, assignedAt: new Date() } });
+    await this.notifications.notify({ userId: user.id, title: 'Merchant application claimed', body: `${updated.businessName} was added to your onboarding queue.`, type: NotificationType.system, data: { kind: 'merchant_application_claimed', applicationId: String(id), url: `/coordinator/applications/${id}` } }).catch(() => undefined);
     return serializeApplication(updated);
   }
 

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { getToken } from '@/hooks/use-auth';
+import { portalNotificationDestination, safeNotificationDestination } from '@/lib/notification-destination';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -64,6 +65,9 @@ function iconFor(type: string, kind?: string): { bg: string; color: string; path
 }
 
 function destinationFor(n: ApiNotification): string {
+  const supplied = n.data?.url;
+  const safe = safeNotificationDestination(supplied);
+  if (safe) return safe;
   const kind = n.data?.kind;
   if (n.type === 'inventory_alert' || kind === 'low_stock' || kind === 'out_of_stock') {
     return '/merchant/inventory?filter=low_stock';
@@ -75,6 +79,7 @@ function destinationFor(n: ApiNotification): string {
 
 export default function MerchantNotificationBell({ variant = 'dark' }: MerchantNotificationBellProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ApiNotification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -101,7 +106,12 @@ export default function MerchantNotificationBell({ variant = 'dark' }: MerchantN
   useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 45_000);
-    return () => clearInterval(interval);
+    const refresh = () => void fetchNotifications();
+    window.addEventListener('wk:notifications-updated', refresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('wk:notifications-updated', refresh);
+    };
   }, [fetchNotifications]);
 
   // Close on outside click
@@ -136,7 +146,8 @@ export default function MerchantNotificationBell({ variant = 'dark' }: MerchantN
         }).catch(() => undefined);
       }
     }
-    router.push(destinationFor(n));
+    const destination = destinationFor(n);
+    router.push(portalNotificationDestination(destination, pathname) || '/merchant/notifications');
   };
 
   const markAllRead = async () => {

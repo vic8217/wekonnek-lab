@@ -22,9 +22,9 @@ export default function MerchantsLayout({
   }, []);
 
   return (
-    <>
-      <div className={showNav ? 'pb-20 lg:pb-0' : ''}>{children}</div>
+    <div className="min-h-screen overflow-x-hidden">
+      <div className={`min-w-0 overflow-x-hidden ${showNav ? 'pb-20 lg:pb-0' : ''}`}>{children}</div>
       {showNav && <MobileBottomNav />}
-    </>
+    </div>
   );
 }

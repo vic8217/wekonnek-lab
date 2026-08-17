@@ -33,11 +33,11 @@ function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50">
       <AdminHeader onMenuClick={() => setSidebarOpen(true)} />
-      <div className="flex">
+      <div className="flex min-w-0">
         <AdminSidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <main className="flex-1 min-w-0 p-4 sm:p-6">
+        <main className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6">
           <PortalBackButton />
           {children}
         </main>

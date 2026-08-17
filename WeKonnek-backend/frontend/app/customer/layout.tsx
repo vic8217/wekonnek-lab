@@ -96,7 +96,7 @@ export default function CustomerLayout({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50">
       <div className={usesStandaloneDesktop ? "xl:hidden" : ""}>
         <CustomerHeader
           hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isCart || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
@@ -107,9 +107,9 @@ export default function CustomerLayout({
       {!isGuest && <OpenDineInTicketCard />}
 
       {/* Desktop layout: sidebar + main */}
-      <div className={usesStandaloneDesktop ? "hidden" : "hidden xl:flex"}>
+      <div className={usesStandaloneDesktop ? "hidden" : "hidden min-w-0 xl:flex"}>
         <CustomerSidebar />
-        <main className="flex-1 p-6">
+        <main className="min-w-0 flex-1 overflow-x-hidden p-6">
           {!isEditProfile && !isEReceipt && <PortalBackButton />}
           {children}
         </main>
@@ -120,8 +120,8 @@ export default function CustomerLayout({
       )}
 
       {/* Mobile layout: full width content + bottom nav */}
-      <div className="xl:hidden">
-        <main className="pb-20">
+      <div className="min-w-0 xl:hidden">
+        <main className="min-w-0 overflow-x-hidden pb-20">
           {!isMarketplaceCategory && !isEditProfile && !isCheckout && !isEReceipt && (
             <div className="px-4 pt-3 empty:hidden">
               <PortalBackButton />

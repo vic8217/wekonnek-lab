@@ -14,6 +14,7 @@ import { InvoicesService } from '../modules/invoices/invoices.service';
 import { DineInSyncService } from '../dine-in-crew/dine-in-sync.service';
 import { WalletPaymentGateway, NotificationType } from '@prisma/client';
 import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
+import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
 
 interface OrderItemInput {
   product_id?: number;
@@ -309,6 +310,9 @@ export class OrdersService {
               kind: 'new_order',
               orderId: String(created.id),
               orderCode: created.orderCode,
+              shopId: String(shop.id),
+              orderType: created.orderType,
+              url: merchantOrderNotificationUrl({ orderId: created.id, shopId: shop.id, orderType: created.orderType }),
             },
             orderId: String(created.id),
           })
@@ -508,6 +512,17 @@ export class OrdersService {
       }
     }
     if (['dine_in', 'in_store'].includes(existing.orderType)) await this.dineInSync.recordOrder(Number(id), status === 'completed' ? 'ORDER_COMPLETED' : 'ORDER_STATUS_CHANGED');
+    if (existing.userId && existing.status !== status) {
+      const customerStates: Record<string, { title: string; body: string }> = {
+        accepted: { title: 'Order accepted', body: `Order ${existing.orderCode} was accepted.` },
+        confirmed: { title: 'Order accepted', body: `Order ${existing.orderCode} was accepted.` },
+        preparing: { title: 'Order preparing', body: `Order ${existing.orderCode} is being prepared.` },
+        ready: { title: 'Order ready', body: `Order ${existing.orderCode} is ready.` },
+        cancelled: { title: 'Order cancelled', body: `Order ${existing.orderCode} was cancelled.` },
+      };
+      const message = customerStates[status];
+      if (message) await this.notifications.notify({ userId: existing.userId, ...message, type: NotificationType.order_update, orderId: String(existing.id), data: { kind: `order_${status}`, orderId: String(existing.id), url: `/customer/orders/${existing.id}` } }).catch(() => undefined);
+    }
     return serializeOrder(order);
   }
 
@@ -620,6 +635,8 @@ export class OrdersService {
 
     if (voucherId) await this.vouchers.redeem(voucherId, userId, String(id), discountAmount);
     await this.dineInSync.recordOrder(id, 'BILL_REQUESTED');
+    const billOutMerchant = await this.prisma.merchant.findUnique({ where: { id: existing.merchantId }, select: { userId: true } });
+    if (billOutMerchant?.userId) await this.notifications.notify({ userId: billOutMerchant.userId, title: 'Bill-out requested', body: `Order ${existing.orderCode} requested bill-out.`, type: NotificationType.order_update, orderId: String(id), data: { kind: 'bill_out_requested', orderId: String(id), ...(existing.shopId ? { shopId: String(existing.shopId), url: merchantOrderNotificationUrl({ orderId: id, shopId: existing.shopId, orderType: existing.orderType }) } : { url: '/merchant/orders?tab=in_store' }) } }).catch(() => undefined);
     return serializeOrder(updated);
   }
 
@@ -717,6 +734,8 @@ export class OrdersService {
     if (['bill_out', 'payment_pending', 'completed', 'cancelled'].includes(order.status)) throw new BadRequestException('Service requests are closed for this ticket');
     const request = await this.prisma.dineInServiceRequest.create({ data: { orderId, shopId: order.shopId, requestedByUserId: userId, type, details } });
     await this.dineInSync.record(order.shopId, 'SERVICE_REQUEST_CREATED', request.id, { serviceRequest: this.serializeServiceRequest(request), orderId });
+    const requestMerchant = await this.prisma.merchant.findUnique({ where: { id: order.merchantId }, select: { userId: true } });
+    if (requestMerchant?.userId) await this.notifications.notify({ userId: requestMerchant.userId, title: 'Table assistance requested', body: `Order ${order.orderCode} requested table assistance.`, type: NotificationType.order_update, orderId: String(orderId), data: { kind: 'table_assistance', orderId: String(orderId), requestId: String(request.id), shopId: String(order.shopId), url: merchantOrderNotificationUrl({ orderId, shopId: order.shopId, orderType: order.orderType }) } }).catch(() => undefined);
     return this.serializeServiceRequest(request);
   }
 

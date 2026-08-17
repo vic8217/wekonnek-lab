@@ -14,6 +14,7 @@ type Inquiry = { id: string; listingType: 'BAZAAR' | 'PROPERTY'; message: string
 function InquiriesContent() {
   const params = useSearchParams();
   const requested = params.get('type');
+  const requestedInquiryId = params.get('inquiryId');
   const [filter, setFilter] = useState<Filter>(requested === 'bazaar' || requested === 'property' ? requested : 'all');
   const [rows, setRows] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,7 +54,7 @@ function InquiriesContent() {
         const name = [inquiry.inquirer.firstName, inquiry.inquirer.lastName].filter(Boolean).join(' ') || 'WEKONNEK User';
         const href = inquiry.listingType === 'BAZAAR' ? `/bazaar/listings/${inquiry.listing?.id}` : `/property/listings/${inquiry.listing?.id}`;
         const image = publicAssetUrl(inquiry.listing?.thumbnailUrls?.[0] || inquiry.listing?.imageUrls?.[0]);
-        return <article key={inquiry.id} className={`rounded-2xl border bg-white p-4 shadow-sm ${!inquiry.readAt ? 'border-red-200' : 'border-slate-100'}`}>
+        return <article key={inquiry.id} id={`inquiry-${inquiry.id}`} className={`scroll-mt-4 rounded-2xl border bg-white p-4 shadow-sm ${requestedInquiryId === inquiry.id ? 'ring-2 ring-[#DB0002]' : !inquiry.readAt ? 'border-red-200' : 'border-slate-100'}`}>
           <div className="flex gap-3"><div className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-red-50 font-bold text-[#DB0002]">{inquiry.inquirer.avatar ? <Image src={publicAssetUrl(inquiry.inquirer.avatar)!} alt="" fill sizes="44px" className="object-cover" /> : name[0]}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-sm">{name}</strong>{!inquiry.readAt && <span className="rounded-full bg-[#DB0002] px-2 py-0.5 text-[9px] font-bold text-white">NEW</span>}</div><p className="text-xs text-slate-500">Interested in <b>{inquiry.listing?.title || 'Unavailable listing'}</b></p></div>{image && <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg"><Image src={image} alt="" fill sizes="48px" className="object-cover" /></div>}</div>
           <p className="mt-3 line-clamp-2 text-sm text-slate-700">“{inquiry.message}”</p><div className="mt-2 flex items-center justify-between text-[11px] text-slate-400"><span>{new Date(inquiry.createdAt).toLocaleString()}</span><span className="capitalize">{inquiry.status.toLowerCase()}</span></div>
           <Link href={inquiry.listing ? href : '#'} onClick={() => openInquiry(inquiry)} className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-[#DB0002] text-xs font-bold text-[#DB0002]">View Inquiry</Link>

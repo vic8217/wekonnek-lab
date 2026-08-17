@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'next/navigation';
 import type { UserType } from '@/types';
 import { ROUTES } from '@/lib/constants';
+import { deactivateCurrentPushDevice } from '@/lib/firebase-messaging';
 
 // Authentication is forwarded by the same-origin /api/auth/* Next.js rewrite.
 const API = '';
@@ -342,6 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const token = getToken();
       if (token) {
+        await deactivateCurrentPushDevice(token);
         await fetch(`${API}/api/auth/logout`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },

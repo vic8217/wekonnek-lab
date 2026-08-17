@@ -22,6 +22,7 @@ import {
   QrCode,
   Sandwich,
   Share2,
+  ShoppingCart,
   Sparkles,
   Star,
   Store,
@@ -32,7 +33,7 @@ import {
   UtensilsCrossed,
   Wifi,
 } from "lucide-react";
-import { addToCart } from "@/lib/cart";
+import { addToCart, getCartCount, onCartChange } from "@/lib/cart";
 import {
   merchantsApi,
   productsApi,
@@ -116,8 +117,14 @@ export default function MerchantMarketplacePage() {
   const [variantProduct, setVariantProduct] = useState<Product | null>(null);
   const [promotions, setPromotions] = useState<MerchantPromotion[]>([]);
   const [claimingVoucher, setClaimingVoucher] = useState<string | null>(null);
+  const [cartCount, setCartCount] = useState(0);
   const merchantName = merchant?.name || titleCase(merchantSlug);
   const merchantId = merchant?.id || numericId(`${category}-${merchantSlug}`);
+  useEffect(() => {
+    const refreshCartCount = () => setCartCount(getCartCount(merchantId));
+    refreshCartCount();
+    return onCartChange(refreshCartCount);
+  }, [merchantId]);
   const activeShop =
     merchant?.branches?.find((branch) => branch.isDefault) ||
     merchant?.branches?.[0];
@@ -230,12 +237,16 @@ export default function MerchantMarketplacePage() {
     product: Product,
     variant?: NonNullable<Product["variants"]>[number],
   ) => {
+    const defaultShop =
+      merchant?.branches?.find((branch) => branch.isDefault) ||
+      merchant?.branches?.[0];
     addToCart(merchantId, {
       product_id: product.id,
       product_name: product.name,
       price: Number(variant?.price ?? productPrice(product)),
       image_url: publicAssetUrl(variant?.imageUrl || product.imageUrl),
       merchant_id: merchantId,
+      shop_id: defaultShop?.id,
       variant_id: variant?.id,
       variant_name: variant ? variantName(variant) : undefined,
     });
@@ -341,6 +352,18 @@ export default function MerchantMarketplacePage() {
             <ArrowLeft size={19} /> Back to {titleCase(category)}
           </Link>
           <div className="flex gap-2">
+            <Link
+              href="/customer/cart"
+              className="relative flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-red-600"
+            >
+              <ShoppingCart size={18} />
+              <span className="hidden sm:inline">Cart</span>
+              {cartCount > 0 && (
+                <span className="flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-black text-white">
+                  {cartCount > 99 ? "99+" : cartCount}
+                </span>
+              )}
+            </Link>
             <button className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-red-600">
               <Heart size={18} /> Save
             </button>

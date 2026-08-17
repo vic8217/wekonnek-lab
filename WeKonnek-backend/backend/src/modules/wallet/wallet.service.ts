@@ -9,8 +9,10 @@ import {
   WalletTransactionType,
   WalletTransactionStatus,
   WalletPaymentGateway,
+  NotificationType,
 } from '@prisma/client';
 import { PaymentGatewayService } from './payment-gateway.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 function addOnQuantity(quantities: unknown, id: string) {
   if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
@@ -23,6 +25,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gatewayService: PaymentGatewayService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async getOrCreateWallet(userId: string) {
@@ -341,6 +344,12 @@ export class WalletService {
         subscriptionStatus: hasCoverage ? 'active' : 'inactive',
       },
     });
+    if (merchant.subscriptionStatus !== (hasCoverage ? 'active' : 'inactive')) {
+      await this.notifications.notify({ userId, title: hasCoverage ? 'Subscription reactivated' : 'Subscription paused', body: hasCoverage ? 'Your merchant subscription is active again.' : 'Your wallet no longer covers the daily subscription fee.', type: NotificationType.system, data: { kind: hasCoverage ? 'subscription_reactivated' : 'subscription_expired', url: '/merchant/subscription/upgrade' } }).catch(() => undefined);
+    } else if (hasCoverage && dailyFee > 0 && walletBalance < dailyFee * 3) {
+      const recent = await this.prisma.notification.findFirst({ where: { userId, title: 'Low subscription balance', createdAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) } }, select: { id: true } });
+      if (!recent) await this.notifications.notify({ userId, title: 'Low subscription balance', body: 'Your wallet covers fewer than three days of subscription fees.', type: NotificationType.system, data: { kind: 'subscription_low_balance', url: '/merchant/wallet' } }).catch(() => undefined);
+    }
   }
 
   private calculateCashOutFee(amount: number): number {

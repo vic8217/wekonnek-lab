@@ -2,11 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
-import { UserRole } from '@prisma/client';
+import { NotificationType, UserRole } from '@prisma/client';
+import { NotificationsService } from '../modules/notifications/notifications.service';
 
 @Injectable()
 export class CoordinatorApplicationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly notifications: NotificationsService) {}
 
   async getCommissionSettings() {
     const setting = await this.prisma.coordinatorCommissionSetting.upsert({
@@ -114,12 +115,12 @@ export class CoordinatorApplicationsService {
     });
   }
 
-  create(input: Record<string, unknown>) {
+  async create(input: Record<string, unknown>) {
     const required = ['fullName', 'mobileNumber', 'email', 'region', 'provinceDistrict', 'cityMunicipality', 'latitude', 'longitude'];
     for (const field of required) {
       if (input[field] === undefined || input[field] === '') throw new BadRequestException(`${field} is required`);
     }
-    return this.prisma.coordinatorApplication.create({
+    const application = await this.prisma.coordinatorApplication.create({
       data: {
         fullName: String(input.fullName), mobileNumber: String(input.mobileNumber),
         viberAccount: input.viberAccount ? String(input.viberAccount) : null,
@@ -139,6 +140,9 @@ export class CoordinatorApplicationsService {
         supportingDocumentUrl: input.supportingDocumentUrl ? String(input.supportingDocumentUrl) : null,
       },
     });
+    const administrators = await this.prisma.user.findMany({ where: { role: { in: [UserRole.admin, UserRole.staff] }, isActive: true }, select: { id: true } });
+    await this.notifications.notifyUsers(administrators.map(user => user.id), { title: 'New coordinator application', body: 'A new coordinator application is ready for review.', type: NotificationType.system, data: { kind: 'coordinator_application', applicationId: String(application.id), url: '/admin/coordinators' } }).catch(() => undefined);
+    return application;
   }
 
   async findAll() {

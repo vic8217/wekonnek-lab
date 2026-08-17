@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { getToken } from '@/hooks/use-auth';
+import { portalNotificationDestination } from '@/lib/notification-destination';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -12,9 +14,12 @@ interface Notification {
   message: string;
   is_read: boolean;
   created_at: string;
+  data?: Record<string, string> | null;
 }
 
 export default function MerchantNotificationsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
@@ -47,6 +52,7 @@ export default function MerchantNotificationsPage() {
         message: n.body ?? n.message ?? '',
         is_read: n.isRead ?? n.is_read ?? false,
         created_at: n.createdAt ?? n.created_at,
+        data: n.data || null,
       }));
 
       notifs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -70,6 +76,12 @@ export default function MerchantNotificationsPage() {
     } catch {
       /* optimistic update already applied */
     }
+  };
+
+  const openNotification = async (notification: Notification) => {
+    await markAsRead(notification.id);
+    const destination = portalNotificationDestination(notification.data?.url, pathname);
+    if (destination) router.push(destination);
   };
 
   const markAllRead = async () => {
@@ -187,7 +199,7 @@ export default function MerchantNotificationsPage() {
               className={`bg-white rounded-lg p-4 border transition-colors cursor-pointer hover:bg-gray-50 ${
                 !notif.is_read ? 'border-[#DB0002]/30 bg-red-50/30' : 'border-gray-200'
               }`}
-              onClick={() => markAsRead(notif.id)}
+              onClick={() => void openNotification(notif)}
             >
               <div className="flex items-start gap-3">
                 {getTypeIcon(notif.type)}

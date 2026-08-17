@@ -1,7 +1,11 @@
 import {
   Controller,
   Get,
+  Post,
+  Delete,
+  Patch,
   Put,
+  Body,
   Param,
   Query,
   UseGuards,
@@ -17,6 +21,24 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @ApiBearerAuth()
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  @Post('devices')
+  @ApiOperation({ summary: 'Register or refresh the current user device' })
+  registerDevice(@Req() req: any, @Body() body: { fcmToken: string; platform?: string; deviceName?: string; browser?: string; operatingSystem?: string }) {
+    return this.notificationsService.registerDevice(req.user.id, body);
+  }
+
+  @Get('devices')
+  @ApiOperation({ summary: 'List active push devices for the current user' })
+  getDevices(@Req() req: any) {
+    return this.notificationsService.getDevices(req.user.id);
+  }
+
+  @Delete('devices/current')
+  @ApiOperation({ summary: 'Deactivate the current browser push device' })
+  deactivateCurrent(@Req() req: any, @Body('fcmToken') fcmToken: string) {
+    return this.notificationsService.deactivateCurrentDevice(req.user.id, fcmToken);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get notifications for the current user' })
@@ -42,15 +64,25 @@ export class NotificationsController {
     return this.notificationsService.getUnreadCount(req.user.id);
   }
 
-  @Put(':id/read')
+  @Patch(':id/read')
   @ApiOperation({ summary: 'Mark a notification as read' })
-  markAsRead(@Param('id') id: string) {
-    return this.notificationsService.markAsRead(id);
+  markAsRead(@Req() req: any, @Param('id') id: string) {
+    return this.notificationsService.markAsRead(req.user.id, id);
+  }
+
+  @Patch('read-all')
+  @ApiOperation({ summary: 'Mark all notifications as read' })
+  markAllAsRead(@Req() req: any) {
+    return this.notificationsService.markAllAsRead(req.user.id);
+  }
+
+  @Put(':id/read')
+  markAsReadCompatibility(@Req() req: any, @Param('id') id: string) {
+    return this.notificationsService.markAsRead(req.user.id, id);
   }
 
   @Put('read-all')
-  @ApiOperation({ summary: 'Mark all notifications as read' })
-  markAllAsRead(@Req() req: any) {
+  markAllAsReadCompatibility(@Req() req: any) {
     return this.notificationsService.markAllAsRead(req.user.id);
   }
 }

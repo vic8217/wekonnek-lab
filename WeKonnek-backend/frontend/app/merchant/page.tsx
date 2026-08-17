@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Eye, EyeOff, KeyRound, LockKeyhole, Mail, Smartphone, Store } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
+import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 export default function MerchantLoginPage() {
 	const router = useRouter();
@@ -29,7 +30,7 @@ export default function MerchantLoginPage() {
 			const apiUser = body.user; const role = apiUser.role ?? apiUser.user_type;
 			if (role !== 'merchant') throw new Error('This account is not authorized for the Merchant Portal.');
 			const user: AuthUser = { id: apiUser.id, email: apiUser.email, phone: apiUser.phone, firstName: apiUser.firstName ?? apiUser.first_name ?? null, lastName: apiUser.lastName ?? apiUser.last_name ?? null, role, userType: role, mustChangePassword: Boolean(apiUser.mustChangePassword ?? apiUser.must_change_password) };
-			setAuth(body.access_token, user); await refreshAuth(); router.replace(user.mustChangePassword ? '/merchant/settings/security' : '/merchant/dashboard');
+			setAuth(body.access_token, user); await refreshAuth(); router.replace(user.mustChangePassword ? '/merchant/settings/security' : pendingNotificationDestination('/merchant/dashboard', '/merchant/'));
 		} catch (err) { setError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.'); }
 		finally { setLoading(false); }
 	}
