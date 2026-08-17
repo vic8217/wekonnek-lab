@@ -408,8 +408,10 @@ export default function MerchantBranchesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {branches.map((branch) => (
-            <div key={branch.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow">
+          {branches.map((branch) => {
+            const active = (branch.isActive ?? branch.is_active) === true;
+            const effectiveOpen = active && branch.wallet_funded !== false && branch.is_open === true;
+            return <div key={branch.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-bold text-gray-900 truncate">{branch.name}</h3>
@@ -422,16 +424,16 @@ export default function MerchantBranchesPage() {
                     <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Default Shop</span>
                   )}
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    (branch.isActive ?? branch.is_active) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                    active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
                   }`}>
-                    {(branch.isActive ?? branch.is_active)
+                    {active
                       ? 'Active'
                       : branch.wallet_funded === false
                         ? 'Inactive · Reload Wallet'
                         : 'Inactive'}
                   </span>
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${branch.is_open ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>
-                    {branch.is_open ? 'Open' : 'Closed'}
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${effectiveOpen ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>
+                    {effectiveOpen ? 'Open' : 'Closed'}
                   </span>
                 </div>
               </div>
@@ -448,11 +450,11 @@ export default function MerchantBranchesPage() {
               <div className="mb-4 flex gap-2">
                 <button
                   type="button"
-                  disabled={changingOperationId === branch.id || !(branch.isActive ?? branch.is_active)}
-                  onClick={() => void setOperationOverride(branch, !branch.is_open)}
-                  className={`flex-1 rounded-full px-4 py-2 text-xs font-bold text-white disabled:opacity-40 ${branch.is_open ? 'bg-red-600' : 'bg-emerald-600'}`}
+                  disabled={changingOperationId === branch.id || !active}
+                  onClick={() => void setOperationOverride(branch, !effectiveOpen)}
+                  className={`flex-1 rounded-full px-4 py-2 text-xs font-bold text-white disabled:opacity-40 ${effectiveOpen ? 'bg-red-600' : 'bg-emerald-600'}`}
                 >
-                  {changingOperationId === branch.id ? 'Updating…' : branch.is_open ? 'Close Shop' : 'Open Shop'}
+                  {changingOperationId === branch.id ? 'Updating…' : effectiveOpen ? 'Close Shop' : 'Open Shop'}
                 </button>
                 {branch.operation_source === 'manual' && (
                   <button type="button" disabled={changingOperationId === branch.id} onClick={() => void setOperationOverride(branch, null)} className="rounded-full border px-4 py-2 text-xs font-bold text-slate-700 disabled:opacity-40">
@@ -541,8 +543,8 @@ export default function MerchantBranchesPage() {
                   </button>
                 )}
               </div>
-            </div>
-          ))}
+            </div>;
+          })}
         </div>
       )}
 

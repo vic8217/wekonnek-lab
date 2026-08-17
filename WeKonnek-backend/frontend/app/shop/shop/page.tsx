@@ -41,6 +41,7 @@ export default function ShopOrderTakingPage() {
   const catalogueRef = useRef<HTMLElement | null>(null);
   const tableSectionRef = useRef<HTMLElement | null>(null);
   const syncCursorRef = useRef('0');
+  const seenOrderIdsRef = useRef(new Set<number>());
 
   const load = useCallback(async () => {
     try {
@@ -70,7 +71,9 @@ export default function ShopOrderTakingPage() {
       if (orderResponse?.ok) {
         const payload = await orderResponse.json();
         const rows: Order[] = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-        setOrders(rows.filter(order => !order.shop_id || order.shop_id === activeShop?.id));
+        const shopOrders = rows.filter(order => !order.shop_id || order.shop_id === activeShop?.id);
+        seenOrderIdsRef.current = new Set(shopOrders.map(order => order.id));
+        setOrders(shopOrders);
       }
       if (token) {
         const crewResponse = await fetch('/api/backend/dine-in-crew/overview', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
@@ -83,12 +86,19 @@ export default function ShopOrderTakingPage() {
     }
   }, []);
 
-  const reconcile = useCallback(async () => {
+  const reconcile = useCallback(async (announceNewOrders = false) => {
     const token = getToken(); if (!token) return;
     const response = await fetch(`/api/backend/dine-in-crew/shop/sync?cursor=${encodeURIComponent(syncCursorRef.current)}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
     if (!response.ok) return;
     const result = await response.json();
     syncCursorRef.current = result.nextCursor || syncCursorRef.current;
+    const newOrders: Order[] = [];
+    for (const change of result.changes || []) {
+      const row = change.payload?.order;
+      if (!row || ['completed', 'cancelled', 'delivered'].includes(String(row.status).toLowerCase()) || seenOrderIdsRef.current.has(Number(row.id))) continue;
+      newOrders.push({ id: Number(row.id), order_code: row.orderCode, order_type: row.orderType, status: row.status });
+      seenOrderIdsRef.current.add(Number(row.id));
+    }
     setOrders(current => {
       let next = [...current];
       for (const change of result.changes || []) {
@@ -102,13 +112,26 @@ export default function ShopOrderTakingPage() {
         if (!row) continue;
         if (['completed', 'cancelled', 'delivered'].includes(row.status)) next = next.filter(order => order.id !== row.id);
         else {
-          const adapted: Order = { id: row.id, order_code: row.orderCode, order_type: 'dine_in', status: row.status, table_number: row.tableNumber, total_amount: row.totalAmount, notes: row.notes, created_at: row.createdAt, payment_method: row.paymentMethod, discount_type: row.discountType, discount_amount: row.discountAmount, discount_details: row.discountDetails, order_items: row.items?.map((item: any) => ({ id: item.id, product_name: item.productName, quantity: item.quantity, price: item.price, subtotal: item.subtotal, status: item.status })) || [] };
+          const adapted: Order = { id: row.id, order_code: row.orderCode, order_type: row.orderType || 'dine_in', status: row.status, table_number: row.tableNumber, total_amount: row.totalAmount, notes: row.notes, created_at: row.createdAt, payment_method: row.paymentMethod, discount_type: row.discountType, discount_amount: row.discountAmount, discount_details: row.discountDetails, order_items: row.items?.map((item: any) => ({ id: item.id, product_name: item.productName, quantity: item.quantity, price: item.price, subtotal: item.subtotal, status: item.status })) || [] };
+          seenOrderIdsRef.current.add(adapted.id);
           const index = next.findIndex(order => order.id === adapted.id);
           if (index >= 0) next[index] = { ...next[index], ...adapted }; else next.unshift(adapted);
         }
       }
       return next;
     });
+    if (announceNewOrders && newOrders.length) {
+      window.dispatchEvent(new CustomEvent('wk:notifications-updated'));
+      for (const order of newOrders) {
+        const label = order.order_type === 'delivery' ? 'delivery' : order.order_type === 'pickup' ? 'pickup' : 'dine-in';
+        const message = `New ${label} order ${order.order_code || ''}`.trim();
+        toast.success(message, { id: `shop-order-${order.id}`, duration: 8000 });
+        if (document.visibilityState !== 'visible' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          const notification = new Notification('New order received', { body: message, icon: '/images/weKonnekLogov1.png', tag: `shop-order-${order.id}` });
+          notification.onclick = () => { window.focus(); notification.close(); };
+        }
+      }
+    }
   }, []);
 
   useEffect(() => { void load().then(() => void reconcile()); }, [load, reconcile]);
@@ -120,7 +143,7 @@ export default function ShopOrderTakingPage() {
     window.addEventListener('focus', foreground); document.addEventListener('visibilitychange', foreground);
     const accessToken = getToken(); const configured = process.env.NEXT_PUBLIC_API_URL; const origin = configured || `${window.location.protocol}//${window.location.hostname}:3000`;
     const socket = accessToken ? io(`${origin.replace(/\/$/, '')}/dine-in`, { auth: { accessToken }, transports: ['websocket', 'polling'] }) : null;
-    socket?.on('dine-in-change', () => void reconcile());
+    socket?.on('dine-in-change', () => void reconcile(true));
     return () => { window.clearTimeout(timer); window.removeEventListener('focus', foreground); document.removeEventListener('visibilitychange', foreground); socket?.disconnect(); };
   }, [reconcile]);
 

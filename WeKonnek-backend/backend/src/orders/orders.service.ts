@@ -321,7 +321,9 @@ export class OrdersService {
     } catch {
       // swallow — merchant alerts are non-critical to order creation
     }
-    if (['dine_in', 'in_store'].includes(created.orderType)) await this.dineInSync.recordOrder(created.id, 'ORDER_CREATED');
+    // Publish every order type to the branch's operational stream. The shop
+    // counter uses this for live delivery/pickup badges as well as dine-in.
+    await this.dineInSync.recordOrder(created.id, 'ORDER_CREATED');
 
     // Online payment → create a gateway checkout and attach the redirect URL.
     if (isOnline) {
