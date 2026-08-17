@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Eye, EyeOff, KeyRound, LockKeyhole, Store } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
+import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 type ShopLoginResponse = {
   message?: string;
@@ -70,7 +71,7 @@ export default function ShopLoginPage() {
       setAuth(body.access_token, user, 'shop');
       sessionStorage.setItem('wk_active_shop', JSON.stringify(body.shop));
       await refreshAuth();
-      router.replace('/shop/dashboard');
+      router.replace(pendingNotificationDestination('/shop/dashboard', '/shop/'));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to open the shop portal');
     } finally {

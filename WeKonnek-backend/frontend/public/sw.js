@@ -52,16 +52,55 @@ function safeNotificationPath(value) {
   catch { return '/'; }
 }
 
+function portalForPath(path) {
+  if (path.startsWith('/merchant/')) return 'merchant';
+  if (path.startsWith('/shop/')) return 'shop';
+  if (path.startsWith('/admin/')) return 'admin';
+  if (path.startsWith('/coordinator/')) return 'coordinator';
+  return 'customer';
+}
+
+function loginPathFor(target) {
+  const portal = portalForPath(target);
+  const login = portal === 'merchant' ? '/merchant' : portal === 'shop' ? '/shop' : portal === 'admin' ? '/admin/login' : portal === 'coordinator' ? '/coordinator/login' : '/auth/login';
+  return `${login}?redirect=${encodeURIComponent(target)}`;
+}
+
+function forShopPortal(target) {
+  return target.startsWith('/merchant/') ? target.replace('/merchant/', '/shop/') : target;
+}
+
+function requestWindowContext(client) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timeout = setTimeout(() => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve({ client, authenticated: false });
+    }, 400);
+    channel.port1.onmessage = (event) => {
+      clearTimeout(timeout);
+      channel.port1.close();
+      channel.port2.close();
+      resolve({ client, ...(event.data || {}) });
+    };
+    client.postMessage({ type: 'WK_NOTIFICATION_CONTEXT_REQUEST' }, [channel.port2]);
+  });
+}
+
 self.addEventListener('push', (event) => {
   let payload = {};
   try { payload = event.data ? event.data.json() : {}; } catch { payload = { notification: { title: 'WeKonnek', body: event.data?.text() || 'You have a new notification.' } }; }
   const notification = payload.notification || {};
   const data = payload.data || {};
-  event.waitUntil(self.registration.showNotification(notification.title || 'WeKonnek', {
-    body: notification.body || 'You have a new notification.',
+  const title = notification.title || data.title || payload.title || 'WeKonnek';
+  const body = notification.body || data.body || payload.body || 'You have a new notification.';
+  const target = data.url || notification.click_action || payload.url;
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
     icon: '/images/weKonnekLogov1.png',
     badge: '/images/weKonnekLogov1.png',
-    data: { url: safeNotificationPath(data.url) },
+    data: { url: safeNotificationPath(target) },
     tag: payload.fcmMessageId || data.notificationId || undefined,
   }));
 });
@@ -69,10 +108,35 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const target = safeNotificationPath(event.notification.data?.url);
-  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-    const existing = clients.find(client => new URL(client.url).origin === self.location.origin);
-    if (existing) { existing.navigate(target); return existing.focus(); }
-    return self.clients.openWindow(target);
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
+    const ownWindows = clients.filter(client => new URL(client.url).origin === self.location.origin);
+    const contexts = await Promise.all(ownWindows.map(requestWindowContext));
+    const targetUrl = new URL(target, self.location.origin);
+    const targetShopId = Number(targetUrl.searchParams.get('shopId')) || null;
+    const exactShop = targetShopId ? contexts.find(context => context.authenticated && context.portal === 'shop' && Number(context.shopId) === targetShopId) : undefined;
+    const merchant = contexts.find(context => context.authenticated && context.portal === 'merchant');
+    const samePortal = contexts.find(context => context.authenticated && context.portal === portalForPath(target));
+    const reusable = exactShop || merchant || samePortal;
+    if (reusable) {
+      const path = reusable.portal === 'shop' ? forShopPortal(target) : target;
+      const destination = new URL(path, self.location.origin).href;
+      const navigated = reusable.client.url === destination ? reusable.client : await reusable.client.navigate(destination);
+      return (navigated || reusable.client).focus();
+    }
+    const otherShop = targetShopId ? contexts.find(context => context.authenticated && context.portal === 'shop') : undefined;
+    if (otherShop) {
+      const shopTarget = forShopPortal(target);
+      const switchShop = `/shop?redirect=${encodeURIComponent(shopTarget)}`;
+      const navigated = await otherShop.client.navigate(new URL(switchShop, self.location.origin).href);
+      return (navigated || otherShop.client).focus();
+    }
+    const existing = ownWindows[0];
+    const login = loginPathFor(target);
+    if (existing) {
+      const navigated = await existing.navigate(new URL(login, self.location.origin).href);
+      return (navigated || existing).focus();
+    }
+    return self.clients.openWindow(login);
   }));
 });
 

@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma';
 import { MediaService } from '../modules/media/media.service';
 import { NotificationsService } from '../modules/notifications/notifications.service';
 import { NotificationType } from '@prisma/client';
+import { listingInquiryNotificationUrl } from '../modules/notifications/notification-routes';
 
 type InquiryType = 'BAZAAR' | 'PROPERTY';
 
@@ -66,7 +67,7 @@ export class ListingInquiriesService {
       title: `New ${type === 'BAZAAR' ? 'Bazaar' : 'Property'} inquiry`,
       body: 'Someone sent an inquiry about your listing.',
       type: NotificationType.system,
-      data: { kind: `${type.toLowerCase()}_inquiry`, inquiryId: String(inquiry.id), listingId, url: '/my/inquiries' },
+      data: { kind: `${type.toLowerCase()}_inquiry`, inquiryId: String(inquiry.id), listingId, url: listingInquiryNotificationUrl(type, String(inquiry.id)) },
     }).catch(() => undefined);
     return inquiry;
   }

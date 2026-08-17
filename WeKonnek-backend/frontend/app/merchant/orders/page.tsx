@@ -25,6 +25,7 @@ interface MerchantData {
 
 interface Order {
   id: number;
+  shop_id?: number;
   order_code: string;
   customer_name: string;
   table_number?: string;
@@ -76,6 +77,9 @@ export default function MerchantOrdersPage() {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab') as OrderTabFilter | null;
   const requestedStatus = searchParams.get('status');
+  const requestedOrderId = Number(searchParams.get('orderId')) || null;
+  const requestedShopId = Number(searchParams.get('shopId')) || null;
+  const requestedReservationId = Number(searchParams.get('reservationId')) || null;
   const [merchant, setMerchant] = useState<MerchantData | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -247,6 +251,7 @@ export default function MerchantOrdersPage() {
 
         return {
           id: order.id,
+          shop_id: Number(order.shop_id ?? order.shopId) || undefined,
           order_code: order.order_code,
           customer_name: customerName,
           table_number: order.table_number,
@@ -264,11 +269,21 @@ export default function MerchantOrdersPage() {
         };
       });
 
-      setOrders(transformedOrders);
+      const shopOrders = requestedShopId
+        ? transformedOrders.filter(order => Number(order.shop_id) === requestedShopId)
+        : transformedOrders;
+      setOrders(shopOrders);
+      if (requestedOrderId) {
+        const requestedOrder = shopOrders.find(order => order.id === requestedOrderId);
+        if (requestedOrder) {
+          setActiveTab(requestedOrder.order_type === 'delivery' ? 'delivery' : requestedOrder.order_type === 'pickup' ? 'pickup' : 'in_store');
+          setSelectedOrder(requestedOrder);
+        }
+      }
     } catch (error) {
       console.error('Error fetching orders:', error);
     }
-  }, [merchant]);
+  }, [merchant, requestedOrderId, requestedShopId]);
 
   const fetchReservations = useCallback(async () => {
     if (!merchant) return;
@@ -808,11 +823,12 @@ export default function MerchantOrdersPage() {
                 <EmptyState icon="📅" message="No reservation requests" subtext="Reservation requests from customers will appear here in real-time" />
               ) : (
                 activeReservations.map((reservation) => (
-                  <ReservationCard
-                    key={reservation.id}
-                    reservation={reservation}
-                    onStatusChange={handleReservationStatusChange}
-                  />
+                  <div key={reservation.id} id={`reservation-${reservation.id}`} className={`scroll-mt-4 rounded-xl ${requestedReservationId === reservation.id ? 'ring-2 ring-[#DB0002]' : ''}`}>
+                    <ReservationCard
+                      reservation={reservation}
+                      onStatusChange={handleReservationStatusChange}
+                    />
+                  </div>
                 ))
               )}
             </div>

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
+import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 export default function AdminLoginPage() {
 	const router = useRouter();
@@ -46,7 +47,7 @@ export default function AdminLoginPage() {
 			};
 			setAuth(body.access_token, user);
 			await refreshAuth();
-			router.replace('/admin/dashboard');
+			router.replace(pendingNotificationDestination('/admin/dashboard', '/admin/'));
 		} catch (err) {
 			setError(err instanceof Error && err.name === 'AbortError' ? 'Authentication request timed out. Please try again.' : err instanceof Error ? err.message : 'Unable to sign in. Please try again.');
 		} finally {

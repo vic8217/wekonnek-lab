@@ -41,16 +41,15 @@ export class FirebasePushService implements OnModuleInit {
     for (let offset = 0; offset < messages.length; offset += 500) {
       const batch = messages.slice(offset, offset + 500);
       try {
-        const response = await getMessaging(this.app!).sendEach(batch.map(message => ({
-          token: message.token,
-          notification: { title: message.title, body: message.body },
-          data: message.data || {},
-          webpush: { fcmOptions: { link: safeInternalPath(message.data?.url) } },
-        })));
+        const response = await getMessaging(this.app!).sendEach(batch.map(toFirebaseWebPushMessage));
         response.responses.forEach((result, index) => {
           if (!result.success && PERMANENT_TOKEN_ERRORS.has(String(result.error?.code))) invalidTokens.push(batch[index].token);
         });
-        if (response.failureCount) this.logger.warn(`Firebase push batch completed with ${response.failureCount} failed delivery attempt(s)`);
+        if (response.successCount) this.logger.debug(`Firebase accepted ${response.successCount} background push message(s)`);
+        if (response.failureCount) {
+          const codes = [...new Set(response.responses.filter(result => !result.success).map(result => String(result.error?.code || 'unknown')))];
+          this.logger.warn(`Firebase push batch completed with ${response.failureCount} failed delivery attempt(s): ${codes.join(', ')}`);
+        }
       } catch (error) {
         this.logger.warn(`Firebase push batch temporarily failed: ${error instanceof Error ? error.message : 'unknown error'}`);
       }
@@ -65,4 +64,23 @@ export function safeInternalPath(value?: string): string {
     const parsed = new URL(value, 'https://wekonnek.invalid');
     return parsed.origin === 'https://wekonnek.invalid' ? `${parsed.pathname}${parsed.search}${parsed.hash}` : '/';
   } catch { return '/'; }
+}
+
+export function toFirebaseWebPushMessage(message: PushMessage) {
+  const url = safeInternalPath(message.data?.url);
+  return {
+    token: message.token,
+    // Data-only delivery ensures the single custom /sw.js owns background
+    // display. Including a Firebase notification payload here would mix
+    // automatic SDK display with the worker's showNotification handler.
+    data: {
+      ...(message.data || {}),
+      title: message.title,
+      body: message.body,
+      url,
+    },
+    webpush: {
+      headers: { Urgency: 'high' },
+    },
+  };
 }

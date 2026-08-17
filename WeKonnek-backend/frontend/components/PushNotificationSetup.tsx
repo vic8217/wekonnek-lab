@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getToken, useAuth } from '@/hooks/use-auth';
 import { enablePushNotifications, firebaseMessagingConfigured, listenForForegroundPush } from '@/lib/firebase-messaging';
+import { usePathname } from 'next/navigation';
 
 const DISMISSED_KEY = 'wk_push_prompt_dismissed';
 
 export default function PushNotificationSetup() {
   const { user } = useAuth();
+  const pathname = usePathname();
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -19,10 +21,28 @@ export default function PushNotificationSetup() {
   }, [user]);
 
   useEffect(() => {
+    const respondToWorker = (event: MessageEvent) => {
+      if (event.data?.type !== 'WK_NOTIFICATION_CONTEXT_REQUEST' || !event.ports[0]) return;
+      const portal = pathname.startsWith('/shop/') ? 'shop'
+        : pathname.startsWith('/merchant/') ? 'merchant'
+          : pathname.startsWith('/admin/') ? 'admin'
+            : pathname.startsWith('/coordinator/') ? 'coordinator' : 'customer';
+      let shopId: number | undefined;
+      if (portal === 'shop') {
+        try { shopId = Number(JSON.parse(sessionStorage.getItem('wk_active_shop') || '{}').id) || undefined; } catch { /* ignore invalid stale context */ }
+      }
+      event.ports[0].postMessage({ authenticated: Boolean(user && getToken()), portal, shopId });
+    };
+    navigator.serviceWorker?.addEventListener('message', respondToWorker);
+    return () => navigator.serviceWorker?.removeEventListener('message', respondToWorker);
+  }, [pathname, user]);
+
+  useEffect(() => {
     if (!user || Notification.permission !== 'granted') return;
     let unsubscribe: () => void = () => undefined;
     void enablePushNotifications(getToken()).catch(() => undefined);
     void listenForForegroundPush(payload => {
+      window.dispatchEvent(new CustomEvent('wk:notifications-updated'));
       toast(payload.notification?.body || payload.notification?.title || 'You have a new notification', { icon: '🔔', id: payload.messageId || undefined });
     }).then(stop => { unsubscribe = stop; });
     return () => unsubscribe();

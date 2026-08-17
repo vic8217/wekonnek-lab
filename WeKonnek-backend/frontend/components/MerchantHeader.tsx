@@ -20,6 +20,7 @@ interface MerchantInfo {
 }
 
 interface ActiveShop {
+  id?: number;
   name: string;
   branch_name?: string;
   merchant_name?: string;

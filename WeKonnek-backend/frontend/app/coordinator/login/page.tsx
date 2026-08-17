@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowRight, BadgeCheck, Eye, EyeOff, LockKeyhole, UsersRound } from 'lucide-react';
 import { setAuth, useAuth, type AuthUser } from '@/hooks/use-auth';
+import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 export default function CoordinatorLoginPage() {
 	const router = useRouter();
@@ -26,7 +27,7 @@ export default function CoordinatorLoginPage() {
 			const role = apiUser.role ?? apiUser.user_type;
 			if (role !== 'coordinator' && role !== 'admin') throw new Error('This account is not authorized for the Coordinator Portal.');
 			const user: AuthUser = { id: apiUser.id, email: apiUser.email, phone: apiUser.phone, firstName: apiUser.firstName ?? apiUser.first_name ?? null, lastName: apiUser.lastName ?? apiUser.last_name ?? null, role, userType: role };
-			setAuth(body.access_token, user, 'coordinator'); await refreshAuth(); router.replace('/coordinator/dashboard');
+			setAuth(body.access_token, user, 'coordinator'); await refreshAuth(); router.replace(pendingNotificationDestination('/coordinator/dashboard', '/coordinator/'));
 		} catch (err) { setError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.'); }
 		finally { setLoading(false); }
 	}

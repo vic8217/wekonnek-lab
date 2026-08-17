@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { getToken, getUser, useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import { ArrowRight, CalendarDays, Eye, EyeOff, Mail, Moon, ShoppingBag, Sun, Sunrise, Tag, UserRound, UserRoundPlus, UtensilsCrossed } from 'lucide-react';
+import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 // Keep backend addresses server-side so a bad build-time environment value
 // can never make a production browser connect to localhost.
@@ -16,6 +17,9 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const { refreshAuth } = useAuth();
   const redirectTo = searchParams.get('redirect');
+  const customerDestination = () => redirectTo === '/bazaar/post'
+    ? '/bazaar/post'
+    : pendingNotificationDestination('/customer/dashboard', '/customer/');
   const [activeTab, setActiveTab] = useState<'signin' | 'register'>('signin');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -75,7 +79,7 @@ function LoginForm() {
     if (!oauthCode) return;
     setActiveTab('register'); setLoading(true);
     fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
-      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(redirectTo || '/customer/dashboard'); })
+      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
       .catch(error => setError(error.message)).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -148,9 +152,7 @@ function LoginForm() {
 
       // Normal customer sign-in always opens Home. Bazaar posting is the one
       // intentional resume-after-login workflow and returns to its form.
-      const safeCustomerRedirect = redirectTo === '/bazaar/post'
-        ? '/bazaar/post'
-        : '/customer/dashboard';
+      const safeCustomerRedirect = customerDestination();
       // A full navigation starts the destination with the already persisted
       // customer session and avoids a race with the login page's AuthProvider.
       window.location.replace(safeCustomerRedirect);
@@ -189,7 +191,7 @@ function LoginForm() {
 
   const verifyCode = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true); setError(null);
-    try { const response = await fetch('/api/auth/verify-otp', { method: 'POST', headers: deviceHeaders(), body: JSON.stringify({ challengeId, code: otp.join('') }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Verification failed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); if (body.needsProfile) setRegisterStep('profile'); else router.replace(redirectTo || '/customer/dashboard'); }
+    try { const response = await fetch('/api/auth/verify-otp', { method: 'POST', headers: deviceHeaders(), body: JSON.stringify({ challengeId, code: otp.join('') }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Verification failed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); if (body.needsProfile) setRegisterStep('profile'); else router.replace(customerDestination()); }
     catch (error: any) { setError(error.message); } finally { setLoading(false); }
   };
 
@@ -198,7 +200,7 @@ function LoginForm() {
     if (profile.password.length < 8) { setError('Create a password with at least 8 characters.'); return; }
     if (profile.password !== profile.confirmPassword) { setError('Passwords do not match.'); return; }
     setLoading(true);
-    try { const response = await fetch('/api/auth/complete-profile', { method: 'POST', headers: { ...deviceHeaders(), Authorization: `Bearer ${pendingToken}` }, body: JSON.stringify({ firstName: profile.firstName, lastName: profile.lastName, email: profile.email, password: profile.password }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Could not save your profile.'); router.replace(redirectTo || '/customer/dashboard'); }
+    try { const response = await fetch('/api/auth/complete-profile', { method: 'POST', headers: { ...deviceHeaders(), Authorization: `Bearer ${pendingToken}` }, body: JSON.stringify({ firstName: profile.firstName, lastName: profile.lastName, email: profile.email, password: profile.password }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Could not save your profile.'); router.replace(customerDestination()); }
     catch (error: any) { setError(error.message); } finally { setLoading(false); }
   };
 

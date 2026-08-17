@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../modules/notifications/notifications.service';
 import { NotificationType } from '@prisma/client';
+import { merchantReservationNotificationUrl } from '../modules/notifications/notification-routes';
 
 interface CreateReservationInput {
   merchant_id?: number;
@@ -133,7 +134,8 @@ export class ReservationsService {
               kind: 'new_booking',
               reservationId: String(reservation.id),
               reservationCode: reservation.reservationCode,
-              url: '/merchant/reservations',
+              merchantId: String(reservation.merchantId),
+              url: merchantReservationNotificationUrl(reservation.merchantId, reservation.id),
             },
           })
           .catch(() => undefined);

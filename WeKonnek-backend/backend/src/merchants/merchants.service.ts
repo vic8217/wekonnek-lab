@@ -681,14 +681,17 @@ export class MerchantsService {
   async findOne(id: number) {
     const merchant = await this.prisma.merchant.findUnique({
       where: { id },
-      include: { category: true, subCategory: true },
+      include: { category: true, subCategory: true, branches: { where: { isActive: true }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }], select: { id: true, name: true, address: true, city: true, isDefault: true, isActive: true, operatingHours: true, manualOpenOverride: true, manualOverrideUpdatedAt: true } } },
     });
 
     if (!merchant) {
       throw new NotFoundException(`Merchant with ID ${id} not found`);
     }
 
-    return serializeMerchant(merchant);
+    return serializeMerchant({
+      ...merchant,
+      branches: merchant.branches.map(branch => ({ ...branch, ...operationState(branch) })),
+    });
   }
 
   async findBySlug(slug: string) {
