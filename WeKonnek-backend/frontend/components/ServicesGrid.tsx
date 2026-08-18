@@ -10,6 +10,11 @@ import {
   ShoppingBag,
   Pill,
   Wrench,
+  Store,
+  HeartPulse,
+  CalendarDays,
+  Building2,
+  Sprout,
   Truck,
   CalendarClock,
   Gift,
@@ -54,14 +59,36 @@ const CATEGORY_STYLES = [
   { icon: House, bg: 'bg-gradient-to-br from-blue-500 to-indigo-700' },
 ];
 
+const CATEGORY_VISUALS: Array<{ matches: string[]; icon: LucideIcon; bg: string }> = [
+  { matches: ['farm-to-table', 'farm to table'], icon: Sprout, bg: 'bg-gradient-to-br from-emerald-400 to-green-600' },
+  { matches: ['food', 'restaurant'], icon: UtensilsCrossed, bg: 'bg-gradient-to-br from-orange-400 to-red-500' },
+  { matches: ['grocer'], icon: ShoppingBasket, bg: 'bg-gradient-to-br from-emerald-400 to-green-600' },
+  { matches: ['service'], icon: Wrench, bg: 'bg-gradient-to-br from-blue-400 to-indigo-600' },
+  { matches: ['pharmacy', 'pharmacies'], icon: Pill, bg: 'bg-gradient-to-br from-violet-500 to-purple-700' },
+  { matches: ['shop', 'retail'], icon: Store, bg: 'bg-gradient-to-br from-cyan-400 to-teal-600' },
+  { matches: ['wellness', 'health'], icon: HeartPulse, bg: 'bg-gradient-to-br from-blue-500 to-indigo-700' },
+  { matches: ['deal', 'promo'], icon: Gift, bg: 'bg-gradient-to-br from-orange-400 to-red-500' },
+  { matches: ['event'], icon: CalendarDays, bg: 'bg-gradient-to-br from-emerald-400 to-green-600' },
+  { matches: ['bazaar', 'marketplace'], icon: LayoutGrid, bg: 'bg-gradient-to-br from-blue-400 to-indigo-600' },
+  { matches: ['property', 'real-estate', 'real estate'], icon: Building2, bg: 'bg-gradient-to-br from-violet-500 to-purple-700' },
+];
+
+function categoryVisual(category: MerchantCategory, index: number) {
+  const identity = `${category.slug} ${category.name}`.toLowerCase();
+  const matched = CATEGORY_VISUALS.find(visual => visual.matches.some(value => identity.includes(value)));
+  return matched ? { ...matched, managed: true } : { ...CATEGORY_STYLES[index % CATEGORY_STYLES.length], managed: false };
+}
+
 function managedService(category: MerchantCategory, index: number): Service {
-  const style = CATEGORY_STYLES[index % CATEGORY_STYLES.length];
+  const style = categoryVisual(category, index);
   const subcategories = category.subCategories || [];
   return {
     id: category.id,
     name: category.name,
     icon: style.icon,
-    adminIcon: category.icon?.trim(),
+    // Known marketplace categories use semantic icons instead of positional
+    // or stale admin emoji values. Custom categories may still use admin icons.
+    adminIcon: style.managed ? undefined : category.icon?.trim(),
     href: category.slug === 'property' ? '/property' : `/customer/explore/${category.slug}`,
     bg: style.bg,
     color: 'text-white',

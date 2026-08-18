@@ -3,7 +3,7 @@ import { Notification, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FirebasePushService, safeInternalPath } from './firebase-push.service';
 
-type NotifyInput = { userId: string; title: string; body: string; type?: NotificationType; data?: Record<string, string>; orderId?: string };
+type NotifyInput = { userId: string; title: string; body: string; type?: NotificationType; data?: Record<string, string>; orderId?: string; isRead?: boolean; replaceExistingOrder?: boolean };
 
 @Injectable()
 export class NotificationsService {
@@ -31,7 +31,7 @@ export class NotificationsService {
   }
 
   createNotification(data: NotifyInput): Promise<Notification> {
-    return this.prisma.notification.create({ data: { userId: data.userId, title: data.title, body: data.body, type: data.type ?? NotificationType.system, data: data.data, orderId: data.orderId } });
+    return this.prisma.notification.create({ data: { userId: data.userId, title: data.title, body: data.body, type: data.type ?? NotificationType.system, data: data.data, orderId: data.orderId, isRead: data.isRead ?? false } });
   }
 
   async getForUser(userId: string, opts: { limit?: number; offset?: number; unreadOnly?: boolean }) {
@@ -59,6 +59,9 @@ export class NotificationsService {
   }
 
   async notify(params: NotifyInput): Promise<Notification> {
+    if (params.replaceExistingOrder && params.orderId) {
+      await this.prisma.notification.deleteMany({ where: { userId: params.userId, orderId: params.orderId } });
+    }
     const notification = await this.createNotification(params);
     await this.deliver(params).catch(() => undefined);
     return notification;

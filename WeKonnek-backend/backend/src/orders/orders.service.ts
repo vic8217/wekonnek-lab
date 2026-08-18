@@ -520,10 +520,12 @@ export class OrdersService {
         confirmed: { title: 'Order accepted', body: `Order ${existing.orderCode} was accepted.` },
         preparing: { title: 'Order preparing', body: `Order ${existing.orderCode} is being prepared.` },
         ready: { title: 'Order ready', body: `Order ${existing.orderCode} is ready.` },
+        completed: { title: 'Order completed', body: `Order ${existing.orderCode} was completed.` },
+        delivered: { title: 'Order delivered', body: `Order ${existing.orderCode} was delivered.` },
         cancelled: { title: 'Order cancelled', body: `Order ${existing.orderCode} was cancelled.` },
       };
       const message = customerStates[status];
-      if (message) await this.notifications.notify({ userId: existing.userId, ...message, type: NotificationType.order_update, orderId: String(existing.id), data: { kind: `order_${status}`, orderId: String(existing.id), url: `/customer/orders/${existing.id}` } }).catch(() => undefined);
+      if (message) await this.notifications.notify({ userId: existing.userId, ...message, type: NotificationType.order_update, orderId: String(existing.id), isRead: ['completed', 'delivered'].includes(status), replaceExistingOrder: true, data: { kind: `order_${status}`, orderId: String(existing.id), url: `/customer/orders/${existing.id}` } }).catch(() => undefined);
     }
     return serializeOrder(order);
   }

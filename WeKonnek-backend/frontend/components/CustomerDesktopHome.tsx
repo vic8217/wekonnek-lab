@@ -256,19 +256,13 @@ export default function CustomerDesktopHome() {
               </span>
               <ChevronDown size={17} />
             </Link>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center">
               <button className="relative p-2">
                 <Bell size={26} />
                 <span className="absolute right-0 top-0 flex size-6 items-center justify-center rounded-full bg-red-400 text-xs font-bold">
                   3
                 </span>
               </button>
-              <Link
-                href="/auth/login?redirect=/customer/dashboard"
-                className="flex size-14 items-center justify-center rounded-xl bg-red-500"
-              >
-                <UserRound size={28} />
-              </Link>
             </div>
           </div>
           <form action="/customer/search" className="relative mt-5">

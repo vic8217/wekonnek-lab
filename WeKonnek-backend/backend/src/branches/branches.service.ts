@@ -246,7 +246,11 @@ export class BranchesService {
     if (input.operating_hours !== undefined || input.operatingHours !== undefined)
       data.operatingHours = input.operating_hours ?? input.operatingHours;
     if (input.manual_open_override !== undefined || input.manualOpenOverride !== undefined) {
-      const override = input.manual_open_override ?? input.manualOpenOverride;
+      // `null` is meaningful here: it clears a manual override and restores
+      // automatic schedule handling. Do not discard it with nullish coalescing.
+      const override = input.manual_open_override !== undefined
+        ? input.manual_open_override
+        : input.manualOpenOverride;
       if (override !== null && typeof override !== 'boolean') {
         throw new BadRequestException('Manual shop override must be open, closed, or automatic');
       }

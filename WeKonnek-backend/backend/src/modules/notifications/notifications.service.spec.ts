@@ -4,7 +4,7 @@ import { NotificationsService } from './notifications.service';
 describe('NotificationsService', () => {
   const prisma: any = {
     pushDevice: { upsert: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() },
-    notification: { create: jest.fn(), findMany: jest.fn(), count: jest.fn(), updateMany: jest.fn() },
+    notification: { create: jest.fn(), findMany: jest.fn(), count: jest.fn(), updateMany: jest.fn(), deleteMany: jest.fn() },
   };
   const firebase: any = { send: jest.fn() };
   let service: NotificationsService;
@@ -69,6 +69,14 @@ describe('NotificationsService', () => {
     await expect(service.notify({ userId: 'user-a', title: 'New order', body: 'Order received', type: NotificationType.order_update, data: { url: '/merchant/orders' } })).resolves.toBe(saved);
     expect(prisma.notification.create.mock.invocationCallOrder[0]).toBeLessThan(prisma.pushDevice.findMany.mock.invocationCallOrder[0]);
     expect(firebase.send).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ token: 'token-a' }), expect.objectContaining({ token: 'token-b' })]));
+  });
+
+  it('replaces prior notifications for the same order when requested', async () => {
+    prisma.notification.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.notification.create.mockResolvedValue({ id: 'latest', isRead: true });
+    await service.notify({ userId: 'user-a', title: 'Order completed', body: 'Done', orderId: '42', isRead: true, replaceExistingOrder: true });
+    expect(prisma.notification.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-a', orderId: '42' } });
+    expect(prisma.notification.create).toHaveBeenCalledWith({ data: expect.objectContaining({ orderId: '42', isRead: true }) });
   });
 
   it('deactivates only permanently invalid Firebase tokens', async () => {
