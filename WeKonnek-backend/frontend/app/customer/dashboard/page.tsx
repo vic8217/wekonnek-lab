@@ -7,7 +7,6 @@ import { distanceToMerchant, formatDistance, estimateEta } from "@/lib/geo";
 import Link from "next/link";
 import { merchantsApi, Merchant } from "@/lib/api";
 import ServicesGrid from "@/components/ServicesGrid";
-import CustomerDesktopHome from "@/components/CustomerDesktopHome";
 
 const trustBadges = [
   {
@@ -152,7 +151,7 @@ export default function CustomerDashboardPage() {
   return (
     <>
       {/* ========== MOBILE DASHBOARD ========== */}
-      <div className="xl:hidden bg-white min-h-screen pb-20">
+      <div className="min-h-screen bg-white pb-20 xl:pb-6">
         {/* Tagline */}
         <div className="px-4 pt-2 pb-3">
           <p className="text-sm text-gray-500">
@@ -642,8 +641,6 @@ export default function CustomerDashboardPage() {
         </section>
       </div>
 
-      {/* ========== DESKTOP DASHBOARD ========== */}
-      <CustomerDesktopHome />
       <div className="hidden">
         {authUser ? (
           <div>

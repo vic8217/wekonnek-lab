@@ -20,6 +20,7 @@ export default function CustomerHeader({
   const router = useRouter();
   const { user: authUser, signOut } = useAuth();
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [cartCount, setCartCount] = useState(0);
@@ -43,16 +44,17 @@ export default function CustomerHeader({
       if (!target.closest('.settings-dropdown') && !target.closest('.settings-button')) {
         setShowSettingsDropdown(false);
       }
+      if (!target.closest('.account-dropdown') && !target.closest('.account-button')) setShowAccountDropdown(false);
     };
 
-    if (showSettingsDropdown) {
+    if (showSettingsDropdown || showAccountDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showSettingsDropdown]);
+  }, [showSettingsDropdown, showAccountDropdown]);
 
   const fullName = authUser ? `${authUser.firstName || ''} ${authUser.lastName || ''}`.trim() || 'User' : 'User';
   const userType = authUser?.role || 'Customer';
@@ -80,6 +82,7 @@ export default function CustomerHeader({
             </Link>
             <div className="flex items-center">
               {authUser && <NotificationInboxBell />}
+              {authUser && <Link href="/customer/profile" aria-label="Open customer profile" className="ml-1 flex size-9 items-center justify-center rounded-full bg-purple-500 text-sm font-bold text-white">{fullName.charAt(0).toUpperCase()}</Link>}
               {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
                 <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
@@ -177,23 +180,19 @@ export default function CustomerHeader({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                    {fullName.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-900">{fullName || 'Loading...'}</span>
-                    <span className="text-xs text-gray-600 capitalize">{userType}</span>
-                  </div>
-                  <button
-                    onClick={() => signOut('/customer/dashboard')}
-                    className="ml-2 p-1 hover:bg-gray-700 rounded transition-colors"
-                    title="Sign Out"
-                  >
-                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
+                <div className="relative">
+                  <button type="button" onClick={() => setShowAccountDropdown(value => !value)} aria-expanded={showAccountDropdown} aria-haspopup="menu" className="account-button flex items-center gap-3 rounded-xl px-2 py-1.5 text-left hover:bg-gray-100">
+                    <span className="flex size-9 items-center justify-center rounded-full bg-purple-500 font-semibold text-white">{fullName.charAt(0).toUpperCase()}</span>
+                    <span className="flex flex-col"><span className="text-sm font-medium text-gray-900">{fullName || 'Loading...'}</span><span className="text-xs capitalize text-gray-600">{userType}</span></span>
+                    <svg className="size-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m6 9 6 6 6-6" /></svg>
                   </button>
+                  {showAccountDropdown && <div role="menu" className="account-dropdown absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-2 shadow-xl">
+                    <Link role="menuitem" href="/customer/profile" onClick={() => setShowAccountDropdown(false)} className="block px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-100">My Profile</Link>
+                    <Link role="menuitem" href="/customer/addresses" onClick={() => setShowAccountDropdown(false)} className="block px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-100">Saved Addresses</Link>
+                    <Link role="menuitem" href="/customer/notifications" onClick={() => setShowAccountDropdown(false)} className="block px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-100">Notifications</Link>
+                    <button role="menuitem" type="button" onClick={() => { setShowAccountDropdown(false); setShowChangePasswordModal(true); }} className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100">Change Password</button>
+                    <button role="menuitem" type="button" onClick={() => signOut('/customer/dashboard')} className="block w-full border-t border-gray-100 px-4 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50">Sign Out</button>
+                  </div>}
                 </div>
               </>
             ) : (

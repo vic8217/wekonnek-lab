@@ -56,7 +56,6 @@ export default function CustomerLayout({
   const customerUser = user?.userType === "customer" ? user : undefined;
   const isGuest = !customerUser && !getToken();
   const onPublicRoute = isPublicRoute(pathname);
-  const isDashboard = pathname === "/customer/dashboard";
   const isMap = pathname === "/customer/map";
   const isProfile = pathname === "/customer/profile";
   const isEditProfile = pathname === "/customer/edit-profile";
@@ -67,7 +66,6 @@ export default function CustomerLayout({
   const isDineInOrderFlow = /^\/customer\/orders\/[^/]+(?:\/bill-out)?$/.test(pathname);
   const isMarketplaceCategory = pathname.startsWith("/customer/explore/");
   const isMerchantDetail = /^\/customer\/explore\/[^/]+\/[^/]+/.test(pathname);
-  const usesStandaloneDesktop = isDashboard || isMarketplaceCategory;
 
   if (loading && !onPublicRoute) {
     return (
@@ -97,27 +95,21 @@ export default function CustomerLayout({
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-gray-50">
-      <div className={usesStandaloneDesktop ? "xl:hidden" : ""}>
-        <CustomerHeader
-          hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isCart || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
-          showCart={isMerchantDetail}
-        />
-      </div>
+      <CustomerHeader
+        hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isCart || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
+        showCart={isMerchantDetail}
+      />
 
       {!isGuest && <OpenDineInTicketCard />}
 
       {/* Desktop layout: sidebar + main */}
-      <div className={usesStandaloneDesktop ? "hidden" : "hidden min-w-0 xl:flex"}>
-        <CustomerSidebar />
+      <div className="hidden min-w-0 xl:flex">
+        {!isGuest && <CustomerSidebar />}
         <main className="min-w-0 flex-1 overflow-x-hidden p-6">
           {!isEditProfile && !isEReceipt && <PortalBackButton />}
           {children}
         </main>
       </div>
-
-      {usesStandaloneDesktop && (
-        <div className="hidden xl:block">{children}</div>
-      )}
 
       {/* Mobile layout: full width content + bottom nav */}
       <div className="min-w-0 xl:hidden">
