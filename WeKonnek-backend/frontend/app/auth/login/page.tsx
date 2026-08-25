@@ -24,6 +24,7 @@ function LoginForm() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(true);
   const [greeting, setGreeting] = useState({ title: 'Good Morning!', icon: 'morning' });
   const [socialProviders, setSocialProviders] = useState<Array<'google' | 'facebook' | 'apple'>>([]);
@@ -90,7 +91,7 @@ function LoginForm() {
     oauthExchangeStarted.current = oauthCode;
     setActiveTab('register'); setLoading(true);
     fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
-      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
+      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); window.history.replaceState({}, '', '/auth/login'); const savedMobile = sessionStorage.getItem('wekonnek_social_mobile'); sessionStorage.removeItem('wekonnek_social_mobile'); if (savedMobile) setMobile(savedMobile); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (body.needsMobileVerification || body.needsProfile) setSocialNotice('One more step: verify your mobile number to finish setting up your WeKonnek account.'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
       .catch(error => { setError(error instanceof Error ? error.message : 'Social sign-in could not be completed.'); setActiveTab('register'); })
       .finally(() => setLoading(false));
   }, [searchParams, router]);
@@ -183,7 +184,13 @@ function LoginForm() {
     await performPasswordSignIn(signInData.email, signInData.password);
   };
 
+  const hasValidPhilippineMobile = mobile.replace(/\D/g, '').replace(/^0/, '').length === 10;
   const beginSocial = async (provider: 'google' | 'facebook' | 'apple') => {
+    if (!hasValidPhilippineMobile) {
+      setError('Enter your Philippine mobile number to continue with social sign-in.');
+      return;
+    }
+    sessionStorage.setItem('wekonnek_social_mobile', mobile);
     setLoading(true); setError(null);
     try { const response = await fetch(`/api/auth/oauth/${provider}/start`); const body = await response.json(); if (!response.ok) throw new Error(body.message || `${provider} sign-in is unavailable.`); window.location.assign(body.authorizationUrl); }
     catch (error: any) { setError(error.message); setLoading(false); }
@@ -387,12 +394,15 @@ function LoginForm() {
 
             {activeTab === 'register' && <div className="space-y-4">
               {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
+              {socialNotice && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{socialNotice}</div>}
               {registerStep === 'method' && <>
                 <p className="text-center text-sm text-gray-600">Create your customer account in just a few steps.</p>
-                {socialProviders.map(provider => <button key={provider} type="button" disabled={loading} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize">Continue with {provider}</button>)}
-                <div className="flex items-center gap-3 text-xs text-gray-500"><span className="h-px flex-1 bg-gray-200"/><span>or continue with mobile</span><span className="h-px flex-1 bg-gray-200"/></div>
-                <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number</label>
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900"><strong>Philippine mobile number required.</strong><p className="mt-1 text-xs text-blue-700">Enter your number first to enable social sign-in. We&apos;ll verify it after your provider account is confirmed.</p></div>
+                <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number <span className="text-red-600">*</span></label>
                 <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-red-500"><span className="px-4 py-3 bg-gray-50 rounded-l-lg font-medium">+63</span><input id="mobile" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="tel" autoComplete="tel-national" placeholder="917 123 4567" className="min-w-0 flex-1 px-4 py-3 rounded-r-lg outline-none"/></div>
+                <p className="text-xs text-gray-500">Example: 917 123 4567</p>
+                {socialProviders.map(provider => <button key={provider} type="button" disabled={loading || !hasValidPhilippineMobile} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">Continue with {provider}</button>)}
+                <div className="flex items-center gap-3 text-xs text-gray-500"><span className="h-px flex-1 bg-gray-200"/><span>or continue with mobile</span><span className="h-px flex-1 bg-gray-200"/></div>
                 <button type="button" onClick={() => requestOtp()} disabled={loading || mobile.replace(/\D/g, '').replace(/^0/, '').length !== 10} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50">{loading ? 'Please wait…' : 'Continue'}</button>
               </>}
               {registerStep === 'otp' && <form onSubmit={verifyCode} className="space-y-4">
