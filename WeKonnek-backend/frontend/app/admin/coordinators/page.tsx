@@ -599,8 +599,7 @@ export default function CoordinatorManagementPage() {
           role="alert"
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
-          {loadError}. Please confirm the backend service is running, then
-          refresh this page.
+          {loadError}
         </div>
       )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

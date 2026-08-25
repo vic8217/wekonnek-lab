@@ -109,7 +109,7 @@ export default function CustomerLayout({
 
       {/* Desktop layout: sidebar + main */}
       <div className="hidden min-w-0 xl:flex">
-        {!isGuest && <div className="sticky top-16 self-start"><CustomerSidebar /></div>}
+        <div className="sticky top-16 self-start"><CustomerSidebar /></div>
         <main className="min-w-0 flex-1 overflow-x-hidden p-6">
           {!isEditProfile && !isEReceipt && <PortalBackButton />}
           {children}

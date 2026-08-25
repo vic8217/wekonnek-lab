@@ -334,6 +334,10 @@ export default function ForMerchantsPage() {
   };
   const submitLead = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!location) {
+      toast.error("Select your store location on the map or use GPS first.");
+      return;
+    }
     const form = event.currentTarget;
     setSubmitting(true);
     try {
@@ -378,81 +382,80 @@ export default function ForMerchantsPage() {
     }
   };
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f5faff] text-[#071333]">
+    <main className="min-h-screen overflow-x-clip bg-[#f5faff] text-[#071333]">
       <MerchantHeader />
 
-      <section className="grid min-w-0 items-stretch gap-5 px-4 py-6 md:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)] lg:grid-cols-[minmax(0,1.7fr)_minmax(400px,1fr)] lg:px-9">
-        <div className="relative order-2 h-[360px] min-w-0 max-w-full overflow-hidden rounded-[28px] bg-white sm:h-[460px] md:order-1 md:h-auto md:min-h-[810px] md:self-stretch md:rounded-[38px]">
+      <section className="grid w-full min-w-0 items-start gap-5 px-4 py-6 sm:px-6 xl:px-7 lg:grid-cols-[minmax(340px,34%)_minmax(0,66%)] min-[1200px]:grid-cols-[minmax(360px,36%)_minmax(0,64%)] min-[1440px]:grid-cols-[minmax(380px,38%)_minmax(0,62%)]">
+        <div className="order-2 min-w-0 lg:sticky lg:top-4 lg:order-1 lg:h-[calc(100vh-32px)] lg:min-h-[620px] lg:max-h-[900px]">
+        <aside className="relative h-full min-w-0 max-w-full overflow-hidden rounded-2xl bg-[#061b45] text-white shadow-[0_18px_38px_rgba(7,29,67,.22)]">
           <Image
-            src="/images/weKonnekCityBackground.png"
+            src="/images/merchantHeroLeft.png"
             alt=""
             fill
             aria-hidden="true"
-            sizes="(min-width: 1024px) 62vw, 100vw"
-            className="object-cover object-bottom opacity-80"
+            sizes="(min-width: 1024px) 40vw, 100vw"
+            className="object-cover object-center opacity-45"
           />
-          <div className="relative z-10 aspect-[1024/837] w-full overflow-hidden bg-white shadow-[0_18px_32px_rgba(37,99,235,0.08)]">
-            <Image
-              src="/images/merchantHeroLeft.png"
-              alt="Merchant using WeKonnek to grow his business"
-              fill
-              priority
-              sizes="(min-width: 1024px) 62vw, 100vw"
-              className="object-contain object-top"
-            />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#041633]/95 via-[#061b45]/80 to-[#075cff]/70" />
+          <div className="relative z-10 flex min-h-[430px] flex-col p-6 sm:p-8 lg:h-full lg:min-h-0 lg:p-9">
+            <Image src="/images/weKonnekLogov1.png" alt="WeKonnek" width={1536} height={1024} priority className="h-14 w-auto self-start object-contain brightness-0 invert lg:h-16" />
+            <div className="mt-6 max-w-sm lg:mt-8">
+              <h1 className="text-2xl font-black leading-tight sm:text-3xl lg:text-4xl">Grow your business with WeKonnek</h1>
+              <p className="mt-3 text-sm leading-6 text-blue-50 lg:mt-4">Get discovered by more customers, accept orders, and grow your sales—all in one simple platform.</p>
+            </div>
+            <div className="mt-6 space-y-4 text-sm lg:mt-7 lg:space-y-5">
+              {[
+                [QrCode, "QR Ordering", "Customers scan and order from your store."],
+                [MapPin, "Online Discovery", "Be found on the map by more customers."],
+                [Tag, "Deals & Vouchers", "Run promos and attract more buyers."],
+              ].map(([Icon, title, text]) => (
+                <div key={title as string} className="flex items-center gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-[#075cff] shadow-lg"><Icon size={21} /></span><div><p className="font-black">{title as string}</p><p className="mt-0.5 text-xs text-blue-100">{text as string}</p></div></div>
+              ))}
+            </div>
+            <div className="mt-auto flex items-end gap-3 rounded-xl border border-white/20 bg-[#0d3a92]/75 p-4 backdrop-blur lg:p-5"><Image src="/images/weko-mascot.png" alt="WeKo, the WeKonnek mascot" width={120} height={150} className="-mb-4 hidden h-28 w-auto shrink-0 object-contain sm:block lg:h-32" /><div><p className="font-black">WeKo is here to help your business succeed!</p><p className="mt-2 text-sm leading-5 text-blue-50">Join thousands of merchants already growing with WeKonnek.</p></div></div>
           </div>
+        </aside>
         </div>
 
         <div
           id="callback"
-          className="order-1 min-w-0 max-w-full overflow-hidden rounded-2xl border border-[#ccd8e9] bg-white p-5 shadow-[0_16px_40px_rgba(49,91,150,0.12)] md:order-2 lg:p-7"
+          className="order-1 min-w-0 max-w-full overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_8px_28px_rgba(7,29,67,.08)] lg:order-2 lg:p-7"
         >
-          <div className="flex items-start gap-4">
-            <UsersRound
-              className="mt-1 shrink-0 text-[#075cff]"
-              size={45}
-              strokeWidth={2.2}
-            />
-            <div>
-              <h1 className="text-2xl font-black leading-tight">
-                GET IN TOUCH WITH OUR
-                <br />
-                <span className="text-[#075cff]">ZONE COORDINATOR</span>
-              </h1>
-              <p className="mt-2 text-sm leading-5 text-[#17223b]">
-                Submit your details and our Zone Coordinator will contact you
-                for onboarding and support.
-              </p>
-            </div>
+          <div className="mb-7 flex items-center text-xs font-bold text-slate-500 sm:text-sm">
+            {["Business Info", "Location", "Review & Submit"].map((step, index) => <div key={step} className="flex flex-1 items-center last:flex-none"><span className={`mr-2 flex size-7 items-center justify-center rounded-full border ${index === 0 ? "border-[#075cff] bg-[#075cff] text-white" : "border-slate-300 bg-white"}`}>{index + 1}</span><span className={index === 0 ? "text-[#075cff]" : ""}>{step}</span>{index < 2 && <span className="mx-3 h-px flex-1 bg-slate-200" />}</div>)}
           </div>
 
+          <div className="flex items-start gap-3"><BriefcaseBusiness className="mt-0.5 shrink-0 text-[#075cff]" size={22} /><div><h1 className="text-lg font-black text-[#071333]">Business Information</h1><p className="mt-1 text-sm text-slate-500">Tell us about your business.</p></div></div>
+
           <form onSubmit={submitLead} className="mt-5 min-w-0 space-y-3">
-            <FormField
-              name="contact_name"
-              icon={UserRound}
-              placeholder="Full Name"
-              required
-            />
-            <FormField
-              name="business_name"
-              icon={Store}
-              placeholder="Business / Store Name"
-              required
-            />
-            <FormField
-              name="phone"
-              icon={Phone}
-              placeholder="Mobile Number"
-              type="tel"
-              required
-            />
-            <FormField
-              name="email"
-              icon={Mail}
-              placeholder="Email Address"
-              type="email"
-              required
-            />
+            <div className="grid gap-3 lg:grid-cols-2">
+              <FormField
+                name="contact_name"
+                icon={UserRound}
+                placeholder="Full Name"
+                required
+              />
+              <FormField
+                name="business_name"
+                icon={Store}
+                placeholder="Business / Store Name"
+                required
+              />
+              <FormField
+                name="phone"
+                icon={Phone}
+                placeholder="Mobile Number"
+                type="tel"
+                required
+              />
+              <FormField
+                name="email"
+                icon={Mail}
+                placeholder="Email Address"
+                type="email"
+                required
+              />
+            </div>
             <label className="merchant-input flex items-center gap-3">
               <BriefcaseBusiness
                 size={19}
@@ -676,7 +679,7 @@ export default function ForMerchantsPage() {
                   Expand map
                 </button>
               </div>
-                <div className="relative h-64 w-full sm:h-72">
+                <div className="relative h-64 w-full sm:h-[280px]">
                   <LocationMap
                     selectedLocation={location}
                     defaultCenter={location ?? DEFAULT_MAP_CENTER}
@@ -693,10 +696,8 @@ export default function ForMerchantsPage() {
                     Expand map
                   </button>
                 </div>
-              <div className="grid gap-3 border-t border-[#ccd8e9] bg-white p-3 sm:grid-cols-2">
-                <label className="text-xs font-bold text-slate-700">Latitude<input name="latitude" value={location?.[0].toFixed(7) ?? ""} required readOnly placeholder="Select an area or click the map" className="merchant-input mt-2 bg-slate-50" /></label>
-                <label className="text-xs font-bold text-slate-700">Longitude<input name="longitude" value={location?.[1].toFixed(7) ?? ""} required readOnly placeholder="Select an area or click the map" className="merchant-input mt-2 bg-slate-50" /></label>
-              </div>
+              <input type="hidden" name="latitude" value={location?.[0].toFixed(7) ?? ""} />
+              <input type="hidden" name="longitude" value={location?.[1].toFixed(7) ?? ""} />
             </div>
             {mapDialogOpen && (
               <div

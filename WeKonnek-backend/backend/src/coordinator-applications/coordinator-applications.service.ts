@@ -235,6 +235,17 @@ export class CoordinatorApplicationsService {
       const matchingUser = await tx.user.findFirst({
         where: { OR: [{ email: existing.email }, { phone: existing.mobileNumber }] },
       });
+      const linkedApplication = matchingUser
+        ? await tx.coordinatorApplication.findUnique({
+            where: { userId: matchingUser.id },
+            select: { id: true, status: true, coordinatorCode: true },
+          })
+        : null;
+      if (linkedApplication && linkedApplication.id !== id) {
+        throw new BadRequestException(
+          `This account is already linked to coordinator application #${linkedApplication.id}${linkedApplication.coordinatorCode ? ` (${linkedApplication.coordinatorCode})` : ''}. Review the existing coordinator record instead.`,
+        );
+      }
       const user = matchingUser
         ? await tx.user.update({
             where: { id: matchingUser.id },
