@@ -64,7 +64,11 @@ export class OAuthAuthService {
     if (!state?.completedUserId || !state.consumedAt || state.expiresAt <= new Date()) throw new UnauthorizedException('The sign-in result expired. Please try again.');
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: state.completedUserId } });
     await this.prisma.authOAuthState.update({ where: { id: state.id }, data: { exchangeCodeHash: null } });
-    return this.auth.createSession(user);
+    const session = this.auth.createSession(user);
+    // A verified provider identity is sufficient for customer access. Mobile
+    // number collection remains available as an optional account-profile flow
+    // and does not block a social account from reaching the dashboard.
+    return { ...session, needsMobileVerification: false, needsProfile: false };
   }
 
   private async exchange(provider: Provider, code: string, redirectUri: string, verifier: string, expectedNonce: string) {

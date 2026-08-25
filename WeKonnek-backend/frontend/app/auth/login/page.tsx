@@ -91,7 +91,7 @@ function LoginForm() {
     oauthExchangeStarted.current = oauthCode;
     setActiveTab('register'); setLoading(true);
     fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
-      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); window.history.replaceState({}, '', '/auth/login'); const savedMobile = sessionStorage.getItem('wekonnek_social_mobile'); sessionStorage.removeItem('wekonnek_social_mobile'); if (savedMobile) setMobile(savedMobile); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (body.needsMobileVerification || body.needsProfile) setSocialNotice('One more step: verify your mobile number to finish setting up your WeKonnek account.'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
+      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); window.history.replaceState({}, '', '/auth/login'); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (body.needsMobileVerification || body.needsProfile) setSocialNotice('One more step is needed to finish setting up your WeKonnek account.'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
       .catch(error => { setError(error instanceof Error ? error.message : 'Social sign-in could not be completed.'); setActiveTab('register'); })
       .finally(() => setLoading(false));
   }, [searchParams, router]);
@@ -184,13 +184,7 @@ function LoginForm() {
     await performPasswordSignIn(signInData.email, signInData.password);
   };
 
-  const hasValidPhilippineMobile = mobile.replace(/\D/g, '').replace(/^0/, '').length === 10;
   const beginSocial = async (provider: 'google' | 'facebook' | 'apple') => {
-    if (!hasValidPhilippineMobile) {
-      setError('Enter your Philippine mobile number to continue with social sign-in.');
-      return;
-    }
-    sessionStorage.setItem('wekonnek_social_mobile', mobile);
     setLoading(true); setError(null);
     try { const response = await fetch(`/api/auth/oauth/${provider}/start`); const body = await response.json(); if (!response.ok) throw new Error(body.message || `${provider} sign-in is unavailable.`); window.location.assign(body.authorizationUrl); }
     catch (error: any) { setError(error.message); setLoading(false); }
@@ -397,12 +391,10 @@ function LoginForm() {
               {socialNotice && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{socialNotice}</div>}
               {registerStep === 'method' && <>
                 <p className="text-center text-sm text-gray-600">Create your customer account in just a few steps.</p>
-                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900"><strong>Philippine mobile number required.</strong><p className="mt-1 text-xs text-blue-700">Enter your number first to enable social sign-in. We&apos;ll verify it after your provider account is confirmed.</p></div>
-                <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number <span className="text-red-600">*</span></label>
-                <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-red-500"><span className="px-4 py-3 bg-gray-50 rounded-l-lg font-medium">+63</span><input id="mobile" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="tel" autoComplete="tel-national" placeholder="917 123 4567" className="min-w-0 flex-1 px-4 py-3 rounded-r-lg outline-none"/></div>
-                <p className="text-xs text-gray-500">Example: 917 123 4567</p>
-                {socialProviders.map(provider => <button key={provider} type="button" disabled={loading || !hasValidPhilippineMobile} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400">Continue with {provider}</button>)}
+                {socialProviders.map(provider => <button key={provider} type="button" disabled={loading} onClick={() => beginSocial(provider)} className="relative flex min-h-12 w-full items-center justify-center border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"><SocialLoginIcon provider={provider}/><span>Continue with {provider}</span></button>)}
                 <div className="flex items-center gap-3 text-xs text-gray-500"><span className="h-px flex-1 bg-gray-200"/><span>or continue with mobile</span><span className="h-px flex-1 bg-gray-200"/></div>
+                <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number</label>
+                <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-red-500"><span className="px-4 py-3 bg-gray-50 rounded-l-lg font-medium">+63</span><input id="mobile" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="tel" autoComplete="tel-national" placeholder="917 123 4567" className="min-w-0 flex-1 px-4 py-3 rounded-r-lg outline-none"/></div>
                 <button type="button" onClick={() => requestOtp()} disabled={loading || mobile.replace(/\D/g, '').replace(/^0/, '').length !== 10} className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50">{loading ? 'Please wait…' : 'Continue'}</button>
               </>}
               {registerStep === 'otp' && <form onSubmit={verifyCode} className="space-y-4">
@@ -565,6 +557,13 @@ function LoginForm() {
       </section>
     </main>
   );
+}
+
+function SocialLoginIcon({ provider }: { provider: 'google' | 'facebook' | 'apple' }) {
+  const common = "absolute left-5 size-5";
+  if (provider === 'google') return <svg aria-label="Google" viewBox="0 0 24 24" className={common}><path fill="#4285F4" d="M21.8 12.2c0-.7-.1-1.3-.2-1.9H12v3.6h5.5a4.7 4.7 0 0 1-2 3.1v2.4h3.2c1.9-1.8 3.1-4.4 3.1-7.2Z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.6L15.5 17a6 6 0 0 1-8.9-3.2H3.3v2.5A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.6 13.8a6 6 0 0 1 0-3.7V7.6H3.3a10 10 0 0 0 0 8.7l3.3-2.5Z"/><path fill="#EA4335" d="M12 6a5.5 5.5 0 0 1 3.9 1.5l2.9-2.9A10 10 0 0 0 3.3 7.6l3.3 2.5A6 6 0 0 1 12 6Z"/></svg>;
+  if (provider === 'facebook') return <svg aria-label="Facebook" viewBox="0 0 24 24" className={common}><circle cx="12" cy="12" r="11" fill="#1877F2"/><path fill="white" d="M13.4 19v-6h2l.3-2.4h-2.3V9c0-.7.2-1.2 1.2-1.2h1.2V5.7c-.2 0-.9-.1-1.7-.1-1.7 0-2.9 1-2.9 3v1.7H9v2.4h2.2v6h2.2Z"/></svg>;
+  return <svg aria-label="Apple" viewBox="0 0 24 24" className={`${common} fill-slate-900`}><path d="M16.7 12.8c0-2 1.6-3 1.7-3.1a3.8 3.8 0 0 0-3-1.6c-1.3-.1-2.5.8-3.1.8-.7 0-1.7-.8-2.8-.8C7.3 8.2 5.2 9.4 4 11.4c-2.3 4 .6 9.8 1.7 11.4.6.8 1.2 1.8 2.1 1.8.9 0 1.2-.6 2.3-.6 1.1 0 1.4.6 2.3.6 1 0 1.6-.9 2.1-1.7.7-1 1-2 1-2.1-.1 0-3.8-1.5-3.8-6Zm-2.2-6.1c.5-.6.9-1.5.8-2.4-.8 0-1.8.5-2.3 1.1-.5.6-.9 1.5-.8 2.3.9.1 1.8-.4 2.3-1Z"/></svg>;
 }
 
 export default function LoginPage() {
