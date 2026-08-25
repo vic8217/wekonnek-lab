@@ -26,6 +26,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(true);
   const [greeting, setGreeting] = useState({ title: 'Good Morning!', icon: 'morning' });
+  const [socialProviders, setSocialProviders] = useState<Array<'google' | 'facebook' | 'apple'>>([]);
 
   // Sign In Form State
   const [signInData, setSignInData] = useState({
@@ -71,6 +72,13 @@ function LoginForm() {
       : hour >= 12 && hour < 18
         ? { title: 'Good Afternoon!', icon: 'afternoon' }
         : { title: 'Good Evening!', icon: 'evening' });
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/backend/auth/providers', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : { providers: [] })
+      .then(body => setSocialProviders((body.providers || []).filter((item: any) => item.enabled).map((item: any) => String(item.provider).toLowerCase()).filter((provider: string): provider is 'google' | 'facebook' | 'apple' => ['google', 'facebook', 'apple'].includes(provider))))
+      .catch(() => setSocialProviders([]));
   }, []);
 
   useEffect(() => {
@@ -377,7 +385,7 @@ function LoginForm() {
               {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
               {registerStep === 'method' && <>
                 <p className="text-center text-sm text-gray-600">Create your customer account in just a few steps.</p>
-                {(['google', 'facebook', 'apple'] as const).map(provider => <button key={provider} type="button" disabled={loading} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize">Continue with {provider}</button>)}
+                {socialProviders.map(provider => <button key={provider} type="button" disabled={loading} onClick={() => beginSocial(provider)} className="w-full min-h-12 border border-gray-300 rounded-lg bg-white font-semibold text-gray-800 hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-red-500 capitalize">Continue with {provider}</button>)}
                 <div className="flex items-center gap-3 text-xs text-gray-500"><span className="h-px flex-1 bg-gray-200"/><span>or continue with mobile</span><span className="h-px flex-1 bg-gray-200"/></div>
                 <label htmlFor="mobile" className="block text-sm font-medium text-gray-700">Philippine mobile number</label>
                 <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-red-500"><span className="px-4 py-3 bg-gray-50 rounded-l-lg font-medium">+63</span><input id="mobile" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="tel" autoComplete="tel-national" placeholder="917 123 4567" className="min-w-0 flex-1 px-4 py-3 rounded-r-lg outline-none"/></div>

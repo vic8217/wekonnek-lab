@@ -52,6 +52,7 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { PaymentPartnersModule } from './payment-partners/payment-partners.module';
+import { SocialAuthModule } from './social-auth/social-auth.module';
 
 @Module({
   imports: [
@@ -119,6 +120,7 @@ import { PaymentPartnersModule } from './payment-partners/payment-partners.modul
     VouchersModule,
     LoyaltyModule,
     PaymentPartnersModule,
+    SocialAuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

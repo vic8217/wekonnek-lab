@@ -9,10 +9,12 @@ import { UsersModule } from '../users/users.module';
 import { SmsService } from './sms.service';
 import { OtpDeliveryService } from './otp-delivery.service';
 import { OAuthAuthService } from './oauth-auth.service';
+import { SocialAuthModule } from '../../social-auth/social-auth.module';
 
 @Module({
   imports: [
     UsersModule,
+    SocialAuthModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

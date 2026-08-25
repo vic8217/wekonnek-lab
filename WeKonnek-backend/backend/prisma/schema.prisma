@@ -1040,6 +1040,29 @@ model AuthIdentity {
   @@map("auth_identities")
 }
 
+model SocialAuthProvider {
+  id                    String   @id @default(cuid())
+  provider              String
+  enabled               Boolean  @default(false)
+  environment           String   @default("SANDBOX")
+  clientId              String?  @map("client_id")
+  encryptedClientSecret String?  @map("encrypted_client_secret")
+  teamId                String?  @map("team_id")
+  keyId                 String?  @map("key_id")
+  encryptedPrivateKey   String?  @map("encrypted_private_key")
+  callbackUrl           String?  @map("callback_url")
+  scopes                String[] @default([])
+  status                String   @default("NOT_TESTED")
+  lastTestedAt          DateTime? @map("last_tested_at")
+  lastTestResult        String?  @map("last_test_result")
+  updatedById           String?  @map("updated_by_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, environment])
+  @@map("social_auth_providers")
+}
+
 model OtpChallenge {
   id            String    @id @default(uuid()) @db.Uuid
   phone         String

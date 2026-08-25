@@ -1,15 +1,15 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createHash, createPublicKey, randomBytes, randomUUID, verify } from 'crypto';
 import { UserRole } from '@prisma/client';
 import { AuthService } from './auth.service';
+import { SocialAuthProviderService } from '../../social-auth/social-auth.service';
 
 type Provider = 'google' | 'facebook' | 'apple';
 
 @Injectable()
 export class OAuthAuthService {
-  constructor(private readonly config: ConfigService, private readonly prisma: PrismaService, private readonly auth: AuthService) {}
+  constructor(private readonly prisma: PrismaService, private readonly auth: AuthService, private readonly socialProviders: SocialAuthProviderService) {}
 
   private hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
   private b64(value: Buffer) { return value.toString('base64url'); }
@@ -20,9 +20,9 @@ export class OAuthAuthService {
 
   async start(providerInput: string, linkUserId?: string) {
     const provider = this.assertProvider(providerInput);
-    const clientId = this.config.get<string>(`${provider.toUpperCase()}_CLIENT_ID`);
-    const redirectUri = this.config.get<string>(`${provider.toUpperCase()}_REDIRECT_URI`);
-    if (!clientId || !redirectUri) throw new BadRequestException(`${provider[0].toUpperCase() + provider.slice(1)} sign-in is currently unavailable.`);
+    const configured = await this.socialProviders.oauthCredentials(provider);
+    const clientId = configured.clientId;
+    const redirectUri = configured.redirectUri;
     const state = this.b64(randomBytes(32)); const verifier = this.b64(randomBytes(48)); const nonce = this.b64(randomBytes(24));
     await this.prisma.authOAuthState.create({ data: { id: randomUUID(), provider, stateHash: this.hash(state), verifier, nonce, redirectUri, linkUserId, expiresAt: new Date(Date.now() + 10 * 60_000) } });
     const challenge = this.b64(createHash('sha256').update(verifier).digest());
@@ -68,8 +68,9 @@ export class OAuthAuthService {
   }
 
   private async exchange(provider: Provider, code: string, redirectUri: string, verifier: string, expectedNonce: string) {
-    const clientId = this.config.get<string>(`${provider.toUpperCase()}_CLIENT_ID`)!;
-    const secret = this.config.get<string>(`${provider.toUpperCase()}_CLIENT_SECRET`);
+    const configured = await this.socialProviders.oauthCredentials(provider);
+    const clientId = configured.clientId;
+    const secret = configured.clientSecret;
     const tokenUrl = provider === 'google' ? 'https://oauth2.googleapis.com/token' : provider === 'facebook' ? 'https://graph.facebook.com/v20.0/oauth/access_token' : 'https://appleid.apple.com/auth/token';
     const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId });
     if (secret) body.set('client_secret', secret); if (provider !== 'facebook') body.set('code_verifier', verifier);
