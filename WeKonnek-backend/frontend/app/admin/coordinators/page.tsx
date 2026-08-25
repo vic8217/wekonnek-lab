@@ -1190,6 +1190,12 @@ function ApplicationReviewModal({
   onNotesChange,
   onSaveNotes,
   savingNotes,
+  zones,
+  selectedZoneId,
+  onZoneChange,
+  onApprove,
+  onReject,
+  updatingStatus,
   onClose,
 }: {
   application: CoordinatorApplication;
