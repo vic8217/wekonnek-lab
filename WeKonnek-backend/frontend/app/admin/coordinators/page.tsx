@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   BookOpen,
   ChevronLeft,
@@ -133,6 +134,8 @@ export default function CoordinatorManagementPage() {
     useState<CoordinatorApplication | null>(null);
   const [adminNotes, setAdminNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [updatingApplicationStatus, setUpdatingApplicationStatus] =
+    useState(false);
   const [generatedAccess, setGeneratedAccess] =
     useState<GeneratedAccess | null>(null);
   const [temporaryAccess, setTemporaryAccess] = useState<
@@ -325,52 +328,73 @@ export default function CoordinatorManagementPage() {
   const updateStatus = async (
     id: number,
     nextStatus: "approved" | "rejected",
-  ) => {
+  ): Promise<CoordinatorApplication | null> => {
     const previousStatus = applications.find((item) => item.id === id)?.status;
     const managementZoneId = zoneSelections[id];
     if (nextStatus === "approved" && !managementZoneId) {
       setLoadError("Select a coordinator zone before approving the applicant");
-      return;
+      return null;
     }
-    const response = await fetch(
-      `/api/backend/coordinator-applications/${id}/status`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
+    setUpdatingApplicationStatus(true);
+    try {
+      const response = await fetch(
+        `/api/backend/coordinator-applications/${id}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({ status: nextStatus, managementZoneId }),
         },
-        body: JSON.stringify({ status: nextStatus, managementZoneId }),
-      },
-    );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setLoadError(body.message || "Unable to update coordinator");
-      return;
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setLoadError(body.message || "Unable to update coordinator");
+        return null;
+      }
+      setLoadError("");
+      setApplications((current) =>
+        current.map((application) =>
+          application.id === id ? body : application,
+        ),
+      );
+      if (previousStatus === "pending")
+        setStats((current) => ({
+          ...current,
+          pending: Math.max(0, current.pending - 1),
+          coordinators:
+            current.coordinators + (nextStatus === "approved" ? 1 : 0),
+          activeCoverageAreas:
+            current.activeCoverageAreas + (nextStatus === "approved" ? 1 : 0),
+        }));
+      if (body.credentials) {
+        const access = {
+          title: "Coordinator account created",
+          ...body.credentials,
+        } as GeneratedAccess;
+        setGeneratedAccess(access);
+        setTemporaryAccess((current) => ({ ...current, [id]: access }));
+      }
+      return body as CoordinatorApplication;
+    } finally {
+      setUpdatingApplicationStatus(false);
     }
-    setLoadError("");
-    setApplications((current) =>
-      current.map((application) =>
-        application.id === id ? body : application,
-      ),
+  };
+
+  const reviewApplicationStatus = async (
+    nextStatus: "approved" | "rejected",
+  ) => {
+    if (!selectedApplication) return;
+    const updated = await updateStatus(selectedApplication.id, nextStatus);
+    if (!updated) return;
+    setSelectedApplication(null);
+    setApplicationSummaryOpen(false);
+    toast.success(
+      nextStatus === "approved"
+        ? "Coordinator application approved."
+        : "Coordinator application rejected.",
     );
-    if (previousStatus === "pending")
-      setStats((current) => ({
-        ...current,
-        pending: Math.max(0, current.pending - 1),
-        coordinators:
-          current.coordinators + (nextStatus === "approved" ? 1 : 0),
-        activeCoverageAreas:
-          current.activeCoverageAreas + (nextStatus === "approved" ? 1 : 0),
-      }));
-    if (body.credentials) {
-      const access = {
-        title: "Coordinator account created",
-        ...body.credentials,
-      } as GeneratedAccess;
-      setGeneratedAccess(access);
-      setTemporaryAccess((current) => ({ ...current, [id]: access }));
-    }
   };
 
   const suspendCoordinator = async (application: CoordinatorApplication) => {
@@ -544,6 +568,10 @@ export default function CoordinatorManagementPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <Link href="/admin/coordinator-resources" className="inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-6 font-bold text-slate-700 transition hover:border-[#e60012] hover:bg-red-50 hover:text-[#e60012]">
+            <BookOpen size={20} />
+            Coordinator Resources
+          </Link>
           <button type="button" onClick={openCommissionSettings} className="inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-[#e60012] bg-white px-6 font-bold text-[#e60012] transition hover:bg-red-50">
             <BadgePercent size={20} />
             <span>Commission</span>
@@ -872,6 +900,17 @@ export default function CoordinatorManagementPage() {
           onNotesChange={setAdminNotes}
           onSaveNotes={saveNotes}
           savingNotes={savingNotes}
+          zones={zones}
+          selectedZoneId={zoneSelections[selectedApplication.id] || ""}
+          onZoneChange={(zoneId) =>
+            setZoneSelections((current) => ({
+              ...current,
+              [selectedApplication.id]: zoneId,
+            }))
+          }
+          onApprove={() => void reviewApplicationStatus("approved")}
+          onReject={() => void reviewApplicationStatus("rejected")}
+          updatingStatus={updatingApplicationStatus}
           onClose={() => setSelectedApplication(null)}
         />
       )}
@@ -1158,6 +1197,12 @@ function ApplicationReviewModal({
   onNotesChange: (value: string) => void;
   onSaveNotes: () => void;
   savingNotes: boolean;
+  zones: CoordinatorZone[];
+  selectedZoneId: string;
+  onZoneChange: (zoneId: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
+  updatingStatus: boolean;
   onClose: () => void;
 }) {
   const details = [
@@ -1295,6 +1340,53 @@ function ApplicationReviewModal({
                 {savingNotes ? "Saving…" : "Save staff notes"}
               </button>
             </section>
+            {application.status === "pending" && (
+              <section className="border-t border-slate-200 pt-6">
+                <label
+                  htmlFor="coordinator-zone"
+                  className="block text-sm font-black text-slate-900"
+                >
+                  Coordinator zone
+                </label>
+                <select
+                  id="coordinator-zone"
+                  value={selectedZoneId}
+                  onChange={(event) => onZoneChange(event.target.value)}
+                  disabled={updatingStatus}
+                  className="mt-3 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
+                >
+                  <option value="">Select a zone to approve</option>
+                  {zones
+                    .filter((zone) => zone.isActive)
+                    .map((zone) => (
+                      <option key={zone.id} value={zone.id}>
+                        {zone.code} — {zone.name}
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  A zone assignment is required before this coordinator can be approved.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={onReject}
+                    disabled={updatingStatus}
+                    className="h-11 rounded-xl border border-red-300 bg-white font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {updatingStatus ? "Processing…" : "Reject"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onApprove}
+                    disabled={updatingStatus || !selectedZoneId}
+                    className="h-11 rounded-xl bg-emerald-600 font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {updatingStatus ? "Processing…" : "Approve"}
+                  </button>
+                </div>
+              </section>
+            )}
           </aside>
         </div>
       </div>

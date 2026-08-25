@@ -1,0 +1,1 @@
+import View from '@/components/AdminPaymentPlaceholder'; export default function Page() { return <View title="Payment Reconciliation" disabled="PayCools reconciliation awaits provider API specifications." />; }

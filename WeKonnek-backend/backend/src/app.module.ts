@@ -51,6 +51,7 @@ import { ZonesModule } from './modules/zones/zones.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { PaymentPartnersModule } from './payment-partners/payment-partners.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     InvoicesModule,
     VouchersModule,
     LoyaltyModule,
+    PaymentPartnersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

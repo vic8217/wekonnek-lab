@@ -122,7 +122,7 @@ export class BazaarListingsService {
     if (!reason || reason.length < 5) throw new BadRequestException('Provide a clear policy violation reason');
     const listing = await this.prisma.bazaarListing.findUnique({ where: { id } });
     if (!listing) throw new NotFoundException('Bazaar listing not found');
-    if (listing.status === 'suspended') throw new BadRequestException('This listing is already suspended');
+    if (listing.status !== 'active') throw new BadRequestException('Only active listings can be suspended');
     return this.prisma.bazaarListing.update({ where: { id }, data: {
       statusBeforeSuspension: listing.status, status: 'suspended', suspendedAt: new Date(), suspendedBy: adminUserId, suspensionReason: reason,
     } });

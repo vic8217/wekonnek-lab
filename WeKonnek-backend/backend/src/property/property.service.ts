@@ -543,10 +543,25 @@ export class PropertyService {
   }
 
   async adminList(q: any) {
+    await this.expire();
     const page = Math.max(1, Number(q.page) || 1),
       limit = Math.min(100, Math.max(1, Number(q.limit) || 25));
     const where: any = {};
     if (q.status && q.status !== "ALL") where.listingStatus = q.status;
+    if (q.paymentStatus && q.paymentStatus !== "ALL")
+      where.paymentStatus = q.paymentStatus;
+    if (q.planId && q.planId !== "ALL") where.planId = q.planId;
+    if (q.expiringSoon === "true")
+      where.AND = [
+        ...(where.AND || []),
+        {
+          listingStatus: "ACTIVE",
+          expiresAt: {
+            gt: new Date(),
+            lte: new Date(Date.now() + 7 * 86400000),
+          },
+        },
+      ];
     if (q.search)
       where.OR = [
         { title: { contains: q.search, mode: "insensitive" } },
@@ -561,11 +576,12 @@ export class PropertyService {
           },
         },
       ];
-    const [items, total] = await Promise.all([
+    const [items, total, statusGroups, expiringSoon] = await Promise.all([
       this.prisma.propertyListing.findMany({
         where,
         include: {
           propertyType: true,
+          plan: { select: { id: true, name: true, listingFee: true } },
           images: { take: 1, orderBy: { sortOrder: "asc" } },
           owner: {
             select: {
@@ -589,6 +605,19 @@ export class PropertyService {
         take: limit,
       }),
       this.prisma.propertyListing.count({ where }),
+      this.prisma.propertyListing.groupBy({
+        by: ["listingStatus"],
+        _count: { _all: true },
+      }),
+      this.prisma.propertyListing.count({
+        where: {
+          listingStatus: "ACTIVE",
+          expiresAt: {
+            gt: new Date(),
+            lte: new Date(Date.now() + 7 * 86400000),
+          },
+        },
+      }),
     ]);
     return {
       items,
@@ -597,6 +626,14 @@ export class PropertyService {
         limit,
         total,
         pages: Math.max(1, Math.ceil(total / limit)),
+      },
+      counts: {
+        all: statusGroups.reduce((sum, group) => sum + group._count._all, 0),
+        active: statusGroups.find((group) => group.listingStatus === "ACTIVE")?._count._all || 0,
+        pending: statusGroups.find((group) => group.listingStatus === "PENDING")?._count._all || 0,
+        expired: statusGroups.find((group) => group.listingStatus === "EXPIRED")?._count._all || 0,
+        suspended: statusGroups.find((group) => group.listingStatus === "SUSPENDED")?._count._all || 0,
+        expiringSoon,
       },
     };
   }

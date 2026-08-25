@@ -108,10 +108,10 @@ function ProtectedMerchantLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-gray-50">
-      <MerchantHeader onMenuOpen={openMobileMenu} />
+    <div className="min-h-screen overflow-x-clip bg-gray-50">
+      <div className="sticky top-0 z-50"><MerchantHeader onMenuOpen={openMobileMenu} /></div>
       <div className="flex min-w-0">
-        <div className="hidden lg:block">
+        <div className="sticky top-16 hidden max-h-[calc(100vh-4rem)] self-start overflow-y-auto lg:block">
           <MerchantSidebar
             subscriptionTier={subscription.tier}
             subscriptionActive={subscription.active}

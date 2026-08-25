@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/hooks/use-auth';
 import AdminSidebar from '@/components/AdminSidebar';
 import AdminHeader from '@/components/AdminHeader';
-import PortalBackButton from '@/components/PortalBackButton';
 
 export default function AdminLayout({
   children,
@@ -33,12 +32,11 @@ function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-gray-50">
-      <AdminHeader onMenuClick={() => setSidebarOpen(true)} />
+    <div className="min-h-screen overflow-x-clip bg-gray-50">
+      <div className="sticky top-0 z-50"><AdminHeader onMenuClick={() => setSidebarOpen(true)} /></div>
       <div className="flex min-w-0">
         <AdminSidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <main className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6">
-          <PortalBackButton />
           {children}
         </main>
       </div>

@@ -6,7 +6,6 @@ import Image from 'next/image';
 import { getToken, getUser, useAuth, setAuth, type AuthUser } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import { ArrowRight, CalendarDays, Eye, EyeOff, Mail, Moon, ShoppingBag, Sun, Sunrise, Tag, UserRound, UserRoundPlus, UtensilsCrossed } from 'lucide-react';
-import { pendingNotificationDestination } from '@/lib/notification-destination';
 
 // Keep backend addresses server-side so a bad build-time environment value
 // can never make a production browser connect to localhost.
@@ -16,10 +15,10 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { refreshAuth } = useAuth();
-  const redirectTo = searchParams.get('redirect');
-  const customerDestination = () => redirectTo === '/bazaar/post'
-    ? '/bazaar/post'
-    : pendingNotificationDestination('/customer/dashboard', '/customer/');
+  // A successful customer login always opens the customer home page. This
+  // avoids resuming a stale order/notification route before the dashboard
+  // session has finished initializing.
+  const customerDestination = () => '/customer/dashboard';
   const [activeTab, setActiveTab] = useState<'signin' | 'register'>('signin');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);

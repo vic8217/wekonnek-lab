@@ -1,226 +1,32 @@
 "use client";
+
 import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Clock3, Eye, FileText, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { getToken } from "@/hooks/use-auth";
-import type { PropertyListing } from "@/lib/property";
+import type { PropertyListing, PropertyPlan } from "@/lib/property";
 import PropertyPlanManager from "@/components/PropertyPlanManager";
 import { listerTypeLabel } from "@/lib/property-classification";
 
+type Row = Omit<PropertyListing, "owner"> & { owner?: PropertyListing["owner"] & { email?: string; phone?: string }; paymentStatus: string; publishedAt?: string; expiresAt?: string; plan?: Pick<PropertyPlan,"id"|"name"|"listingFee"> | null };
+type Counts = { all:number; active:number; pending:number; expiringSoon:number; expired:number; suspended:number };
+const date = (v?:string) => v ? new Intl.DateTimeFormat("en-PH",{dateStyle:"medium"}).format(new Date(v)) : "—";
+const tones:Record<string,string>={PENDING:"bg-orange-100 text-orange-800",ACTIVE:"bg-emerald-100 text-emerald-800",SUSPENDED:"bg-red-100 text-red-800",EXPIRED:"bg-red-50 text-red-700",DRAFT:"bg-amber-100 text-amber-800"};
+
 export default function AdminPropertyPage() {
-  const [items, setItems] = useState<PropertyListing[]>([]),
-    [status, setStatus] = useState("ALL"),
-    [search, setSearch] = useState(""),
-    [error, setError] = useState("");
-  const load = useCallback(async () => {
-    const p = new URLSearchParams({ status });
-    if (search) p.set("search", search);
-    const r = await fetch(`/api/backend/property/admin/listings?${p}`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    });
-    const b = await r.json();
-    if (!r.ok) throw new Error(b.message || "Unable to load properties");
-    setItems(b.items || []);
-  }, [status, search]);
-  useEffect(() => {
-    const t = setTimeout(() => load().catch((e) => setError(e.message)), 200);
-    return () => clearTimeout(t);
-  }, [load]);
-  const act = async (
-    item: PropertyListing,
-    action: string,
-    value?: boolean,
-  ) => {
-    let reason = "";
-    if (["SUSPEND", "REJECT"].includes(action)) {
-      reason =
-        window.prompt(`Reason to ${action.toLowerCase()} this listing:`) || "";
-      if (!reason) return;
-    }
-    try {
-      const r = await fetch(
-        `/api/backend/property/admin/listings/${item.id}/moderate`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${getToken()}`,
-          },
-          body: JSON.stringify({ action, reason, value }),
-        },
-      );
-      const b = await r.json();
-      if (!r.ok) throw new Error(b.message);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Moderation failed");
-    }
-  };
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-black">Property Management</h1>
-        <p className="text-sm text-slate-500">
-          Review, verify, feature and suspend property listings and reports.
-        </p>
-      </div>
-      <PropertyPlanManager />
-      <div className="grid gap-3 rounded-xl border bg-white p-4 md:grid-cols-[1fr_220px]">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title, location, owner or phone"
-          className="rounded-xl border p-3"
-        />
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-xl border bg-white p-3"
-        >
-          <option>ALL</option>
-          {[
-            "DRAFT",
-            "PENDING",
-            "ACTIVE",
-            "RESERVED",
-            "SOLD",
-            "RENTED",
-            "EXPIRED",
-            "INACTIVE",
-            "REJECTED",
-            "SUSPENDED",
-          ].map((x) => (
-            <option key={x}>{x}</option>
-          ))}
-        </select>
-      </div>
-      {error && (
-        <div className="rounded-xl bg-red-50 p-4 text-red-700">{error}</div>
-      )}
-      <div className="overflow-x-auto rounded-xl border bg-white">
-        <table className="min-w-[1100px] w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="p-4">Property</th>
-              <th>Owner</th>
-              <th>Status</th>
-              <th>Performance</th>
-              <th>Validity</th>
-              <th>Moderation</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td className="p-4">
-                  <div className="flex gap-3">
-                    <img
-                      src={item.images?.[0]?.imageUrl || ""}
-                      alt=""
-                      className="size-14 rounded-lg bg-slate-100 object-cover"
-                    />
-                    <div>
-                      <p className="font-black">{item.title}</p>
-                      <p className="text-xs text-slate-500">
-                        {item.propertyType.name} ·{" "}
-                        {item.transactionType.replace("_", " ")} · ₱
-                        {Number(item.price).toLocaleString()}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {item.barangay}, {item.city}
-                      </p>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <p className="font-bold">
-                    {[item.owner?.firstName, item.owner?.lastName]
-                      .filter(Boolean)
-                      .join(" ") || "Customer"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {listerTypeLabel(item.sellerType)}
-                    {item.agencyName ? ` · ${item.agencyName}` : ""}
-                  </p>
-                </td>
-                <td>
-                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black">
-                    {item.listingStatus}
-                  </span>
-                  <div className="mt-2 flex gap-1">
-                    {item.isVerified && (
-                      <span className="text-xs font-bold text-blue-700">
-                        Verified
-                      </span>
-                    )}
-                    {item.isFeatured && (
-                      <span className="text-xs font-bold text-amber-600">
-                        Featured
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td>
-                  {item.viewCount} views
-                  <br />
-                  <span className="text-xs text-slate-500">
-                    {item._count?.savedBy || 0} saves ·{" "}
-                    {item._count?.viewingRequests || 0} viewings ·{" "}
-                    {item._count?.reports || 0} reports
-                  </span>
-                </td>
-                <td className="text-xs">
-                  {item.expiresAt
-                    ? new Date(item.expiresAt).toLocaleDateString("en-PH")
-                    : "—"}
-                </td>
-                <td>
-                  <div className="flex max-w-64 flex-wrap gap-1">
-                    {item.listingStatus === "PENDING" && (
-                      <button
-                        onClick={() => act(item, "APPROVE")}
-                        className="rounded border px-2 py-1 font-bold text-green-700"
-                      >
-                        Approve
-                      </button>
-                    )}
-                    {item.listingStatus === "SUSPENDED" ? (
-                      <button
-                        onClick={() => act(item, "RESTORE")}
-                        className="rounded border px-2 py-1 font-bold text-green-700"
-                      >
-                        Restore
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => act(item, "SUSPEND")}
-                        className="rounded border px-2 py-1 font-bold text-red-700"
-                      >
-                        Suspend
-                      </button>
-                    )}
-                    <button
-                      onClick={() => act(item, "VERIFY", !item.isVerified)}
-                      className="rounded border px-2 py-1 font-bold text-blue-700"
-                    >
-                      {item.isVerified ? "Unverify" : "Verify"}
-                    </button>
-                    <button
-                      onClick={() => act(item, "FEATURE", !item.isFeatured)}
-                      className="rounded border px-2 py-1 font-bold text-amber-700"
-                    >
-                      {item.isFeatured ? "Unfeature" : "Feature"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!items.length && (
-          <p className="p-10 text-center text-slate-500">
-            No property listings match these filters.
-          </p>
-        )}
-      </div>
-    </div>
-  );
+  const [items,setItems]=useState<Row[]>([]),[plans,setPlans]=useState<PropertyPlan[]>([]),[counts,setCounts]=useState<Counts>({all:0,active:0,pending:0,expiringSoon:0,expired:0,suspended:0});
+  const [status,setStatus]=useState("ALL"),[payment,setPayment]=useState("ALL"),[planId,setPlanId]=useState("ALL"),[soon,setSoon]=useState(false),[search,setSearch]=useState(""),[page,setPage]=useState(1),[rows,setRows]=useState(10),[paging,setPaging]=useState({page:1,pages:1,total:0}),[error,setError]=useState("");
+  const load=useCallback(async()=>{const q=new URLSearchParams({status,paymentStatus:payment,planId,page:String(page),limit:String(rows)});if(search)q.set("search",search);if(soon)q.set("expiringSoon","true");try{setError("");const r=await fetch("/api/backend/property/admin/listings?"+q,{headers:{Authorization:"Bearer "+getToken()}}),b=await r.json();if(!r.ok)throw new Error(b.message||"Unable to load properties");setItems(b.items||[]);setCounts(b.counts||{});setPaging(b.pagination||{page:1,pages:1,total:0});}catch(e){setError(e instanceof Error?e.message:"Unable to load properties");}},[page,payment,planId,rows,search,soon,status]);
+  useEffect(()=>{void fetch("/api/backend/property/plans").then(r=>r.json()).then(setPlans).catch(()=>undefined);},[]);
+  useEffect(()=>{const t=setTimeout(()=>void load(),200);return()=>clearTimeout(t);},[load]);
+  const choose=(s:string,exp=false)=>{setStatus(s);setSoon(exp);setPage(1);};
+  const act=async(item:Row,action:string,value?:boolean)=>{let reason="";if(action==="SUSPEND"){reason=window.prompt("Reason to suspend this listing:")||"";if(!reason)return;}try{const r=await fetch("/api/backend/property/admin/listings/"+item.id+"/moderate",{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:"Bearer "+getToken()},body:JSON.stringify({action,reason,value})}),b=await r.json();if(!r.ok)throw new Error(b.message);await load();}catch(e){setError(e instanceof Error?e.message:"Moderation failed");}};
+  const cards:Array<[string,keyof Counts,string,typeof FileText,string,()=>void]>=[["All Listings","all","All property listings",FileText,"bg-blue-50 text-blue-600",()=>choose("ALL")],["Active","active","Currently published",CheckCircle2,"bg-emerald-50 text-emerald-600",()=>choose("ACTIVE")],["Pending","pending","Awaiting payment or activation",CircleAlert,"bg-amber-50 text-amber-600",()=>choose("PENDING")],["Expiring Soon","expiringSoon","Expiring within 7 days",Clock3,"bg-orange-50 text-orange-600",()=>choose("ACTIVE",true)],["Expired","expired","Validity period ended",Clock3,"bg-red-50 text-red-600",()=>choose("EXPIRED")],["Suspended","suspended","Temporarily suspended",ShieldAlert,"bg-red-50 text-red-600",()=>choose("SUSPENDED")]];
+  return <div className="space-y-5 text-[#101a33]">
+    <header><h1 className="text-2xl font-black tracking-tight sm:text-3xl">Property Management</h1><p className="mt-1 text-sm text-slate-500">Review, verify, feature and suspend property listings and reports.</p></header>
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">{cards.map(([label,key,sub,Icon,color])=><button key={key} onClick={cards.find(c=>c[1]===key)![5]} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-red-200"><div className="flex justify-between"><span className={"rounded-xl p-2.5 "+color}><Icon size={18}/></span><b className="text-2xl">{counts[key]||0}</b></div><p className="mt-3 text-sm font-black">{label}</p><p className="mt-1 text-xs text-slate-500">{sub}</p></button>)}</div>
+    <PropertyPlanManager />
+    <div className="grid grid-cols-[minmax(0,1fr)_170px_150px_190px] gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm"><label className="relative"><Search size={17} className="absolute left-3 top-3 text-slate-400"/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search title, location, owner or phone" className="w-full rounded-lg border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-[#e60012]"/></label><select value={status} onChange={e=>{setStatus(e.target.value);setSoon(false);setPage(1);}} className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm"><option value="ALL">All statuses</option>{["PENDING","ACTIVE","SUSPENDED","EXPIRED"].map(x=><option key={x}>{x}</option>)}</select><select value={payment} onChange={e=>{setPayment(e.target.value);setPage(1);}} className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm"><option value="ALL">All payments</option><option value="paid">Paid</option><option value="unpaid">Unpaid</option></select><select value={planId} onChange={e=>{setPlanId(e.target.value);setPage(1);}} className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm"><option value="ALL">All tiers</option>{plans.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+    {error&&<div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="min-w-[1370px] w-full text-left text-sm"><thead className="bg-[#e60012] text-xs font-bold uppercase text-white"><tr>{["Property","Owner","Plan","Payment","Status","Performance","Validity","Moderation"].map(x=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody className="divide-y divide-slate-200">{items.map(item=>{const remaining=item.expiresAt?Math.ceil((new Date(item.expiresAt).getTime()-Date.now())/86400000):null;const urgent=item.listingStatus==="ACTIVE"&&remaining!==null&&remaining>0&&remaining<=7;return <tr key={item.id} className="align-top hover:bg-slate-50/70"><td className="px-4 py-4"><div className="flex gap-3"><img src={item.images?.[0]?.imageUrl||""} alt="" className="size-14 rounded-lg border border-slate-200 bg-slate-100 object-cover"/><div><b>{item.title}</b><p className="text-xs text-slate-500">{item.propertyType.name} · {item.transactionType.replace("_"," ")} · ₱{Number(item.price).toLocaleString()}</p><p className="mt-1 text-xs text-slate-400">{item.barangay}, {item.city}</p></div></div></td><td className="px-4 py-4"><b>{[item.owner?.firstName,item.owner?.lastName].filter(Boolean).join(" ")||"Customer"}</b><p className="mt-1 text-xs text-slate-500">{item.owner?.email||"No email"}</p><p className="text-xs text-slate-500">{item.owner?.phone||"No phone"}</p></td><td className="px-4 py-4"><b>{item.plan?.name||"—"}</b><p className="mt-1 text-xs text-slate-500">{item.plan?"₱"+Number(item.plan.listingFee).toLocaleString():""}</p></td><td className="px-4 py-4"><span className={"rounded-full px-2.5 py-1 text-xs font-bold "+(item.paymentStatus==="paid"?"bg-emerald-100 text-emerald-800":"bg-red-50 text-red-700")}>{item.paymentStatus==="paid"?"Paid":"Unpaid"}</span><p className="mt-2 text-xs text-slate-400">{item.paymentStatus==="paid"?date(item.publishedAt):"—"}</p></td><td className="px-4 py-4"><span className={"rounded-full px-2.5 py-1 text-xs font-bold "+(tones[item.listingStatus]||"bg-slate-100 text-slate-700")}>{item.listingStatus}</span></td><td className="px-4 py-4">{item.viewCount} views<br/><span className="text-xs text-slate-500">{item._count?.savedBy||0} saves · {item._count?.viewingRequests||0} viewings · {item._count?.reports||0} reports</span></td><td className="px-4 py-4 text-xs"><p><b>Start:</b> {date(item.publishedAt)}</p><p className="mt-1"><b>End:</b> {date(item.expiresAt)}</p>{remaining!==null&&remaining>0&&<p className={"mt-2 font-bold "+(urgent?"text-orange-700":"text-slate-500")}>{urgent?"Expiring soon · ":""}{remaining} days remaining</p>}</td><td className="px-4 py-4"><div className="flex max-w-72 flex-wrap gap-2">{item.listingStatus==="PENDING"&&<button onClick={()=>act(item,"APPROVE")} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700"><CheckCircle2 size={14}/>Approve</button>}{item.listingStatus==="SUSPENDED"?<button onClick={()=>act(item,"RESTORE")} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700"><CheckCircle2 size={14}/>Restore</button>:item.listingStatus==="ACTIVE"&&<button onClick={()=>act(item,"SUSPEND")} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-bold text-red-700"><ShieldAlert size={14}/>Suspend</button>}<button onClick={()=>act(item,"VERIFY",!item.isVerified)} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700"><Eye size={14}/>{item.isVerified?"Unverify":"Verify"}</button><button onClick={()=>act(item,"FEATURE",!item.isFeatured)} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-3 py-2 text-xs font-bold text-amber-700"><Sparkles size={14}/>{item.isFeatured?"Unfeature":"Feature"}</button></div></td></tr>})}</tbody></table></div>{!items.length&&<p className="p-10 text-center text-slate-500">No property listings match these filters.</p>}<footer className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between"><span className="text-slate-500">Showing {paging.total?(page-1)*rows+1:0} to {Math.min(page*rows,paging.total)} of {paging.total} listings</span><div className="flex items-center gap-3"><button disabled={page<=1} onClick={()=>setPage(p=>p-1)} className="rounded-lg p-2 text-slate-500 disabled:opacity-30"><ChevronLeft size={18}/></button><span className="flex size-9 items-center justify-center rounded-lg bg-[#e60012] font-bold text-white">{page}</span><button disabled={page>=paging.pages} onClick={()=>setPage(p=>p+1)} className="rounded-lg p-2 text-slate-500 disabled:opacity-30"><ChevronRight size={18}/></button><select value={rows} onChange={e=>{setRows(Number(e.target.value));setPage(1);}} className="rounded-lg border border-slate-200 px-2 py-2"><option value={10}>10 rows</option><option value={25}>25 rows</option><option value={50}>50 rows</option></select></div></footer></div>
+  </div>;
 }

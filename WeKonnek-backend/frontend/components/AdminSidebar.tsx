@@ -17,6 +17,8 @@ export default function AdminSidebar({
 }) {
   const pathname = usePathname();
   const [userType, setUserType] = useState<'admin' | 'staff' | null>(null);
+  const settingsActive = ['/admin/subscriptions', '/admin/categories', '/admin/zones', '/admin/payments'].some(isPath => pathname === isPath || pathname?.startsWith(`${isPath}/`));
+  const [settingsExpanded, setSettingsExpanded] = useState(settingsActive);
 
   useEffect(() => {
     const checkUserType = async () => {
@@ -44,6 +46,10 @@ export default function AdminSidebar({
     };
     checkUserType();
   }, []);
+
+  useEffect(() => {
+    if (settingsActive) setSettingsExpanded(true);
+  }, [settingsActive]);
 
   const isActive = (path: string) => {
     return pathname === path || pathname?.startsWith(path + '/');
@@ -75,7 +81,7 @@ export default function AdminSidebar({
         <Link
           href="/admin/bazaar-listings"
           className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-            isActive('/admin/bazaar-listings') ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
+            (isActive('/admin/bazaar-listings') || isActive('/admin/bazaar-promos')) ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
           }`}
         >
           <span className="flex w-5 justify-center text-lg">🛡️</span>
@@ -126,7 +132,7 @@ export default function AdminSidebar({
             <Link
               href="/admin/coordinators"
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                isActive('/admin/coordinators')
+                (isActive('/admin/coordinators') || isActive('/admin/coordinator-resources'))
                   ? 'bg-[#DB0002] text-white'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
@@ -137,20 +143,22 @@ export default function AdminSidebar({
               <span className="font-medium">Coordinator Management</span>
             </Link>
 
-            <Link
-              href="/admin/coordinator-resources"
-              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                isActive('/admin/coordinator-resources')
-                  ? 'bg-[#DB0002] text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253" />
-              </svg>
-              <span className="font-medium">Coordinator Resources</span>
-            </Link>
+            <div>
+              <button type="button" onClick={(event) => { event.stopPropagation(); setSettingsExpanded(value => !value); }} aria-expanded={settingsExpanded} className={`flex w-full items-center space-x-3 rounded-lg px-4 py-3 text-left transition-colors ${settingsActive ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317a1.724 1.724 0 013.35 0 1.724 1.724 0 002.573 1.066 1.724 1.724 0 012.37 2.37 1.724 1.724 0 001.066 2.573 1.724 1.724 0 010 3.35 1.724 1.724 0 00-1.066 2.573 1.724 1.724 0 01-2.37 2.37 1.724 1.724 0 00-2.573 1.066 1.724 1.724 0 01-3.35 0 1.724 1.724 0 00-2.573-1.066 1.724 1.724 0 01-2.37-2.37 1.724 1.724 0 00-1.066-2.573 1.724 1.724 0 010-3.35 1.724 1.724 0 001.066-2.573 1.724 1.724 0 012.37-2.37 1.724 1.724 0 002.573-1.066z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span className="flex-1 font-medium">Settings</span><span className={`text-xs transition-transform ${settingsExpanded ? 'rotate-180' : ''}`}>⌄</span>
+              </button>
+              {settingsExpanded && <div className="ml-4 space-y-1 border-l border-gray-200 pl-3">
+                {[
+                  ['/admin/subscriptions', 'Subscription Tier'],
+                  ['/admin/categories', 'Categories'],
+                  ['/admin/zones', 'Zones'],
+                  ['/admin/payments', 'Payments'],
+                ].map(([href, label]) => <Link key={href} href={href} className={`block rounded-lg px-3 py-2 text-sm transition-colors ${isActive(href) ? 'bg-[#DB0002] font-medium text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{label}</Link>)}
+              </div>}
+            </div>
 
+            {false && <>
             <Link
               href="/admin/subscriptions"
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
@@ -166,6 +174,20 @@ export default function AdminSidebar({
             </Link>
 
             <Link
+              href="/admin/payments"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/admin/payments')
+                  ? 'bg-[#DB0002] text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 8.25h19.5m-18 0v9A2.25 2.25 0 006 19.5h12a2.25 2.25 0 002.25-2.25v-9m-16.5 0v-1.5A2.25 2.25 0 016 4.5h12a2.25 2.25 0 012.25 2.25v1.5M6.75 15h2.25" />
+              </svg>
+              <span className="font-medium">Payments</span>
+            </Link>
+
+            <Link
               href="/admin/categories"
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 isActive('/admin/categories')
@@ -177,16 +199,6 @@ export default function AdminSidebar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
               <span className="font-medium">Category Management</span>
-            </Link>
-
-            <Link
-              href="/admin/bazaar-promos"
-              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                isActive('/admin/bazaar-promos') ? 'bg-[#DB0002] text-white' : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              <span className="flex w-5 justify-center text-lg">📢</span>
-              <span className="font-medium">Bazaar Promo Cards</span>
             </Link>
 
             <Link
@@ -217,6 +229,7 @@ export default function AdminSidebar({
               </svg>
               <span className="font-medium">Coordinator Zones</span>
             </Link>
+            </>}
 
             <Link
               href="/admin/users"
@@ -270,7 +283,7 @@ export default function AdminSidebar({
   return (
     <>
       {/* Desktop static sidebar */}
-      <aside className="hidden lg:block w-64 shrink-0 bg-white border-r border-gray-200 min-h-screen">
+      <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-64 shrink-0 overflow-y-auto bg-white border-r border-gray-200 lg:block">
         {navContent}
       </aside>
 

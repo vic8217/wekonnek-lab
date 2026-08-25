@@ -54,7 +54,12 @@ export default function CustomerLayout({
   }, [loading, user, pathname, router]);
 
   const customerUser = user?.userType === "customer" ? user : undefined;
-  const isGuest = !customerUser && !getToken();
+  // Do not read browser storage during render. `getToken()` is unavailable on
+  // the server, so using it here makes the initial server and client trees
+  // disagree for signed-in customers and triggers hydration errors. Auth
+  // state is synchronized by `useAuth`; while it is loading we keep the
+  // authenticated shell stable and let the effect-driven state update settle.
+  const isGuest = !loading && !customerUser;
   const onPublicRoute = isPublicRoute(pathname);
   const isMap = pathname === "/customer/map";
   const isProfile = pathname === "/customer/profile";
@@ -94,17 +99,17 @@ export default function CustomerLayout({
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-gray-50">
-      <CustomerHeader
+    <div className="min-h-screen overflow-x-clip bg-gray-50">
+      <div className="xl:sticky xl:top-0 xl:z-50"><CustomerHeader
         hideMobileSearch={isMap || isProfile || isEditProfile || isScan || isCart || isMarketplaceCategory || isCheckout || isDineInOrderFlow || isEReceipt}
         showCart={isMerchantDetail}
-      />
+      /></div>
 
       {!isGuest && <OpenDineInTicketCard />}
 
       {/* Desktop layout: sidebar + main */}
       <div className="hidden min-w-0 xl:flex">
-        {!isGuest && <CustomerSidebar />}
+        {!isGuest && <div className="sticky top-16 self-start"><CustomerSidebar /></div>}
         <main className="min-w-0 flex-1 overflow-x-hidden p-6">
           {!isEditProfile && !isEReceipt && <PortalBackButton />}
           {children}

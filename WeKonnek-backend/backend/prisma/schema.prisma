@@ -35,26 +35,26 @@ model Category {
 }
 
 model MediaAsset {
-  id                    String    @id @default(uuid()) @db.Uuid
-  mediaType             String    @map("media_type") @db.VarChar(50)
-  ownerType             String    @map("owner_type") @db.VarChar(50)
-  ownerId               String    @map("owner_id") @db.VarChar(100)
-  objectKey             String    @unique @map("object_key") @db.VarChar(500)
-  thumbnailKey          String?   @map("thumbnail_key") @db.VarChar(500)
-  url                   String    @db.VarChar(1000)
-  thumbnailUrl          String?   @map("thumbnail_url") @db.VarChar(1000)
-  mimeType              String    @map("mime_type") @db.VarChar(100)
-  width                 Int?
-  height                Int?
-  sizeBytes             Int?      @map("size_bytes")
-  thumbnailWidth        Int?      @map("thumbnail_width")
-  thumbnailHeight       Int?      @map("thumbnail_height")
-  thumbnailSizeBytes    Int?      @map("thumbnail_size_bytes")
-  status                String    @default("active") @db.VarChar(30)
-  createdById           String?   @map("created_by_id") @db.Uuid
-  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz
+  id                 String    @id @default(uuid()) @db.Uuid
+  mediaType          String    @map("media_type") @db.VarChar(50)
+  ownerType          String    @map("owner_type") @db.VarChar(50)
+  ownerId            String    @map("owner_id") @db.VarChar(100)
+  objectKey          String    @unique @map("object_key") @db.VarChar(500)
+  thumbnailKey       String?   @map("thumbnail_key") @db.VarChar(500)
+  url                String    @db.VarChar(1000)
+  thumbnailUrl       String?   @map("thumbnail_url") @db.VarChar(1000)
+  mimeType           String    @map("mime_type") @db.VarChar(100)
+  width              Int?
+  height             Int?
+  sizeBytes          Int?      @map("size_bytes")
+  thumbnailWidth     Int?      @map("thumbnail_width")
+  thumbnailHeight    Int?      @map("thumbnail_height")
+  thumbnailSizeBytes Int?      @map("thumbnail_size_bytes")
+  status             String    @default("active") @db.VarChar(30)
+  createdById        String?   @map("created_by_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz
 
   @@index([ownerType, ownerId])
   @@index([mediaType])
@@ -138,8 +138,8 @@ model Merchant {
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  category             MerchantCategory?      @relation(fields: [categoryId], references: [id])
-  subCategory          MerchantSubCategory?   @relation(fields: [subCategoryId], references: [id])
+  category             MerchantCategory?            @relation(fields: [categoryId], references: [id])
+  subCategory          MerchantSubCategory?         @relation(fields: [subCategoryId], references: [id])
   products             Product[]
   orders               WkOrder[]
   reservations         Reservation[]
@@ -159,8 +159,9 @@ model Merchant {
   crewPairingTokens    CrewPairingToken[]
   dineInAuditLogs      DineInAuditLog[]
   dineInChanges        DineInChange[]
-  ownedCategories      Category[]             @relation("MerchantOwnedCategories")
-  ownedSubCategories   SubCategory[]          @relation("MerchantOwnedSubCategories")
+  platformPayments     PlatformPaymentTransaction[]
+  ownedCategories      Category[]                   @relation("MerchantOwnedCategories")
+  ownedSubCategories   SubCategory[]                @relation("MerchantOwnedSubCategories")
 
   @@index([userId])
   @@index([categoryId])
@@ -339,6 +340,152 @@ model SubscriptionPayment {
   @@index([merchantId])
   @@index([status])
   @@map("subscription_payments")
+}
+
+model PaymentPartnerConfiguration {
+  id                                 String                       @id @default(uuid()) @db.Uuid
+  providerCode                       String                       @unique @map("provider_code") @db.VarChar(50)
+  enabled                            Boolean                      @default(false)
+  environment                        String                       @default("uat") @db.VarChar(20)
+  dynamicQrEnabled                   Boolean                      @default(false) @map("dynamic_qr_enabled")
+  hybridQrEnabled                    Boolean                      @default(false) @map("hybrid_qr_enabled")
+  staticQrEnabled                    Boolean                      @default(false) @map("static_qr_enabled")
+  bankTransferEnabled                Boolean                      @default(false) @map("bank_transfer_enabled")
+  webPaymentEnabled                  Boolean                      @default(false) @map("web_payment_enabled")
+  billsPaymentEnabled                Boolean                      @default(false) @map("bills_payment_enabled")
+  refundEnabled                      Boolean                      @default(false) @map("refund_enabled")
+  payoutEnabled                      Boolean                      @default(false) @map("payout_enabled")
+  defaultQrExpirySeconds             Int                          @default(900) @map("default_qr_expiry_seconds")
+  settlementMode                     String                       @default("MANUAL") @map("settlement_mode") @db.VarChar(20)
+  publicKeyConfirmed                 Boolean                      @default(false) @map("public_key_confirmed")
+  ipWhitelistConfigured              Boolean                      @default(false) @map("ip_whitelist_configured")
+  callbackRegistered                 Boolean                      @default(false) @map("callback_registered")
+  uatPublicKeyRegistrationConfirmed  Boolean                      @default(false) @map("uat_public_key_registration_confirmed")
+  uatIpWhitelistConfirmed            Boolean                      @default(false) @map("uat_ip_whitelist_confirmed")
+  uatCallbackRegistrationConfirmed   Boolean                      @default(false) @map("uat_callback_registration_confirmed")
+  prodPublicKeyRegistrationConfirmed Boolean                      @default(false) @map("prod_public_key_registration_confirmed")
+  prodIpWhitelistConfirmed           Boolean                      @default(false) @map("prod_ip_whitelist_confirmed")
+  prodCallbackRegistrationConfirmed  Boolean                      @default(false) @map("prod_callback_registration_confirmed")
+  uatLastConnectionTestAt            DateTime?                    @map("uat_last_connection_test_at") @db.Timestamptz
+  uatLastConnectionTestSuccessful    Boolean?                     @map("uat_last_connection_test_successful")
+  uatLastConnectionTestErrorCode     String?                      @map("uat_last_connection_test_error_code") @db.VarChar(100)
+  prodLastConnectionTestAt           DateTime?                    @map("prod_last_connection_test_at") @db.Timestamptz
+  prodLastConnectionTestSuccessful   Boolean?                     @map("prod_last_connection_test_successful")
+  prodLastConnectionTestErrorCode    String?                      @map("prod_last_connection_test_error_code") @db.VarChar(100)
+  lastSuccessfulRequestAt            DateTime?                    @map("last_successful_request_at") @db.Timestamptz
+  lastSuccessfulCallbackAt           DateTime?                    @map("last_successful_callback_at") @db.Timestamptz
+  lastReconciliationAt               DateTime?                    @map("last_reconciliation_at") @db.Timestamptz
+  createdAt                          DateTime                     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                          DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  sources                            PaymentPartnerSourceConfig[]
+  auditLogs                          PaymentPartnerAuditLog[]
+  events                             PaymentPartnerEvent[]
+
+  @@map("payment_partner_configurations")
+}
+
+model PaymentPartnerSourceConfig {
+  id              String                      @id @default(uuid()) @db.Uuid
+  configurationId String                      @map("configuration_id") @db.Uuid
+  providerCode    String                      @map("provider_code") @db.VarChar(50)
+  sourceType      String                      @map("source_type") @db.VarChar(50)
+  enabled         Boolean                     @default(false)
+  createdAt       DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  configuration   PaymentPartnerConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade)
+
+  @@unique([providerCode, sourceType])
+  @@index([configurationId])
+  @@map("payment_partner_source_configs")
+}
+
+model PaymentPartnerAuditLog {
+  id              String                      @id @default(uuid()) @db.Uuid
+  configurationId String                      @map("configuration_id") @db.Uuid
+  actorId         String                      @map("actor_id") @db.Uuid
+  action          String                      @db.VarChar(100)
+  changes         Json
+  ipAddress       String?                     @map("ip_address") @db.VarChar(64)
+  userAgent       String?                     @map("user_agent") @db.VarChar(500)
+  createdAt       DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  configuration   PaymentPartnerConfiguration @relation(fields: [configurationId], references: [id], onDelete: Restrict)
+
+  @@index([configurationId, createdAt])
+  @@map("payment_partner_audit_logs")
+}
+
+model PaymentPartnerEvent {
+  id              String                      @id @default(uuid()) @db.Uuid
+  configurationId String                      @map("configuration_id") @db.Uuid
+  type            String                      @db.VarChar(100)
+  message         String                      @db.VarChar(500)
+  reference       String?                     @db.VarChar(100)
+  success         Boolean                     @default(true)
+  createdAt       DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  configuration   PaymentPartnerConfiguration @relation(fields: [configurationId], references: [id], onDelete: Cascade)
+
+  @@index([configurationId, createdAt])
+  @@map("payment_partner_events")
+}
+
+enum PlatformPaymentDestination {
+  MERCHANT_ACCOUNT
+  USER_WALLET
+  RIDER_WALLET
+}
+
+enum PlatformPaymentSourceType {
+  RESTAURANT_ORDER
+  RETAIL_ORDER
+  ADVANCE_ORDER
+  TAKE_OUT
+  RESERVATION
+  MERCHANT_SUBSCRIPTION
+  USER_WALLET_LOAD
+  RIDER_WALLET_LOAD
+}
+
+enum PlatformPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model PlatformPaymentTransaction {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  reference             String                     @unique @db.VarChar(32)
+  provider              String                     @db.VarChar(30)
+  providerTransactionId String?                    @unique @map("provider_transaction_id") @db.VarChar(100)
+  providerQrCodeId      String?                    @unique @map("provider_qr_code_id") @db.VarChar(100)
+  idempotencyKey        String                     @unique @map("idempotency_key") @db.VarChar(30)
+  destination           PlatformPaymentDestination
+  sourceType            PlatformPaymentSourceType  @map("source_type")
+  sourceId              String?                    @map("source_id") @db.VarChar(100)
+  merchantId            Int?                       @map("merchant_id")
+  payerUserId           String?                    @map("payer_user_id") @db.Uuid
+  riderId               String?                    @map("rider_id") @db.Uuid
+  walletId              String?                    @map("wallet_id") @db.Uuid
+  amount                Decimal                    @db.Decimal(14, 2)
+  providerAmountMinor   Int                        @map("provider_amount_minor")
+  currency              String                     @default("PHP") @db.VarChar(3)
+  status                PlatformPaymentStatus      @default(PENDING)
+  metadata              Json?
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  paidAt                DateTime?                  @map("paid_at") @db.Timestamptz
+  merchant              Merchant?                  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  payerUser             User?                      @relation("PlatformPaymentPayer", fields: [payerUserId], references: [id], onDelete: Restrict)
+  rider                 User?                      @relation("PlatformPaymentRider", fields: [riderId], references: [id], onDelete: Restrict)
+  wallet                Wallet?                    @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, createdAt])
+  @@index([payerUserId, createdAt])
+  @@index([riderId, createdAt])
+  @@index([walletId, createdAt])
+  @@index([status, createdAt])
+  @@index([sourceType, sourceId])
+  @@map("platform_payment_transactions")
 }
 
 model SubscriptionPlanDefinition {
@@ -611,23 +758,23 @@ model InventoryDailyCount {
 }
 
 model Promotion {
-  id            Int       @id @default(autoincrement())
-  merchantId    Int       @map("merchant_id")
-  title         String    @db.VarChar(255)
-  description   String?   @db.Text
-  discountType  String?   @map("discount_type") @db.VarChar(50)
-  discountValue Decimal?  @map("discount_value") @db.Decimal(10, 2)
-  minOrderAmount Decimal  @default(0) @map("min_order_amount") @db.Decimal(10, 2)
-  voucherId     String?   @unique @map("voucher_id") @db.Uuid
-  appliesToTotalBill Boolean @default(true) @map("applies_to_total_bill")
-  categoryIds   Int[]     @default([]) @map("category_ids")
-  bundleItems   Json?     @map("bundle_items")
-  bundlePrice   Decimal?  @map("bundle_price") @db.Decimal(10, 2)
-  startDate     DateTime? @map("start_date") @db.Timestamptz
-  endDate       DateTime? @map("end_date") @db.Timestamptz
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id                 Int       @id @default(autoincrement())
+  merchantId         Int       @map("merchant_id")
+  title              String    @db.VarChar(255)
+  description        String?   @db.Text
+  discountType       String?   @map("discount_type") @db.VarChar(50)
+  discountValue      Decimal?  @map("discount_value") @db.Decimal(10, 2)
+  minOrderAmount     Decimal   @default(0) @map("min_order_amount") @db.Decimal(10, 2)
+  voucherId          String?   @unique @map("voucher_id") @db.Uuid
+  appliesToTotalBill Boolean   @default(true) @map("applies_to_total_bill")
+  categoryIds        Int[]     @default([]) @map("category_ids")
+  bundleItems        Json?     @map("bundle_items")
+  bundlePrice        Decimal?  @map("bundle_price") @db.Decimal(10, 2)
+  startDate          DateTime? @map("start_date") @db.Timestamptz
+  endDate            DateTime? @map("end_date") @db.Timestamptz
+  isActive           Boolean   @default(true) @map("is_active")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   voucher  Voucher? @relation(fields: [voucherId], references: [id], onDelete: SetNull)
@@ -851,26 +998,28 @@ model User {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
 
-  preferredZone            Zone?                    @relation("RiderPreferredZone", fields: [preferredZoneId], references: [id])
-  zones                    RiderZone[]              @relation("RiderZones")
+  preferredZone            Zone?                        @relation("RiderPreferredZone", fields: [preferredZoneId], references: [id])
+  zones                    RiderZone[]                  @relation("RiderZones")
   addresses                Address[]
   wallet                   Wallet?
   loyaltyAccount           LoyaltyAccount?
-  customerOrders           Order[]                  @relation("OrderCustomer")
-  riderOrders              Order[]                  @relation("OrderRider")
+  customerOrders           Order[]                      @relation("OrderCustomer")
+  riderOrders              Order[]                      @relation("OrderRider")
   voucherRedemptions       VoucherRedemption[]
   claimedVouchers          CustomerVoucher[]
   merchantStaff            MerchantStaff[]
   bazaarListings           BazaarListing[]
   authIdentities           AuthIdentity[]
   authAuditLogs            AuthAuditLog[]
-  propertyListings         PropertyListing[]        @relation("PropertyOwner")
+  propertyListings         PropertyListing[]            @relation("PropertyOwner")
   savedProperties          SavedProperty[]
-  propertyViewings         PropertyViewingRequest[] @relation("PropertyRequester")
-  propertyReports          PropertyReport[]         @relation("PropertyReporter")
-  listingInquiriesReceived ListingInquiry[]         @relation("ListingInquiryOwner")
-  listingInquiriesSent     ListingInquiry[]         @relation("ListingInquirySender")
-  pushDevices             PushDevice[]
+  propertyViewings         PropertyViewingRequest[]     @relation("PropertyRequester")
+  propertyReports          PropertyReport[]             @relation("PropertyReporter")
+  listingInquiriesReceived ListingInquiry[]             @relation("ListingInquiryOwner")
+  listingInquiriesSent     ListingInquiry[]             @relation("ListingInquirySender")
+  pushDevices              PushDevice[]
+  paymentsMade             PlatformPaymentTransaction[] @relation("PlatformPaymentPayer")
+  riderWalletLoads         PlatformPaymentTransaction[] @relation("PlatformPaymentRider")
 
   @@map("users")
 }
@@ -1475,8 +1624,9 @@ model Wallet {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
-  user         User                @relation(fields: [userId], references: [id])
-  transactions WalletTransaction[]
+  user             User                         @relation(fields: [userId], references: [id])
+  transactions     WalletTransaction[]
+  platformPayments PlatformPaymentTransaction[]
 
   @@map("wallets")
 }
@@ -1741,7 +1891,7 @@ model Voucher {
 
   redemptions VoucherRedemption[]
   claims      CustomerVoucher[]
-  promotion  Promotion?
+  promotion   Promotion?
 
   @@index([code])
   @@map("vouchers")
