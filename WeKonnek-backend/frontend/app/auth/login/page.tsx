@@ -44,6 +44,7 @@ function LoginForm() {
   const [profile, setProfile] = useState({ firstName: '', lastName: '', email: '', password: '', confirmPassword: '' });
   const [pendingToken, setPendingToken] = useState('');
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const oauthExchangeStarted = useRef<string | null>(null);
   const [registerData, setRegisterData] = useState({ firstName: '', lastName: '', email: '', password: '', confirmPassword: '' });
 
   const handleSignInChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,13 +84,16 @@ function LoginForm() {
 
   useEffect(() => {
     const oauthCode = searchParams.get('oauth_code');
-    if (!oauthCode) return;
+    if (!oauthCode || oauthExchangeStarted.current === oauthCode) return;
+    // React Strict Mode may mount effects twice in development. OAuth exchange
+    // codes are single-use, so guard the request before consuming it.
+    oauthExchangeStarted.current = oauthCode;
     setActiveTab('register'); setLoading(true);
     fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
       .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
-      .catch(error => setError(error.message)).finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      .catch(error => { setError(error instanceof Error ? error.message : 'Social sign-in could not be completed.'); setActiveTab('register'); })
+      .finally(() => setLoading(false));
+  }, [searchParams, router]);
 
   useEffect(() => { if (!cooldown) return; const timer = window.setInterval(() => setCooldown(value => Math.max(0, value - 1)), 1000); return () => clearInterval(timer); }, [cooldown]);
 
