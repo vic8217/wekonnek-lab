@@ -109,6 +109,7 @@ function Header() {
 					Home
 				</Link>
 				<Link href="/for-merchants">For Merchants</Link>
+				<Link href="/product-studio">Product Studio</Link>
 				<Link href="/coordinators">For Coordinators</Link>
 				<Link href="/contact">Contact</Link>
 			</nav>

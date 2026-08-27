@@ -23,6 +23,10 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  // OAuth providers return to this same route with a one-time code. Start in
+  // a dedicated handoff state so the sign-in or registration UI never flashes
+  // before the session is stored and the customer dashboard is opened.
+  const [oauthProcessing, setOauthProcessing] = useState(() => Boolean(searchParams.get('oauth_code')));
   const [error, setError] = useState<string | null>(null);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(true);
@@ -89,10 +93,10 @@ function LoginForm() {
     // React Strict Mode may mount effects twice in development. OAuth exchange
     // codes are single-use, so guard the request before consuming it.
     oauthExchangeStarted.current = oauthCode;
-    setActiveTab('register'); setLoading(true);
+    setOauthProcessing(true); setLoading(true);
     fetch('/api/auth/oauth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oauthCode }) })
       .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Social sign-in could not be completed.'); await saveSession(body); window.history.replaceState({}, '', '/auth/login'); setPendingToken(body.access_token ?? body.accessToken); setProfile({ firstName: body.user.firstName || '', lastName: body.user.lastName || '', email: body.user.email || '', password: '', confirmPassword: '' }); setRegisterStep(body.needsMobileVerification ? 'method' : body.needsProfile ? 'profile' : 'method'); if (body.needsMobileVerification || body.needsProfile) setSocialNotice('One more step is needed to finish setting up your WeKonnek account.'); if (!body.needsMobileVerification && !body.needsProfile) router.replace(customerDestination()); })
-      .catch(error => { setError(error instanceof Error ? error.message : 'Social sign-in could not be completed.'); setActiveTab('register'); })
+      .catch(error => { setError(error instanceof Error ? error.message : 'Social sign-in could not be completed.'); setActiveTab('signin'); setOauthProcessing(false); })
       .finally(() => setLoading(false));
   }, [searchParams, router]);
 
@@ -222,6 +226,22 @@ function LoginForm() {
 
   const pasteOtp = (event: React.ClipboardEvent) => { const digits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6); if (digits.length === 6) { event.preventDefault(); setOtp(digits.split('')); otpRefs.current[5]?.focus(); } };
 
+  if (oauthProcessing) {
+    return (
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#071333] px-4">
+        <Image src="/images/customer-auth-storefront.png" alt="" fill priority sizes="100vw" className="pointer-events-none -z-20 object-cover object-center" />
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-[#071333]/75" />
+        <div className="w-full max-w-sm rounded-[28px] bg-white p-10 text-center shadow-[0_22px_60px_rgba(0,0,0,.3)]">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50 text-[#075cff]">
+            <span className="size-6 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+          </div>
+          <h1 className="mt-5 text-2xl font-black text-[#071333]">Signing you in</h1>
+          <p className="mt-2 text-sm text-slate-600">Securing your WeKonnek session…</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="relative isolate min-h-screen overflow-hidden bg-[#071333] lg:grid lg:grid-cols-[minmax(520px,.92fr)_minmax(0,1.08fr)]">
       <Image src="/images/customer-auth-storefront.png" alt="Local WeKonnek storefront connected to nearby dining, shopping, and community services" fill priority sizes="100vw" className="pointer-events-none -z-20 object-cover object-center" />
@@ -311,7 +331,7 @@ function LoginForm() {
                       onClick={() => beginSocial(provider)}
                       className="relative flex min-h-14 w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-12 font-bold text-[#12192b] capitalize transition hover:border-blue-200 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
-                      <span className="absolute left-5 text-xl font-black normal-case">{provider === 'google' ? <span className="text-[#4285f4]">G</span> : provider === 'facebook' ? <span className="flex size-6 items-center justify-center rounded-full bg-[#1877f2] text-sm text-white">f</span> : <span className="text-black">●</span>}</span>
+                      <SocialLoginIcon provider={provider} />
                       Continue with {provider}
                     </button>
                   ))}

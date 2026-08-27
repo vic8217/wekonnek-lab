@@ -110,6 +110,13 @@ function normalizeDistrict(value: string | null | undefined) {
   return normalized.match(/\d+/)?.[0] || normalized;
 }
 
+function normalizeSubCategoryNames(value: unknown): string | null {
+  const names = (Array.isArray(value) ? value : String(value ?? '').split(','))
+    .map((name) => String(name).trim())
+    .filter(Boolean);
+  return names.length ? [...new Set(names)].join(', ') : null;
+}
+
 function coverageMatchesApplication(
   coverage: { cityMunicipalityName: string; congressionalDistrict: string; areas: unknown },
   application: { cityMunicipality: string | null; councilDistrict: string | null; geographicArea: string | null; barangay: string | null },
@@ -211,7 +218,7 @@ export class MerchantApplicationsService {
         address: input.address ?? null,
         contactName: input.contact_name ?? input.contactName ?? null,
         categoryName: input.category_name ?? input.categoryName ?? null,
-        subCategoryName: input.sub_category_name ?? input.subCategoryName ?? null,
+        subCategoryName: normalizeSubCategoryNames(input.sub_category_name ?? input.subCategoryName),
         cityMunicipality: input.city_municipality ?? input.cityMunicipality ?? null,
         barangay: input.barangay ?? null,
         councilDistrict: input.council_district ?? input.councilDistrict ?? null,
@@ -810,7 +817,10 @@ export class MerchantApplicationsService {
           select: { id: true },
         })
       : null;
-    const applicationSubCategory = String(application.subCategoryName || '').trim();
+    // A merchant currently has one primary subcategory relation. Keep the first
+    // selected application subcategory as that primary relation; the complete
+    // selection remains on the application for coordinators and administrators.
+    const applicationSubCategory = String(application.subCategoryName || '').split(',')[0]?.trim();
     const subCategory = category && applicationSubCategory
       ? await this.prisma.merchantSubCategory.findFirst({
           where: { categoryId: category.id, isActive: true, name: { equals: applicationSubCategory, mode: 'insensitive' } },

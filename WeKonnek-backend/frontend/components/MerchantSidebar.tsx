@@ -56,6 +56,7 @@ export default function MerchantSidebar({
     { href: "/merchant/branches", label: "Shops", icon: "building" },
     { href: "/merchant/staff", label: "Staff", icon: "users" },
     { href: "/merchant/products", label: "Products", icon: "box" },
+    { href: "/merchant/ai-product-studio", label: "AI Product Studio", icon: "sparkles" },
     {
       href: "/merchant/inventory-summary",
       label: "Inventory",
@@ -255,6 +256,8 @@ export default function MerchantSidebar({
             />
           </svg>
         );
+      case "sparkles":
+        return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3Zm7 11 .7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7L19 14Z" /></svg>;
       case "inventory":
         return (
           <svg
@@ -469,6 +472,9 @@ export default function MerchantSidebar({
               >
                 {getIcon(item.icon)}
                 <span className="font-medium flex-1">{item.label}</span>
+                {item.label === "AI Product Studio" && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${active ? "bg-white/20 text-white" : "bg-red-100 text-red-700"}`}>New</span>
+                )}
                 {locked && (
                   <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-purple-700">
                     Platinum

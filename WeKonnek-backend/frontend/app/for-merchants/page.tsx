@@ -117,19 +117,22 @@ const features = [
 
 const marketStats = [
   {
+    icon: UsersRound,
     value: "97.5M",
     label: "Internet Users",
     detail: "83.8% Internet Penetration",
   },
-  { value: "74%–99%", label: "Smartphone Penetration", detail: "Nationwide" },
+  { icon: Phone, value: "74%–99%", label: "Smartphone Penetration", detail: "Nationwide" },
   {
+    icon: TrendingUp,
     value: "142M",
     label: "Active Mobile Connections",
     detail: "Multiple SIMs/devices",
   },
-  { value: "89%", label: "Android Market Share", detail: "" },
-  { value: "70M+", label: "Active Online Shoppers", detail: "" },
+  { icon: ShoppingBag, value: "89%", label: "Android Market Share", detail: "" },
+  { icon: UsersRound, value: "70M+", label: "Active Online Shoppers", detail: "" },
   {
+    icon: ShoppingBag,
     value: "8.4",
     label: "Online Purchases Per Month",
     detail: "93% shop via smartphones",
@@ -144,7 +147,7 @@ export default function ForMerchantsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [mapDialogOpen, setMapDialogOpen] = useState(false);
   const [categoryName, setCategoryName] = useState("");
-  const [subCategoryName, setSubCategoryName] = useState("");
+  const [subCategoryNames, setSubCategoryNames] = useState<string[]>([]);
   const [businessCategories, setBusinessCategories] = useState<
     BusinessCategory[]
   >([]);
@@ -162,6 +165,9 @@ export default function ForMerchantsPage() {
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const [selectedArea, setSelectedArea] = useState("");
   const selectedDistrictOption = findZoneDistrict(findZoneCity(coverageOptions, selectedCity), selectedDistrict);
+  const selectedCategory = businessCategories.find(
+    (category) => category.name === categoryName,
+  );
   const normalizedCategory = categoryName.trim().toLowerCase();
   const isFoodBusiness = /(food|restaurant|cafe|bakery|catering|beverage)/.test(
     normalizedCategory,
@@ -334,6 +340,10 @@ export default function ForMerchantsPage() {
   };
   const submitLead = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!subCategoryNames.length) {
+      toast.error("Select at least one business subcategory.");
+      return;
+    }
     if (!location) {
       toast.error("Select your store location on the map or use GPS first.");
       return;
@@ -365,7 +375,7 @@ export default function ForMerchantsPage() {
       form.reset();
       setLocation(null);
       setCategoryName("");
-      setSubCategoryName("");
+      setSubCategoryNames([]);
       setBusinessAddress("");
       setHasBranches("");
       setSelectedCity("");
@@ -466,7 +476,7 @@ export default function ForMerchantsPage() {
                 value={categoryName}
                 onChange={(event) => {
                   setCategoryName(event.target.value);
-                  setSubCategoryName("");
+                  setSubCategoryNames([]);
                 }}
                 required
                 disabled={categoriesLoading}
@@ -492,29 +502,58 @@ export default function ForMerchantsPage() {
                 </button>
               </div>
             )}
-            <label className="merchant-input flex items-center gap-3">
-              <Tag size={19} className="shrink-0 text-[#7187a8]" />
-              <select
+            <fieldset
+              disabled={!categoryName}
+              className="rounded-xl border border-[#ccd8e9] bg-white px-4 py-3 disabled:bg-slate-50"
+            >
+              <legend className="sr-only">Business subcategories</legend>
+              <div className="flex items-center gap-3">
+                <Tag size={19} className="shrink-0 text-[#7187a8]" />
+                <span className="text-sm text-slate-500">
+                  {categoryName ? "Business Subcategories" : "Choose a business category first"}
+                </span>
+                {subCategoryNames.length > 0 && (
+                  <span className="ml-auto rounded-full bg-[#eaf1ff] px-2 py-0.5 text-xs font-bold text-[#075cff]">
+                    {subCategoryNames.length} selected
+                  </span>
+                )}
+              </div>
+              <input
+                type="hidden"
                 name="sub_category_name"
-                value={subCategoryName}
-                onChange={(event) => setSubCategoryName(event.target.value)}
-                required
-                disabled={!categoryName}
-                className="min-w-0 flex-1 bg-transparent outline-none disabled:text-slate-400"
-              >
-                <option value="">Business Subcategory</option>
-                {businessCategories
-                  .find((category) => category.name === categoryName)
-                  ?.subCategories?.map((subcategory) => (
-                    <option key={subcategory.id} value={subcategory.name}>
-                      {subcategory.groupName
-                        ? `${subcategory.groupName} — `
-                        : ""}
-                      {subcategory.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                value={subCategoryNames.join(", ")}
+              />
+              {categoryName && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {selectedCategory?.subCategories?.map((subcategory) => {
+                    const selected = subCategoryNames.includes(subcategory.name);
+                    return (
+                      <label
+                        key={subcategory.id}
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${selected ? "border-[#075cff] bg-[#eaf1ff] text-[#075cff]" : "border-slate-200 text-slate-700 hover:border-[#9cbcff]"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() =>
+                            setSubCategoryNames((current) =>
+                              selected
+                                ? current.filter((name) => name !== subcategory.name)
+                                : [...current, subcategory.name],
+                            )
+                          }
+                          className="size-4 accent-[#075cff]"
+                        />
+                        <span>{subcategory.groupName ? `${subcategory.groupName} — ` : ""}{subcategory.name}</span>
+                      </label>
+                    );
+                  })}
+                  {!selectedCategory?.subCategories?.length && (
+                    <p className="text-sm text-slate-500">No subcategories are available for this category.</p>
+                  )}
+                </div>
+              )}
+            </fieldset>
             <label className="merchant-input flex items-center gap-3">
               <MapPin size={19} className="shrink-0 text-slate-500" />
               <input
@@ -867,9 +906,9 @@ export default function ForMerchantsPage() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-t-[28px] bg-gradient-to-br from-[#182854] to-[#075cff] px-5 py-8 text-white lg:px-9">
-        <div className="grid items-center gap-6 lg:grid-cols-[260px_1fr]">
-          <div className="relative mx-auto h-56 w-52 overflow-hidden lg:h-64 lg:w-60">
+      <section className="overflow-hidden rounded-t-[28px] bg-gradient-to-br from-[#182854] to-[#075cff] px-5 py-5 text-white lg:px-9 lg:py-6">
+        <div className="grid items-center gap-3 lg:grid-cols-[220px_1fr]">
+          <div className="relative mx-auto h-40 w-52 overflow-hidden lg:h-44 lg:w-60">
             <Image
               src="/images/weko-mascot.png"
               alt="Blue WeKonnek mascot"
@@ -889,14 +928,14 @@ export default function ForMerchantsPage() {
           </div>
         </div>
 
-        <div className="mt-5 grid overflow-hidden rounded-2xl bg-white text-[#071333] sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-          {marketStats.map(({ value, label, detail }) => (
+        <div className="mt-0 grid overflow-hidden rounded-2xl bg-white text-[#071333] sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          {marketStats.map(({ icon: Icon, value, label, detail }) => (
             <div
               key={label}
-              className="flex min-h-[220px] flex-col items-center justify-center border-b border-r border-[#ccd8e9] p-5 text-center"
+              className="flex min-h-[220px] flex-col items-center justify-start border-b border-r border-[#ccd8e9] p-5 text-center"
             >
-              <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-[#1749e8] text-2xl text-white">
-                •
+              <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-[#1749e8] text-white">
+                <Icon size={28} strokeWidth={2.2} />
               </div>
               <strong className="text-4xl font-black text-[#1749e8]">
                 {value}
@@ -958,7 +997,7 @@ function MerchantHeader() {
           className="h-24 w-auto object-contain"
         />
       </Link>
-      <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-[52px] whitespace-nowrap text-[15px] font-semibold xl:flex">
+      <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 whitespace-nowrap text-[15px] font-semibold xl:flex">
         <Link href="/">Home</Link>
         <Link
           href="/for-merchants"
@@ -966,6 +1005,7 @@ function MerchantHeader() {
         >
           For Merchants
         </Link>
+        <Link href="/product-studio">Product Studio</Link>
         <Link href="/coordinators">For Coordinators</Link>
         <Link href="/contact">Contact</Link>
       </nav>
