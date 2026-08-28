@@ -1,8 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import { createCipheriv, createHash, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { LalamoveClientService } from './lalamove-client.service';
 
 const LALAMOVE = 'LALAMOVE';
 const PROVIDERS = [
@@ -31,11 +37,33 @@ export function encryptDeliveryProviderCredential(
   return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
+export function decryptDeliveryProviderCredential(
+  value: string,
+  key: Buffer,
+): string {
+  const [ivValue, tagValue, encrypted] = value.split('.');
+  if (!ivValue || !tagValue || !encrypted)
+    throw new BadRequestException(
+      'Stored delivery provider credential is invalid',
+    );
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    key,
+    Buffer.from(ivValue, 'base64url'),
+  );
+  decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encrypted, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
 @Injectable()
 export class DeliveryPartnersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly lalamoveClient: LalamoveClientService,
   ) {}
 
   // This is the same AES-256-GCM packed-value pattern used by Social Auth.
@@ -101,9 +129,16 @@ export class DeliveryPartnersService {
         apiSecretConfigured: keys.has('API_SECRET'),
       },
       connection: {
-        status: 'NOT_TESTED',
-        testedAt: null,
-        message: 'Not Tested',
+        status: configuration.lastConnectionStatus,
+        testedAt: configuration.lastTestedAt,
+        lastSuccessfulApiAt: configuration.lastSuccessfulApiAt,
+        lastError: configuration.lastError,
+        message:
+          configuration.lastConnectionStatus === 'CONNECTED'
+            ? 'Connected'
+            : configuration.lastConnectionStatus === 'FAILED'
+              ? 'Failed'
+              : 'Not Tested',
       },
     };
   }
@@ -125,6 +160,52 @@ export class DeliveryPartnersService {
   }
   getLalamove() {
     return this.safeLalamove();
+  }
+
+  async testLalamoveConnection(actorId: string) {
+    const { provider, configuration } = await this.lalamove();
+    const result = await this.lalamoveClient.testConnection();
+    const now = new Date();
+    const connected = result.ok;
+    const errorCode = connected ? null : result.code;
+    await this.prisma.deliveryProviderConfiguration.update({
+      where: { id: configuration.id },
+      data: {
+        lastConnectionStatus: connected ? 'CONNECTED' : 'FAILED',
+        lastTestedAt: now,
+        ...(connected
+          ? { lastSuccessfulApiAt: now, lastError: null }
+          : { lastError: errorCode }),
+      },
+    });
+    await this.prisma.deliveryProviderAuditLog.create({
+      data: {
+        providerId: provider.id,
+        actorId,
+        action: 'LALAMOVE_CONNECTION_TESTED',
+        changes: {
+          environment: configuration.environment.toUpperCase(),
+          result: connected ? 'CONNECTED' : 'FAILED',
+          ...(errorCode ? { errorCode } : {}),
+        },
+      },
+    });
+    return connected
+      ? {
+          ok: true,
+          status: 'CONNECTED',
+          environment: configuration.environment.toUpperCase(),
+          testedAt: now,
+          message: 'Lalamove connection successful.',
+        }
+      : {
+          ok: false,
+          status: 'FAILED',
+          code: errorCode,
+          environment: configuration.environment.toUpperCase(),
+          testedAt: now,
+          message: 'Lalamove connection failed.',
+        };
   }
 
   async updateLalamove(body: Record<string, unknown>, actorId: string) {

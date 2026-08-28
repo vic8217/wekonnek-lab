@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Patch, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
@@ -37,5 +45,10 @@ export class DeliveryPartnersController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.service.updateLalamoveCredentials(body, req.user.id);
+  }
+  @Post('lalamove/test')
+  @Roles(UserRole.admin)
+  testLalamove(@Req() req: AuthenticatedRequest) {
+    return this.service.testLalamoveConnection(req.user.id);
   }
 }
