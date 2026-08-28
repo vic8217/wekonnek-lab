@@ -71,6 +71,7 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto, merchantId: number) {
     await this.assertCategoryAccess(merchantId, createProductDto.categoryId, createProductDto.subCategoryId);
+    await this.media.assertMerchantOwnedUrls(merchantId, [createProductDto.imageUrl, ...(createProductDto.notes || []).map(note => note.iconUrl), ...(createProductDto.variants || []).map(variant => variant.imageUrl)]);
     const merchant = await this.prisma.merchant.findUnique({
       where: { id: merchantId },
       select: { taxClassification: true, category: { select: { slug: true, name: true } } },
@@ -246,6 +247,7 @@ export class ProductsService {
     }
 
     const { options, variants, quantity: _legacyQuantity, lowStockThreshold: _legacyThreshold, ...input } = updateProductDto;
+    await this.media.assertMerchantOwnedUrls(merchantId, [input.imageUrl, ...(input.notes || []).map(note => note.iconUrl), ...(variants || []).map(variant => variant.imageUrl)]);
     const data: any = { ...input };
     if (input.sellingPrice !== undefined || input.price !== undefined) {
       data.sellingPrice = Number(input.sellingPrice ?? input.price);

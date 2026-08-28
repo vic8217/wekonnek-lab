@@ -45,11 +45,21 @@ pnpm-debug.log*
 *.md
 *.MD
 !backend/docs/database-initialization.md
+!backend/docs/VISUAL_SEARCH_PROVIDER_POC.md
+!backend/docs/VISUAL_SEARCH_HOLD.md
+!backend/benchmark-fixtures/
+!backend/benchmark-fixtures/vertex-poc-v1/
+!backend/benchmark-fixtures/vertex-poc-v1/dataset.json
+!backend/benchmark-fixtures/vertex-poc-v1/README.md
+backend/benchmark-fixtures/vertex-poc-v1/catalogue/*
+backend/benchmark-fixtures/vertex-poc-v1/queries/*
 
 # ─── OS files ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 *.pem
+application_default_credentials.json
+google-credentials*.json
 *serviceAccount*.json
 *service-account*.json
 *firebase-adminsdk*.json

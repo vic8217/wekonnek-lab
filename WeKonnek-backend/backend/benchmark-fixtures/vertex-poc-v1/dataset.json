@@ -1,0 +1,382 @@
+{
+  "datasetVersion": "vertex-poc-v1",
+  "catalogue": [
+    {
+      "productId": 100001,
+      "image": "catalogue/poc-apparel-cap-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100002,
+      "image": "catalogue/poc-apparel-dress-floral-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100003,
+      "image": "catalogue/poc-apparel-dress-floral-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100004,
+      "image": "catalogue/poc-apparel-dress-solid-black-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100005,
+      "image": "catalogue/poc-apparel-handbag-black-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100006,
+      "image": "catalogue/poc-apparel-handbag-tan-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100007,
+      "image": "catalogue/poc-apparel-jacket-denim-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100008,
+      "image": "catalogue/poc-apparel-shorts-khaki-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100009,
+      "image": "catalogue/poc-apparel-sneaker-black-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100010,
+      "image": "catalogue/poc-apparel-sneaker-white-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100011,
+      "image": "catalogue/poc-apparel-sneaker-white-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100012,
+      "image": "catalogue/poc-apparel-solid-polo-black-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100013,
+      "image": "catalogue/poc-apparel-solid-polo-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100014,
+      "image": "catalogue/poc-apparel-striped-polo-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100015,
+      "image": "catalogue/poc-apparel-striped-polo-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100016,
+      "image": "catalogue/poc-beauty-facialwash-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100017,
+      "image": "catalogue/poc-beauty-facialwash-green-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100018,
+      "image": "catalogue/poc-beauty-lipstick-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100019,
+      "image": "catalogue/poc-beauty-lotion-pink-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100020,
+      "image": "catalogue/poc-beauty-lotion-white-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100021,
+      "image": "catalogue/poc-beauty-perfume-gold-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100022,
+      "image": "catalogue/poc-beauty-perfume-silver-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100023,
+      "image": "catalogue/poc-beverage-cola-regular-330-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100024,
+      "image": "catalogue/poc-beverage-cola-regular-500-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100025,
+      "image": "catalogue/poc-beverage-cola-zero-330-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100026,
+      "image": "catalogue/poc-beverage-energy-red-250-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100027,
+      "image": "catalogue/poc-beverage-juice-mango-250-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100028,
+      "image": "catalogue/poc-beverage-orange-soda-330-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100029,
+      "image": "catalogue/poc-beverage-rival-cola-330-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100030,
+      "image": "catalogue/poc-beverage-water-500-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100031,
+      "image": "catalogue/poc-grocery-coffee-brown-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100032,
+      "image": "catalogue/poc-grocery-detergent-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100033,
+      "image": "catalogue/poc-grocery-sardines-green-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100034,
+      "image": "catalogue/poc-grocery-sardines-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100035,
+      "image": "catalogue/poc-grocery-sardines-yellow-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100036,
+      "image": "catalogue/poc-grocery-shampoo-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100037,
+      "image": "catalogue/poc-grocery-shampoo-green-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100038,
+      "image": "catalogue/poc-grocery-shampoo-pink-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100039,
+      "image": "catalogue/poc-grocery-soap-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100040,
+      "image": "catalogue/poc-grocery-soap-pink-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100041,
+      "image": "catalogue/poc-grocery-toothpaste-green-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100042,
+      "image": "catalogue/poc-grocery-toothpaste-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100043,
+      "image": "catalogue/poc-home-cushion-solid-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100044,
+      "image": "catalogue/poc-home-cushion-striped-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100045,
+      "image": "catalogue/poc-home-lamp-black-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100046,
+      "image": "catalogue/poc-home-lamp-white-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100047,
+      "image": "catalogue/poc-home-mug-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100048,
+      "image": "catalogue/poc-home-mug-white-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100049,
+      "image": "catalogue/poc-home-petbowl-blue-001.jpg",
+      "sourceType": "ORIGINAL"
+    },
+    {
+      "productId": 100050,
+      "image": "catalogue/poc-home-petbowl-red-001.jpg",
+      "sourceType": "ORIGINAL"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q-01-poc-apparel-striped-polo-blue-001",
+      "queryImage": "queries/q-01-poc-apparel-striped-polo-blue-001.jpg",
+      "category": "apparel", "difficulty": "EASY", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100014, 100015]
+    },
+    {
+      "id": "q-02-poc-apparel-striped-polo-red-001",
+      "queryImage": "queries/q-02-poc-apparel-striped-polo-red-001.jpg",
+      "category": "apparel", "difficulty": "MEDIUM", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100014, 100015]
+    },
+    {
+      "id": "q-03-poc-apparel-dress-floral-blue-001",
+      "queryImage": "queries/q-03-poc-apparel-dress-floral-blue-001.jpg",
+      "category": "apparel", "difficulty": "HARD", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100002, 100003]
+    },
+    {
+      "id": "q-04-poc-apparel-sneaker-white-blue-001",
+      "queryImage": "queries/q-04-poc-apparel-sneaker-white-blue-001.jpg",
+      "category": "apparel", "difficulty": "EASY", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100010, 100011]
+    },
+    {
+      "id": "q-05-poc-apparel-sneaker-white-red-001",
+      "queryImage": "queries/q-05-poc-apparel-sneaker-white-red-001.jpg",
+      "category": "apparel", "difficulty": "MEDIUM", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100010, 100011]
+    },
+    {
+      "id": "q-06-poc-apparel-handbag-tan-001",
+      "queryImage": "queries/q-06-poc-apparel-handbag-tan-001.jpg",
+      "category": "apparel", "difficulty": "HARD", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100006, 100005]
+    },
+    {
+      "id": "q-07-poc-apparel-handbag-black-001",
+      "queryImage": "queries/q-07-poc-apparel-handbag-black-001.jpg",
+      "category": "apparel", "difficulty": "EASY", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100006, 100005]
+    },
+    {
+      "id": "q-08-poc-apparel-cap-blue-001",
+      "queryImage": "queries/q-08-poc-apparel-cap-blue-001.jpg",
+      "category": "apparel", "difficulty": "MEDIUM", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100001]
+    },
+    {
+      "id": "q-09-poc-apparel-shorts-khaki-001",
+      "queryImage": "queries/q-09-poc-apparel-shorts-khaki-001.jpg",
+      "category": "apparel", "difficulty": "HARD", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100008]
+    },
+    {
+      "id": "q-10-poc-apparel-jacket-denim-blue-001",
+      "queryImage": "queries/q-10-poc-apparel-jacket-denim-blue-001.jpg",
+      "category": "apparel", "difficulty": "EASY", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100007]
+    },
+    {
+      "id": "q-11-poc-grocery-sardines-red-001",
+      "queryImage": "queries/q-11-poc-grocery-sardines-red-001.jpg",
+      "category": "grocery", "difficulty": "MEDIUM", "mode": "EXACT_PRODUCT", "expectedProductIds": [100034]
+    },
+    {
+      "id": "q-12-poc-grocery-sardines-green-001",
+      "queryImage": "queries/q-12-poc-grocery-sardines-green-001.jpg",
+      "category": "grocery", "difficulty": "HARD", "mode": "EXACT_PRODUCT", "expectedProductIds": [100033]
+    },
+    {
+      "id": "q-13-poc-grocery-sardines-yellow-001",
+      "queryImage": "queries/q-13-poc-grocery-sardines-yellow-001.jpg",
+      "category": "grocery", "difficulty": "EASY", "mode": "EXACT_PRODUCT", "expectedProductIds": [100035]
+    },
+    {
+      "id": "q-14-poc-grocery-shampoo-blue-001",
+      "queryImage": "queries/q-14-poc-grocery-shampoo-blue-001.jpg",
+      "category": "grocery", "difficulty": "MEDIUM", "mode": "EXACT_PRODUCT", "expectedProductIds": [100036]
+    },
+    {
+      "id": "q-15-poc-grocery-shampoo-pink-001",
+      "queryImage": "queries/q-15-poc-grocery-shampoo-pink-001.jpg",
+      "category": "grocery", "difficulty": "HARD", "mode": "EXACT_PRODUCT", "expectedProductIds": [100038]
+    },
+    {
+      "id": "q-16-poc-grocery-shampoo-green-001",
+      "queryImage": "queries/q-16-poc-grocery-shampoo-green-001.jpg",
+      "category": "grocery", "difficulty": "EASY", "mode": "EXACT_PRODUCT", "expectedProductIds": [100037]
+    },
+    {
+      "id": "q-17-poc-grocery-soap-blue-001",
+      "queryImage": "queries/q-17-poc-grocery-soap-blue-001.jpg",
+      "category": "grocery", "difficulty": "MEDIUM", "mode": "EXACT_PRODUCT", "expectedProductIds": [100039]
+    },
+    {
+      "id": "q-18-poc-beverage-cola-regular-330-001",
+      "queryImage": "queries/q-18-poc-beverage-cola-regular-330-001.jpg",
+      "category": "beverage", "difficulty": "HARD", "mode": "EXACT_PRODUCT", "expectedProductIds": [100023]
+    },
+    {
+      "id": "q-19-poc-beverage-cola-zero-330-001",
+      "queryImage": "queries/q-19-poc-beverage-cola-zero-330-001.jpg",
+      "category": "beverage", "difficulty": "EASY", "mode": "EXACT_PRODUCT", "expectedProductIds": [100025]
+    },
+    {
+      "id": "q-20-poc-beverage-cola-regular-500-001",
+      "queryImage": "queries/q-20-poc-beverage-cola-regular-500-001.jpg",
+      "category": "beverage", "difficulty": "MEDIUM", "mode": "EXACT_PRODUCT", "expectedProductIds": [100024]
+    },
+    {
+      "id": "q-21-poc-beverage-rival-cola-330-001",
+      "queryImage": "queries/q-21-poc-beverage-rival-cola-330-001.jpg",
+      "category": "beverage", "difficulty": "HARD", "mode": "EXACT_PRODUCT", "expectedProductIds": [100029]
+    },
+    {
+      "id": "q-22-poc-beauty-lotion-white-001",
+      "queryImage": "queries/q-22-poc-beauty-lotion-white-001.jpg",
+      "category": "beauty", "difficulty": "EASY", "mode": "EXACT_PRODUCT", "expectedProductIds": [100020]
+    },
+    {
+      "id": "q-23-poc-beauty-lotion-pink-001",
+      "queryImage": "queries/q-23-poc-beauty-lotion-pink-001.jpg",
+      "category": "beauty", "difficulty": "MEDIUM", "mode": "EXACT_PRODUCT", "expectedProductIds": [100019]
+    },
+    {
+      "id": "q-24-poc-home-mug-blue-001",
+      "queryImage": "queries/q-24-poc-home-mug-blue-001.jpg",
+      "category": "home_pet", "difficulty": "HARD", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100047, 100048]
+    },
+    {
+      "id": "q-25-poc-home-mug-white-001",
+      "queryImage": "queries/q-25-poc-home-mug-white-001.jpg",
+      "category": "home_pet", "difficulty": "EASY", "mode": "SIMILAR_PRODUCT", "expectedProductIds": [100047, 100048]
+    }
+  ]
+}

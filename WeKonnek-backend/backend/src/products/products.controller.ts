@@ -78,6 +78,14 @@ export class ProductsController {
     );
   }
 
+  @Get('merchant/mine')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get products for the authenticated merchant' })
+  async findMine(@Req() req: any) {
+    return this.productsService.findAll(await this.resolveMerchantId(req));
+  }
+
   @Get('export')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

@@ -19,6 +19,8 @@ import { MerchantsModule } from './merchants/merchants.module';
 import { ProductsModule } from './products/products.module';
 import { StaffPostsModule } from './staff-posts/staff-posts.module';
 import { UploadModule } from './upload/upload.module';
+import { ProductStudioModule } from './product-studio/product-studio.module';
+import { VisualSearchModule } from './visual-search/visual-search.module';
 import { MarketplaceOrdersModule } from './orders/orders.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { MerchantApplicationsModule } from './merchant-applications/merchant-applications.module';
@@ -87,6 +89,8 @@ import { SocialAuthModule } from './social-auth/social-auth.module';
     ProductsModule,
     StaffPostsModule,
     UploadModule,
+    ProductStudioModule,
+    VisualSearchModule,
     MarketplaceOrdersModule,
     ReservationsModule,
     MerchantApplicationsModule,

@@ -28,6 +28,9 @@
     "db:seed:dev": "npx tsx prisma/seed-dev.ts",
     "db:reference:counts": "npx tsx prisma/reference-counts.ts",
     "db:seed:verify-safety": "node prisma/verify-seed-safety.mjs",
+    "visual-search:benchmark": "tsx scripts/visual-search-benchmark.ts",
+    "visual-search:dataset": "tsx scripts/visual-search-dataset.ts",
+    "visual-search:dataset:validate": "tsx scripts/visual-search-dataset.ts --validate",
     "prisma:seed:test-customer": "npx tsx prisma/seed-test-customer.ts"
   },
   "dependencies": {
@@ -52,6 +55,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "firebase-admin": "^13.7.0",
+    "google-auth-library": "^10.9.1",
     "ioredis": "^5.10.0",
     "multer": "^2.0.2",
     "nestjs-i18n": "^10.6.0",

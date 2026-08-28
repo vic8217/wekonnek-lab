@@ -554,14 +554,18 @@ export default function MerchantDashboardPage() {
                     <span className="text-gray-600">Funded days:</span>
                     <span className="font-medium">{coverage?.funded_days || 0} days</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Account active through:</span>
+                  <div className="flex justify-between gap-4 text-sm">
+                    <span className="text-gray-600">Store remains open until:</span>
                     <span className="font-medium">
                       {activeThrough
-                        ? activeThrough.toLocaleDateString(undefined, {
+                        ? activeThrough.toLocaleString(undefined, {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            timeZone: 'Asia/Manila',
+                            timeZoneName: 'short',
                           })
                         : 'Wallet reload required'}
                     </span>

@@ -15,6 +15,7 @@ export class BazaarListingsService {
     const subcategory = await this.prisma.merchantSubCategory.findFirst({ where: { id: Number(body.subCategoryId), isActive: true, category: { slug: 'bazaar', isActive: true } } });
     if (!subcategory) throw new BadRequestException('Select a valid active Bazaar subcategory');
     const images = Array.isArray(body.imageUrls) ? body.imageUrls.filter((url: unknown) => typeof url === 'string').slice(0, 5) : [];
+    await this.media.assertUserOwnedUrls(userId, images);
     if (!images.length) throw new BadRequestException('At least one product photo is required');
     const price = Number(body.price);
     if (!body.title?.trim() || !body.description?.trim() || !Number.isFinite(price) || price < 0) throw new BadRequestException('Complete all listing details');
@@ -47,6 +48,7 @@ export class BazaarListingsService {
     const subcategory = await this.prisma.merchantSubCategory.findFirst({ where: { id: Number(body.subCategoryId), isActive: true, category: { slug: 'bazaar', isActive: true } } });
     if (!subcategory) throw new BadRequestException('Select a valid active Bazaar subcategory');
     const images = Array.isArray(body.imageUrls) ? body.imageUrls.filter((url: unknown) => typeof url === 'string').slice(0, 5) : [];
+    await this.media.assertUserOwnedUrls(userId, images);
     const price = Number(body.price);
     if (!images.length) throw new BadRequestException('At least one product photo is required');
     if (!body.title?.trim() || !body.description?.trim() || !Number.isFinite(price) || price < 0) throw new BadRequestException('Complete all listing details');

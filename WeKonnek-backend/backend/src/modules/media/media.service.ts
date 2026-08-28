@@ -182,6 +182,21 @@ export class MediaService {
     return new Map(assets.map(asset => [asset.url, asset.thumbnailUrl! ]));
   }
 
+  async assertUserOwnedUrls(userId: string, urls: Array<string | null | undefined>) {
+    const values = [...new Set(urls.filter((value): value is string => Boolean(value)))];
+    if (!values.length) return;
+    const count = await this.prisma.mediaAsset.count({ where: { url: { in: values }, createdById: userId, status: 'active', deletedAt: null } });
+    if (count !== values.length) throw new ForbiddenException('Every image must be an active asset uploaded by your account');
+  }
+
+  async assertMerchantOwnedUrls(merchantId: number, urls: Array<string | null | undefined>) {
+    const values = [...new Set(urls.filter((value): value is string => Boolean(value)))];
+    if (!values.length) return;
+    const productIds = (await this.prisma.product.findMany({ where: { merchantId }, select: { id: true } })).map((product) => String(product.id));
+    const count = await this.prisma.mediaAsset.count({ where: { url: { in: values }, status: 'active', deletedAt: null, OR: [{ ownerType: 'merchant', ownerId: String(merchantId) }, { ownerType: 'product', ownerId: { in: productIds } }] } });
+    if (count !== values.length) throw new ForbiddenException('Every image must be an active asset uploaded for this merchant');
+  }
+
   async softDeleteMedia(id: string, userId: string) {
     const asset = await this.prisma.mediaAsset.findFirst({ where: { id, createdById: userId, deletedAt: null } });
     if (!asset) throw new NotFoundException('Media asset not found');

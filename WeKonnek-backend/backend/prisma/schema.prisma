@@ -28,6 +28,7 @@ model Category {
   customerPromotions CustomerPromotion[]
   staffPosts         StaffPost[]
   productCategories  ProductCategory[]
+  productStudioGenerations ProductStudioGeneration[]
   ownerMerchant      Merchant?           @relation("MerchantOwnedCategories", fields: [ownerMerchantId], references: [id], onDelete: Cascade)
 
   @@index([ownerMerchantId])
@@ -162,6 +163,8 @@ model Merchant {
   platformPayments     PlatformPaymentTransaction[]
   ownedCategories      Category[]                   @relation("MerchantOwnedCategories")
   ownedSubCategories   SubCategory[]                @relation("MerchantOwnedSubCategories")
+  productStudioGenerations ProductStudioGeneration[]
+  visualIndexes ProductVisualIndex[]
 
   @@index([userId])
   @@index([categoryId])
@@ -565,6 +568,8 @@ model Product {
   shopInventories      ShopInventory[]
   inventoryMovements   InventoryMovement[]
   inventoryDailyCounts InventoryDailyCount[]
+  visualIndexes         ProductVisualIndex[]
+  productStudioGenerations ProductStudioGeneration[]
 
   @@index([merchantId])
   @@index([categoryId])
@@ -644,6 +649,50 @@ model ProductCategory {
   @@index([categoryId])
   @@index([subCategoryId])
   @@map("product_categories")
+}
+
+model ProductStudioGeneration {
+  id              String   @id @default(uuid()) @db.Uuid
+  merchantId      Int      @map("merchant_id")
+  productId       Int      @map("product_id")
+  categoryId      Int      @map("category_id")
+  originalMediaId String   @map("original_media_id") @db.Uuid
+  generatedMediaId String? @map("generated_media_id") @db.Uuid
+  style           String   @db.VarChar(100)
+  status          String   @default("review") @db.VarChar(30)
+  creditsUsed     Int      @default(1) @map("credits_used")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, createdAt])
+  @@index([productId, categoryId])
+  @@map("product_studio_generations")
+}
+
+model ProductVisualIndex {
+  id               String   @id @default(uuid()) @db.Uuid
+  productId        Int      @map("product_id")
+  mediaId          String   @map("media_id") @db.Uuid
+  merchantId       Int      @map("merchant_id")
+  imageType        String   @map("image_type") @db.VarChar(40)
+  provider         String   @default("mock") @db.VarChar(40)
+  embeddingVersion String   @default("v1") @map("embedding_version") @db.VarChar(40)
+  externalRef      String?  @map("external_ref") @db.VarChar(255)
+  status           String   @default("PENDING") @db.VarChar(20)
+  isSearchEligible Boolean  @default(true) @map("is_search_eligible")
+  searchPriority   Int      @default(100) @map("search_priority")
+  indexedAt        DateTime? @map("indexed_at") @db.Timestamptz
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  @@unique([productId, mediaId])
+  @@index([status, isSearchEligible])
+  @@map("product_visual_indexes")
 }
 
 model ShopProduct {

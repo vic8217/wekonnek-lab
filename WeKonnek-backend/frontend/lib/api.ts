@@ -384,6 +384,10 @@ export interface CreateProductData {
 }
 
 export const productsApi = {
+  getMine: async (): Promise<Product[]> => {
+    const response = await apiClient.get("/products/merchant/mine");
+    return response.data;
+  },
   getAll: async (): Promise<Product[]> => {
     const response = await apiClient.get("/products");
     return response.data;
@@ -727,30 +731,33 @@ async function normalizeLargeBrowserImage(file: File): Promise<File> {
   }
 }
 
-export const uploadApi = {
-  uploadFile: async (
-    file: File,
-    type: "establishment" | "authorized-person" | "document" | "review" | "product" | "menu" | "logo" | "banner" | "bazaar" | "property" | "profile" | "category",
-  ): Promise<string> => {
+type UploadType = "establishment" | "authorized-person" | "document" | "review" | "product" | "menu" | "logo" | "banner" | "bazaar" | "property" | "profile" | "category";
+type UploadedMediaAsset = { url: string; mediaId: string };
+
+async function uploadMediaAsset(file: File, type: UploadType, resourceId?: string): Promise<UploadedMediaAsset> {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
     const uploadFile = type === 'document' ? file : await normalizeLargeBrowserImage(file);
     const formData = new FormData();
     formData.append("file", uploadFile);
     formData.append("type", type);
-
-    const response = await fetch('/api/backend/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
+    if (resourceId) formData.append("resourceId", resourceId);
+    const response = await fetch('/api/backend/upload', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       const proxyMessage = response.status === 413 ? 'The image is too large to upload. Please choose a smaller image.' : undefined;
       throw new Error(body.message || proxyMessage || 'Unable to upload file');
     }
-    return body.url;
-  },
+    return { url: body.url, mediaId: body.mediaId };
+}
+
+export const uploadApi = {
+  uploadFile: async (
+    file: File,
+    type: UploadType,
+    resourceId?: string,
+  ): Promise<string> => uploadMediaAsset(file, type, resourceId).then((asset) => asset.url),
+  uploadAsset: (file: File, type: UploadType, resourceId?: string): Promise<UploadedMediaAsset> => uploadMediaAsset(file, type, resourceId),
   uploadMultipleFiles: async (
     files: File[],
     type: "document",

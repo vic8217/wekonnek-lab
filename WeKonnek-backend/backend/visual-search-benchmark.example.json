@@ -1,0 +1,14 @@
+{
+  "datasetVersion": "example-v1",
+  "queries": [
+    {
+      "id": "example-striped-polo",
+      "mode": "SIMILAR_PRODUCT",
+      "category": "APPAREL",
+      "difficulty": "MEDIUM",
+      "queryImage": "fixtures/striped-polo-query.jpg",
+      "expectedProductIds": [101],
+      "notes": "Add approved development assets only. Query photos must not reuse the catalogue image file."
+    }
+  ]
+}

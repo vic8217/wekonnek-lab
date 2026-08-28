@@ -1,0 +1,667 @@
+{
+  "datasetVersion": "vertex-poc-v1-synthetic-starter",
+  "note": "Synthetic benchmark starter data. Regenerate with the repository's visual-search:dataset command if its schema differs.",
+  "catalogue": [
+    {
+      "productId": "poc-apparel-striped-polo-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-striped-polo-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "598118bc2b0f8aee40cb0bcda229787061bb38b0504314029e52e738accf2947"
+    },
+    {
+      "productId": "poc-apparel-striped-polo-red-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-striped-polo-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "798b5c961ecd4fc9e2dfc859b22500ad80a3f37c5e1363ec01387b34427c032d"
+    },
+    {
+      "productId": "poc-apparel-solid-polo-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-solid-polo-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "2e7554707bb04359cced4a60e650b6fe44b6baa1d549175a8f9238c439fa1520"
+    },
+    {
+      "productId": "poc-apparel-solid-polo-black-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-solid-polo-black-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "75e023c6dc63dbd9ee2459c96f6353422bb2ebd27531d27474db2de19be7e5b6"
+    },
+    {
+      "productId": "poc-apparel-dress-floral-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-dress-floral-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "1ea0d0a291a3909da2300bd6d8e85478440f089bacf1c3aba40e9eada4f2c196"
+    },
+    {
+      "productId": "poc-apparel-dress-floral-red-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-dress-floral-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "359f741f9b68bb47d03f504a1ef737a61b003670855da5b3ddb052d5e65f9cb4"
+    },
+    {
+      "productId": "poc-apparel-dress-solid-black-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-dress-solid-black-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "533716a8d5d9ffc811f5254393765e0a5308a119f10f16460b9536d7d447d4f1"
+    },
+    {
+      "productId": "poc-apparel-sneaker-white-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-sneaker-white-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "691954bd079453c662d59cec9d8869fcfc51cb1e98eda34a31d0ef14f3aa3e85"
+    },
+    {
+      "productId": "poc-apparel-sneaker-white-red-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-sneaker-white-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "0ca881df8aa5fbb39c67222113b197d1a34adb0d7175d6afadfa80d7fe1f2fea"
+    },
+    {
+      "productId": "poc-apparel-sneaker-black-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-sneaker-black-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "9c6109b9d68ae606e3d33d1188543fa9fb735d897fcdf5773e6112d63686ae4f"
+    },
+    {
+      "productId": "poc-apparel-handbag-tan-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-handbag-tan-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "01af2ad169eab0a6f9d1a93c438885598999e74f7ebbcc4e35e78bcb1a2736c3"
+    },
+    {
+      "productId": "poc-apparel-handbag-black-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-handbag-black-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "2402edacd755492233a94b73849dbd60ed85b534e1cae13db73483bd6d5df653"
+    },
+    {
+      "productId": "poc-apparel-cap-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-cap-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "b3b5709983db7fef88bdb948ecf3e3631cd426bfd510eda5d8d43f5091b040c7"
+    },
+    {
+      "productId": "poc-apparel-shorts-khaki-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-shorts-khaki-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "bc9af6f82a43bfc1a66c74cbc5bc3e947067750c4f305858be3c307f498f1424"
+    },
+    {
+      "productId": "poc-apparel-jacket-denim-blue-001",
+      "category": "apparel",
+      "image": "catalogue/poc-apparel-jacket-denim-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "1a55335d0a9805f810c477d305c5949487ca3b58644922a82f32d9862be01e78"
+    },
+    {
+      "productId": "poc-grocery-sardines-red-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-sardines-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "ed29b9d61b5274656dc07cec4aa23fe92929b166fc2173c0e2c9ebcb936ec231"
+    },
+    {
+      "productId": "poc-grocery-sardines-green-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-sardines-green-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "60a12e35cfe22c6149f375573b9c980a57e97b8be63dc07aeb28330001ceef26"
+    },
+    {
+      "productId": "poc-grocery-sardines-yellow-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-sardines-yellow-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "59cb0fc7ac38d4771779e658ebb042bfdd849dabad18f68d8c2091a3784f5957"
+    },
+    {
+      "productId": "poc-grocery-shampoo-blue-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-shampoo-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "5a57260df02732a503c3e0dc98b17e3c393a185687528ca71582c5856e427a5a"
+    },
+    {
+      "productId": "poc-grocery-shampoo-pink-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-shampoo-pink-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "91cf1a5d04ba93db001b2ffdb908b0d68cdff5735c58f0db5e1652bdfedb957a"
+    },
+    {
+      "productId": "poc-grocery-shampoo-green-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-shampoo-green-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "46160a311dfe34d30dd571ff6021414d20a60bf0f7490bab2bb8f299ce6198ef"
+    },
+    {
+      "productId": "poc-grocery-soap-blue-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-soap-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "24774838daaf3432e36c56e2488c725416f6f44b1d9f341d69dfd3fc4cf6b6b0"
+    },
+    {
+      "productId": "poc-grocery-soap-pink-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-soap-pink-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "760925afe57067ae38e6ac1ed874b3f90cf45e65fbe6f04848016e7f42dff6a4"
+    },
+    {
+      "productId": "poc-grocery-toothpaste-red-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-toothpaste-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "65e2d10ccc974c3183250ecc72ce97bb5e096141b045c8aaff394a6f94603c68"
+    },
+    {
+      "productId": "poc-grocery-toothpaste-green-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-toothpaste-green-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "58657ed33a83ba43020c3750d0d0d3478fb47d9684273dba14e068fb27d3db85"
+    },
+    {
+      "productId": "poc-grocery-coffee-brown-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-coffee-brown-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "12ecd65a4243ebbb2e1ed5ad8557360af70db38c6243426fcf2a4eb12371b9ad"
+    },
+    {
+      "productId": "poc-grocery-detergent-blue-001",
+      "category": "grocery",
+      "image": "catalogue/poc-grocery-detergent-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "fcff44bc9d147621297e65bba02b0d6e7f164ae555c547b28860285e4817143e"
+    },
+    {
+      "productId": "poc-beverage-cola-regular-330-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-cola-regular-330-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "a72c1d4ae89627d9bd3683ac1a48f65728734a09fed45c87290552f48bffef05"
+    },
+    {
+      "productId": "poc-beverage-cola-zero-330-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-cola-zero-330-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "5de74d91eef62f86acb958e5738cb08b2129e2fcdab81c213899719cd34543da"
+    },
+    {
+      "productId": "poc-beverage-cola-regular-500-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-cola-regular-500-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "b96b6ce3d4f07d8f447c6d18166cfb152b6f215924ff4cfcd04809512a5dcc0d"
+    },
+    {
+      "productId": "poc-beverage-rival-cola-330-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-rival-cola-330-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "d728344d78722d8cd7d461c865e834b4eaf8ee725732124f3504dab093d6f864"
+    },
+    {
+      "productId": "poc-beverage-orange-soda-330-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-orange-soda-330-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "ccf8c0df4cf0d57665fe935753744910b865d0fd9eb4bd42e8085a6ab7f3668a"
+    },
+    {
+      "productId": "poc-beverage-water-500-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-water-500-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "50c620669358c3962f977666d819ade0a68943065678ecf05429faacfbb87cc6"
+    },
+    {
+      "productId": "poc-beverage-juice-mango-250-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-juice-mango-250-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "4369aa30e98ecd24a013636340e4d347e9197f9cee3456787ad5489360129ded"
+    },
+    {
+      "productId": "poc-beverage-energy-red-250-001",
+      "category": "beverage",
+      "image": "catalogue/poc-beverage-energy-red-250-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "eadc15ab84d42dc263c71bf820028872b3b112780401d358da8ed72a80053f80"
+    },
+    {
+      "productId": "poc-beauty-lotion-white-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-lotion-white-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "3723a65015b74b68ec56839cca3668a4b00c5f1c521aa37aa37d2282076d3667"
+    },
+    {
+      "productId": "poc-beauty-lotion-pink-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-lotion-pink-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "25fb5a9d490f90e6426586fca4238af78825a38d0b113415f8ceee3b727a0650"
+    },
+    {
+      "productId": "poc-beauty-facialwash-blue-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-facialwash-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "469d486d93bf60d1efffc0b1e11f6fa185b247091ca7743e5e5f24789c0d0798"
+    },
+    {
+      "productId": "poc-beauty-facialwash-green-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-facialwash-green-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "11d501aa87bd74f9ef50f28a752999d9f94298143eff983a4a23173ec98779d5"
+    },
+    {
+      "productId": "poc-beauty-perfume-gold-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-perfume-gold-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "ec27bbfcb16bd8783797fba6288cbb36b9cb9063e7036248992efe5fe2fc3806"
+    },
+    {
+      "productId": "poc-beauty-perfume-silver-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-perfume-silver-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "b103d57f09117bea3dcf6b9a442e58f0f99682f1432d3ac009e39b4f81acb042"
+    },
+    {
+      "productId": "poc-beauty-lipstick-red-001",
+      "category": "beauty",
+      "image": "catalogue/poc-beauty-lipstick-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "bc9c5b4463e477789ce4592afe513a694b6a5728d1f7038da0fb34419ad21eb7"
+    },
+    {
+      "productId": "poc-home-mug-blue-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-mug-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "e86ded25f323287d162b32d90c887e874cbf726fb1c4ca973e1e7b37a0941579"
+    },
+    {
+      "productId": "poc-home-mug-white-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-mug-white-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "f46b012c2de2b2947695c35890d39ba0ba09838435308310fed8c4443d3158c7"
+    },
+    {
+      "productId": "poc-home-lamp-black-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-lamp-black-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "d3a07dbade5dc8951ce054d6c3537574c161894f41a386fdec3664c86e326d72"
+    },
+    {
+      "productId": "poc-home-lamp-white-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-lamp-white-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "9f5b4f8d8ff0a279fb45a87a362dae4d3729e6bce98ee4d4b968a8c1fd202051"
+    },
+    {
+      "productId": "poc-home-petbowl-blue-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-petbowl-blue-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "73ab0373405f1b518d7c190ad34e7754f7d26e0dc31e5ea2d55469e3be819696"
+    },
+    {
+      "productId": "poc-home-petbowl-red-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-petbowl-red-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "b6ebaa6fb2e22029aba6f43b8171de166a83f9d50873321594523e2765ad278b"
+    },
+    {
+      "productId": "poc-home-cushion-striped-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-cushion-striped-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "d18aa617be088eff6b03589abb0cebc6cbc172872ca4254e636e8b30a9d84ab6"
+    },
+    {
+      "productId": "poc-home-cushion-solid-001",
+      "category": "home_pet",
+      "image": "catalogue/poc-home-cushion-solid-001.jpg",
+      "sourceType": "SYNTHETIC_TEST",
+      "sha256": "567c75590d814b91dc01c68eb1e98dafd9ce300e1e8cf1cf481970f7283f5cc2"
+    }
+  ],
+  "queries": [
+    {
+      "queryId": "q-01",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-01-poc-apparel-striped-polo-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-striped-polo-blue-001",
+        "poc-apparel-striped-polo-red-001"
+      ],
+      "sourceProductId": "poc-apparel-striped-polo-blue-001",
+      "sha256": "f618a6d381fa6af451c2abdc11259c0ad8d254e5c79256c0f3d27d166f482924"
+    },
+    {
+      "queryId": "q-02",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-02-poc-apparel-striped-polo-red-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-striped-polo-blue-001",
+        "poc-apparel-striped-polo-red-001"
+      ],
+      "sourceProductId": "poc-apparel-striped-polo-red-001",
+      "sha256": "3495a3f82f3f6f157c2da3470fbb9cd7f68a6e1b7b6151659950402fcff28ae5"
+    },
+    {
+      "queryId": "q-03",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-03-poc-apparel-dress-floral-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-dress-floral-blue-001",
+        "poc-apparel-dress-floral-red-001"
+      ],
+      "sourceProductId": "poc-apparel-dress-floral-blue-001",
+      "sha256": "5499d8a3981c77ea9f327747b36faa4cd1cc46a0df6d015d5d88208eb052b77a"
+    },
+    {
+      "queryId": "q-04",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-04-poc-apparel-sneaker-white-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-sneaker-white-blue-001",
+        "poc-apparel-sneaker-white-red-001"
+      ],
+      "sourceProductId": "poc-apparel-sneaker-white-blue-001",
+      "sha256": "9f400bd9872933f92471e2fd590d5f4802d85cdf6bf9f5d90b5486b4bf8b1e62"
+    },
+    {
+      "queryId": "q-05",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-05-poc-apparel-sneaker-white-red-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-sneaker-white-blue-001",
+        "poc-apparel-sneaker-white-red-001"
+      ],
+      "sourceProductId": "poc-apparel-sneaker-white-red-001",
+      "sha256": "be332d14a4be05b06dfcf090e88cf6bf2f8d441a90bd41cbbb643a579b731c09"
+    },
+    {
+      "queryId": "q-06",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-06-poc-apparel-handbag-tan-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-handbag-tan-001",
+        "poc-apparel-handbag-black-001"
+      ],
+      "sourceProductId": "poc-apparel-handbag-tan-001",
+      "sha256": "1ca17fafdd6c79a7f563f91a240780593a40cbb9876a4b1093ee7a0042fab4de"
+    },
+    {
+      "queryId": "q-07",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-07-poc-apparel-handbag-black-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-handbag-tan-001",
+        "poc-apparel-handbag-black-001"
+      ],
+      "sourceProductId": "poc-apparel-handbag-black-001",
+      "sha256": "96c8067f7aecdbdfab77e784e736887a2ce2b47fefa79ab9b029adfad43dc8c6"
+    },
+    {
+      "queryId": "q-08",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-08-poc-apparel-cap-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-cap-blue-001"
+      ],
+      "sourceProductId": "poc-apparel-cap-blue-001",
+      "sha256": "05fab7b0c2525bf9282b24ad6f0e21db5477ad08df64cabf1af124ae55453584"
+    },
+    {
+      "queryId": "q-09",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-09-poc-apparel-shorts-khaki-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-shorts-khaki-001"
+      ],
+      "sourceProductId": "poc-apparel-shorts-khaki-001",
+      "sha256": "bcb212f03b72217696dbb0dc27dd7bf400ae5bc42d42600e76f3d7b6273f8800"
+    },
+    {
+      "queryId": "q-10",
+      "category": "apparel",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-10-poc-apparel-jacket-denim-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-apparel-jacket-denim-blue-001"
+      ],
+      "sourceProductId": "poc-apparel-jacket-denim-blue-001",
+      "sha256": "e2cafb54824dd8b0008a43bb092f27c6b9c4272ec7b004764f5f352a3f994a0e"
+    },
+    {
+      "queryId": "q-11",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-11-poc-grocery-sardines-red-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-sardines-red-001"
+      ],
+      "sourceProductId": "poc-grocery-sardines-red-001",
+      "sha256": "481ddf95a0bd3d5db43058006751a67ea3239f68d6d06bd65b0227923a0a292d"
+    },
+    {
+      "queryId": "q-12",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-12-poc-grocery-sardines-green-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-sardines-green-001"
+      ],
+      "sourceProductId": "poc-grocery-sardines-green-001",
+      "sha256": "cf2f1831b41e86d708d859577f35e6f49a33a1636ea1bd317ab77f1ec5fc2ca4"
+    },
+    {
+      "queryId": "q-13",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-13-poc-grocery-sardines-yellow-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-sardines-yellow-001"
+      ],
+      "sourceProductId": "poc-grocery-sardines-yellow-001",
+      "sha256": "0b3ba8d968de96a6f93ca50edab82c83eae81f586362d7137c6694b0acc7931a"
+    },
+    {
+      "queryId": "q-14",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-14-poc-grocery-shampoo-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-shampoo-blue-001"
+      ],
+      "sourceProductId": "poc-grocery-shampoo-blue-001",
+      "sha256": "e185bf73589b7ebd7c8baa261c236ea00b7c45c70168f22064f28681d5c164ca"
+    },
+    {
+      "queryId": "q-15",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-15-poc-grocery-shampoo-pink-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-shampoo-pink-001"
+      ],
+      "sourceProductId": "poc-grocery-shampoo-pink-001",
+      "sha256": "de32ec06978db6e1b95043d80cdcfd8e44e02042d6c571e2962d537c3c56fa1d"
+    },
+    {
+      "queryId": "q-16",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-16-poc-grocery-shampoo-green-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-shampoo-green-001"
+      ],
+      "sourceProductId": "poc-grocery-shampoo-green-001",
+      "sha256": "14e5f53fdd29abe6b40f52de2239fa5da0dd222512a0b112b9a965a2cf4d64e7"
+    },
+    {
+      "queryId": "q-17",
+      "category": "grocery",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-17-poc-grocery-soap-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-grocery-soap-blue-001"
+      ],
+      "sourceProductId": "poc-grocery-soap-blue-001",
+      "sha256": "4d466d4cff163734244503f2b1e0cc4d5c62da780f66fd38b4266e7e46c8b4a5"
+    },
+    {
+      "queryId": "q-18",
+      "category": "beverage",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-18-poc-beverage-cola-regular-330-001.jpg",
+      "expectedProductIds": [
+        "poc-beverage-cola-regular-330-001"
+      ],
+      "sourceProductId": "poc-beverage-cola-regular-330-001",
+      "sha256": "873bc13d0764fa527aca3a1a5d917c2cc00140702bbca848bca11b011f63f968"
+    },
+    {
+      "queryId": "q-19",
+      "category": "beverage",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-19-poc-beverage-cola-zero-330-001.jpg",
+      "expectedProductIds": [
+        "poc-beverage-cola-zero-330-001"
+      ],
+      "sourceProductId": "poc-beverage-cola-zero-330-001",
+      "sha256": "8ff561c2088b3b9081bfc1f95e0727385b486e1bf2a9f40976dbfe1e564fd0f2"
+    },
+    {
+      "queryId": "q-20",
+      "category": "beverage",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-20-poc-beverage-cola-regular-500-001.jpg",
+      "expectedProductIds": [
+        "poc-beverage-cola-regular-500-001"
+      ],
+      "sourceProductId": "poc-beverage-cola-regular-500-001",
+      "sha256": "26fae8965079e0e2cb898518dd5adf63bc1e880cc17c046fe8967bf74c903def"
+    },
+    {
+      "queryId": "q-21",
+      "category": "beverage",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-21-poc-beverage-rival-cola-330-001.jpg",
+      "expectedProductIds": [
+        "poc-beverage-rival-cola-330-001"
+      ],
+      "sourceProductId": "poc-beverage-rival-cola-330-001",
+      "sha256": "4d9c80c9e13fe6fb8cd0a55868e21409b8981e51fe658c1f76e827805dedc585"
+    },
+    {
+      "queryId": "q-22",
+      "category": "beauty",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-22-poc-beauty-lotion-white-001.jpg",
+      "expectedProductIds": [
+        "poc-beauty-lotion-white-001"
+      ],
+      "sourceProductId": "poc-beauty-lotion-white-001",
+      "sha256": "2f726c276aed40027c24900770a2474e480ffb5185029b278e4c3508a6f3ad08"
+    },
+    {
+      "queryId": "q-23",
+      "category": "beauty",
+      "mode": "EXACT_PRODUCT",
+      "difficulty": "MEDIUM",
+      "image": "queries/q-23-poc-beauty-lotion-pink-001.jpg",
+      "expectedProductIds": [
+        "poc-beauty-lotion-pink-001"
+      ],
+      "sourceProductId": "poc-beauty-lotion-pink-001",
+      "sha256": "8a27027331a6756438816f04ed75da7cbfce24fe41c4bcd800b5aca765d467f1"
+    },
+    {
+      "queryId": "q-24",
+      "category": "home_pet",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "HARD",
+      "image": "queries/q-24-poc-home-mug-blue-001.jpg",
+      "expectedProductIds": [
+        "poc-home-mug-blue-001",
+        "poc-home-mug-white-001"
+      ],
+      "sourceProductId": "poc-home-mug-blue-001",
+      "sha256": "9178b344face8d66b2e95af0be381a67b295f3688d82558b3a8204311c64ff2b"
+    },
+    {
+      "queryId": "q-25",
+      "category": "home_pet",
+      "mode": "SIMILAR_PRODUCT",
+      "difficulty": "EASY",
+      "image": "queries/q-25-poc-home-mug-white-001.jpg",
+      "expectedProductIds": [
+        "poc-home-mug-blue-001",
+        "poc-home-mug-white-001"
+      ],
+      "sourceProductId": "poc-home-mug-white-001",
+      "sha256": "cbd1aa7c34bd1fcb64e88a71bcf84b716fd032ac23ec34e0c4397ec467368739"
+    }
+  ]
+}

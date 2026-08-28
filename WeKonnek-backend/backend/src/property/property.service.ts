@@ -203,6 +203,7 @@ export class PropertyService {
     if (!user?.isActive)
       throw new ForbiddenException("An active account is required");
     const data = await this.input(body, true);
+    await this.media.assertUserOwnedUrls(userId, Array.isArray(body.imageUrls) ? body.imageUrls : []);
     const slug = await this.uniqueSlug(data.title);
     return this.prisma.propertyListing.create({
       data: {
@@ -230,6 +231,7 @@ export class PropertyService {
         "This listing cannot be edited in its current status",
       );
     const data = await this.input(body, false);
+    if (body.imageUrls) await this.media.assertUserOwnedUrls(userId, Array.isArray(body.imageUrls) ? body.imageUrls : []);
     const imageData = body.imageUrls
       ? { deleteMany: {}, create: this.images(body.imageUrls) }
       : undefined;
