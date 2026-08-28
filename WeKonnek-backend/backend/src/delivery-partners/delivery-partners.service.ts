@@ -18,6 +18,19 @@ const DEFAULT_AVAILABILITY = {
   SCHEDULED_DELIVERY: false,
 };
 
+export function encryptDeliveryProviderCredential(
+  value: string,
+  key: Buffer,
+): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(value, 'utf8'),
+    cipher.final(),
+  ]);
+  return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
 @Injectable()
 export class DeliveryPartnersService {
   constructor(
@@ -35,13 +48,7 @@ export class DeliveryPartnersService {
     return createHash('sha256').update(value).digest();
   }
   private encrypt(value: string) {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.key(), iv);
-    const encrypted = Buffer.concat([
-      cipher.update(value, 'utf8'),
-      cipher.final(),
-    ]);
-    return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+    return encryptDeliveryProviderCredential(value, this.key());
   }
 
   private async ensureProviders() {
@@ -158,7 +165,10 @@ export class DeliveryPartnersService {
           changes[key] = null;
           continue;
         }
-        const value = new Prisma.Decimal(String(body[key]));
+        const rawValue = body[key];
+        if (typeof rawValue !== 'string' && typeof rawValue !== 'number')
+          throw new BadRequestException(`${key} must be a non-negative number`);
+        const value = new Prisma.Decimal(rawValue);
         if (value.isNegative() || !value.isFinite())
           throw new BadRequestException(`${key} must be a non-negative number`);
         data[key] = value;
