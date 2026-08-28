@@ -55,6 +55,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { PaymentPartnersModule } from './payment-partners/payment-partners.module';
 import { SocialAuthModule } from './social-auth/social-auth.module';
+import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.module';
 
 @Module({
   imports: [
@@ -125,6 +126,7 @@ import { SocialAuthModule } from './social-auth/social-auth.module';
     LoyaltyModule,
     PaymentPartnersModule,
     SocialAuthModule,
+    DeliveryPartnersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

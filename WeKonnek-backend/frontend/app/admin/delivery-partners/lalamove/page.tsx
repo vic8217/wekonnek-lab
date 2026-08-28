@@ -1,0 +1,34 @@
+'use client';
+
+import Link from 'next/link';
+import { FormEvent, useEffect, useState } from 'react';
+import { getToken } from '@/hooks/use-auth';
+
+type LalamoveState = {
+  provider: { enabled: boolean };
+  configuration: { environment: 'uat' | 'production'; showAtCheckout: boolean };
+  credentials: { apiKeyConfigured: boolean; apiSecretConfigured: boolean };
+};
+const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
+const request = async (path: string, method = 'GET', body?: unknown) => {
+  const response = await fetch(`/api/backend/admin/delivery-partners/lalamove${path}`, { method, headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message || 'Request failed');
+  return response.json();
+};
+export default function LalamovePage() {
+  const [state, setState] = useState<LalamoveState>(); const [notice, setNotice] = useState(''); const [error, setError] = useState('');
+  const load = () => request('').then(data => setState(data as LalamoveState)).catch(e => setError(message(e)));
+  useEffect(() => { void load(); }, []);
+  const update = async (patch: Record<string, unknown>) => { setError(''); setNotice(''); try { setState(await request('', 'PATCH', patch) as LalamoveState); setNotice('Saved. Connection remains Not Tested.'); } catch (e: unknown) { setError(message(e)); } };
+  const saveCredentials = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { setState(await request('/credentials', 'PATCH', { apiKey: form.get('apiKey'), apiSecret: form.get('apiSecret') }) as LalamoveState); event.currentTarget.reset(); setNotice('Credential configuration state updated. Secrets are not displayed.'); setError(''); } catch (e: unknown) { setError(message(e)); } };
+  if (!state) return <main className="mx-auto max-w-5xl p-5 md:p-8">Loading Lalamove configuration…</main>;
+  const c = state.configuration; const credentials = state.credentials;
+  return <main className="mx-auto max-w-5xl p-5 md:p-8"><Link href="/admin/delivery-partners" className="text-sm font-medium text-[#DB0002]">← Delivery Partners</Link><div className="mb-7 mt-3"><h1 className="text-2xl font-bold text-gray-900">Lalamove</h1><p className="mt-2 text-sm text-gray-600">Phase 1 configuration only. No API calls, webhooks, quotes, orders, or delivery execution are available.</p></div>
+    {notice && <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{notice}</div>}{error && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+    <div className="grid gap-5 md:grid-cols-2"><section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-semibold text-gray-900">Provider status</h2><p className="mt-3 text-sm text-gray-600">Connection status <span className="ml-2 rounded-full bg-gray-100 px-2 py-1 font-medium text-gray-700">Not Tested</span></p><Toggle label="Provider enabled" value={state.provider.enabled} onChange={enabled => update({ enabled })} /><Toggle label="Show at checkout" value={c.showAtCheckout} onChange={showAtCheckout => update({ showAtCheckout })} /><p className="mt-3 text-xs text-gray-500">This setting is stored for future delivery integration; checkout behavior is unchanged in Phase 1.</p></section>
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-semibold text-gray-900">Environment</h2><label className="mt-4 block text-sm font-medium text-gray-700">Selected environment<select value={c.environment} onChange={e => { const environment = e.target.value; if (environment === 'production' && !window.confirm('Confirm the Lalamove production configuration change?')) return; update({ environment, confirmation: environment === 'production' ? 'CONFIRM LALAMOVE CHANGE' : undefined }); }} className="mt-1 block w-full rounded-lg border border-gray-300 p-2"><option value="uat">UAT</option><option value="production">Production</option></select></label><p className="mt-3 text-xs text-gray-500">Changing this never contacts Lalamove and does not test connectivity.</p></section>
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-semibold text-gray-900">Credentials</h2><p className="mt-2 text-sm text-gray-600">API key: <b>{credentials.apiKeyConfigured ? 'Configured' : 'Not configured'}</b><br />API secret: <b>{credentials.apiSecretConfigured ? 'Configured' : 'Not configured'}</b></p><form onSubmit={saveCredentials} className="mt-4 space-y-3"><input name="apiKey" type="password" autoComplete="off" placeholder="New API key (optional)" className="w-full rounded-lg border border-gray-300 p-2 text-sm" /><input name="apiSecret" type="password" autoComplete="off" placeholder="New API secret (optional)" className="w-full rounded-lg border border-gray-300 p-2 text-sm" /><button className="rounded-lg bg-[#DB0002] px-4 py-2 text-sm font-medium text-white">Save credentials</button></form></section>
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="font-semibold text-gray-900">Capabilities</h2><ul className="mt-3 space-y-2 text-sm text-gray-600"><li>Provider supported: Delivery API credentials</li><li>WeKonnek status: Not Yet Implemented</li><li>Live quotes, booking, tracking and webhooks: Deferred to Phase 2</li></ul></section></div>
+  </main>;
+}
+function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) { return <label className="mt-4 flex items-center justify-between gap-4 text-sm text-gray-700"><span>{label}</span><input type="checkbox" checked={value} onChange={e => onChange(e.target.checked)} className="h-4 w-4 accent-[#DB0002]" /></label>; }

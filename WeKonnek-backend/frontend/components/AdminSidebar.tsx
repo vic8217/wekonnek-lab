@@ -17,7 +17,7 @@ export default function AdminSidebar({
 }) {
   const pathname = usePathname();
   const [userType, setUserType] = useState<'admin' | 'staff' | null>(null);
-  const settingsActive = ['/admin/subscriptions', '/admin/categories', '/admin/zones', '/admin/payments', '/admin/social-login-providers'].some(isPath => pathname === isPath || pathname?.startsWith(`${isPath}/`));
+  const settingsActive = ['/admin/subscriptions', '/admin/categories', '/admin/zones', '/admin/payments', '/admin/social-login-providers', '/admin/delivery-partners'].some(isPath => pathname === isPath || pathname?.startsWith(`${isPath}/`));
   const [settingsExpanded, setSettingsExpanded] = useState(settingsActive);
 
   useEffect(() => {
@@ -154,6 +154,7 @@ export default function AdminSidebar({
                   ['/admin/categories', 'Categories'],
                   ['/admin/zones', 'Zones'],
                   ['/admin/payments', 'Payments'],
+                  ['/admin/delivery-partners', 'Delivery Partners'],
                   ['/admin/social-login-providers', 'Social Login Providers'],
                 ].map(([href, label]) => <Link key={href} href={href} className={`block rounded-lg px-3 py-2 text-sm transition-colors ${isActive(href) ? 'bg-[#DB0002] font-medium text-white' : 'text-gray-600 hover:bg-gray-100'}`}>{label}</Link>)}
               </div>}

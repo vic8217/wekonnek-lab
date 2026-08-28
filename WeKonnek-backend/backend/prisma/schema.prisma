@@ -2279,3 +2279,61 @@ model FloorTable {
   @@index([merchantId])
   @@map("floor_tables")
 }
+
+model DeliveryProvider {
+  id            String                         @id @default(uuid()) @db.Uuid
+  code          String                         @unique @db.VarChar(40)
+  name          String                         @db.VarChar(100)
+  providerType  String                         @map("provider_type") @db.VarChar(30)
+  enabled       Boolean                        @default(false)
+  createdAt     DateTime                       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime                       @updatedAt @map("updated_at") @db.Timestamptz
+  configuration DeliveryProviderConfiguration?
+  credentials   DeliveryProviderCredential[]
+  audits        DeliveryProviderAuditLog[]
+  @@map("delivery_providers")
+}
+
+model DeliveryProviderConfiguration {
+  id                        String   @id @default(uuid()) @db.Uuid
+  providerId                String   @unique @map("provider_id") @db.Uuid
+  environment               String   @default("uat") @db.VarChar(20)
+  market                    String   @default("PH") @db.VarChar(8)
+  showAtCheckout            Boolean  @default(false) @map("show_at_checkout")
+  automaticSelectionEnabled Boolean  @default(false) @map("automatic_selection_enabled")
+  platformMarkup            Decimal  @default(0) @map("platform_markup") @db.Decimal(12, 2)
+  maximumCustomerFee        Decimal? @map("maximum_customer_fee") @db.Decimal(12, 2)
+  availableFor              Json     @default("{}") @map("available_for")
+  lastConnectionStatus      String   @default("NOT_TESTED") @map("last_connection_status") @db.VarChar(30)
+  lastTestedAt              DateTime? @map("last_tested_at") @db.Timestamptz
+  lastSuccessfulApiAt       DateTime? @map("last_successful_api_at") @db.Timestamptz
+  lastError                 String?  @map("last_error") @db.VarChar(300)
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  provider                  DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@map("delivery_provider_configurations")
+}
+
+model DeliveryProviderCredential {
+  id             String   @id @default(uuid()) @db.Uuid
+  providerId     String   @map("provider_id") @db.Uuid
+  credentialKey  String   @map("credential_key") @db.VarChar(60)
+  encryptedValue String   @map("encrypted_value") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  provider       DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@unique([providerId, credentialKey])
+  @@map("delivery_provider_credentials")
+}
+
+model DeliveryProviderAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  actorId    String   @map("actor_id") @db.Uuid
+  action     String   @db.VarChar(80)
+  changes    Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  provider   DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  @@index([providerId, createdAt])
+  @@map("delivery_provider_audit_logs")
+}
