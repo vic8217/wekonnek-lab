@@ -12,25 +12,12 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { operationState } from '../branches/branch-operation';
-import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
-
-function addOnQuantity(quantities: unknown, id: string) {
-  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
-  const value = Number((quantities as Record<string, unknown>)[id]);
-  return Number.isInteger(value) && value > 0 ? value : 1;
-}
-
-function philippineBillingDay(now = new Date()) {
-  const offsetMs = 8 * 60 * 60 * 1000;
-  const local = new Date(now.getTime() + offsetMs);
-  const year = local.getUTCFullYear();
-  const month = local.getUTCMonth();
-  const day = local.getUTCDate();
-  const periodStart = new Date(Date.UTC(year, month, day) - offsetMs);
-  const periodEnd = new Date(periodStart.getTime() + 24 * 60 * 60 * 1000);
-  const key = `${year}${String(month + 1).padStart(2, '0')}${String(day).padStart(2, '0')}`;
-  return { key, periodStart, periodEnd };
-}
+import {
+  addOnQuantity,
+  computeDailySubscriptionFee,
+  dailySubscriptionReference,
+  philippineBillingDay,
+} from './philippine-billing-day';
 
 /**
  * The merchant/admin portals read snake_case fields while the customer
@@ -116,10 +103,7 @@ function normalizeMerchantInput(input: Record<string, any>): Record<string, any>
 
 @Injectable()
 export class MerchantsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly coordinatorApplications: CoordinatorApplicationsService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createMerchantDto: CreateMerchantDto) {
     const merchant = await this.prisma.merchant.create({
@@ -168,113 +152,21 @@ export class MerchantsService {
         })
       : [];
     const planFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount);
-    const addOnFee = addOns.reduce(
-      (sum, addOn) =>
-        sum + Number(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
-      0,
+    const { addOnFee, dailySubscriptionFee } = computeDailySubscriptionFee(
+      planFee,
+      addOns,
+      application?.selectedAddOnQuantities,
     );
-    const dailySubscriptionFee = planFee + addOnFee;
     const isDailyPlan = merchant.subscriptionPlan.toLowerCase() === 'daily';
     const billingDay = philippineBillingDay();
-    const chargeReference = `SUB-${merchant.id}-${billingDay.key}`;
-
-    if (isDailyPlan && wallet && dailySubscriptionFee > 0) {
-      const existingCharge = await this.prisma.walletTransaction.findUnique({
-        where: { referenceNumber: chargeReference },
-        select: { id: true },
-      });
-
-      if (!existingCharge && Number(wallet.balance) >= dailySubscriptionFee) {
-        const coveredShops = await this.prisma.branch.findMany({
-          where: { merchantId: merchant.id },
-          select: { id: true, name: true, shopId: true },
-          orderBy: { createdAt: 'asc' },
-        });
-        try {
-          await this.prisma.$transaction(async tx => {
-            // The unique reference makes the daily debit safe when the dashboard
-            // sends overlapping coverage requests.
-            await tx.walletTransaction.create({
-              data: {
-                referenceNumber: chargeReference,
-                walletId: wallet.id,
-                type: WalletTransactionType.payment,
-                status: WalletTransactionStatus.completed,
-                gateway: WalletPaymentGateway.internal,
-                amount: dailySubscriptionFee,
-                fee: 0,
-                netAmount: dailySubscriptionFee,
-                description: `Daily ${merchant.subscriptionTier} subscription fee`,
-                metadata: {
-                  merchantId: merchant.id,
-                  billingDate: billingDay.key,
-                  purpose: 'daily_subscription',
-                  shops: coveredShops.map(shop => ({
-                    id: shop.id,
-                    name: shop.name,
-                    shopId: shop.shopId,
-                  })),
-                },
-              },
-            });
-            const deduction = await tx.wallet.updateMany({
-              where: { id: wallet.id, balance: { gte: dailySubscriptionFee } },
-              data: { balance: { decrement: dailySubscriptionFee } },
-            });
-            if (deduction.count !== 1) throw new Error('INSUFFICIENT_WALLET_BALANCE');
-            await tx.subscriptionPayment.create({
-              data: {
-                merchantId: merchant.id,
-                tier: merchant.subscriptionTier,
-                plan: 'daily',
-                amount: dailySubscriptionFee,
-                paymentMethod: 'wallet',
-                gateway: 'internal',
-                status: 'paid',
-                paymentRef: chargeReference,
-                periodStart: billingDay.periodStart,
-                periodEnd: billingDay.periodEnd,
-              },
-            });
-          });
-        } catch (error) {
-          // A concurrent request may have inserted the unique daily charge first.
-          // Any other failure is reflected below by the absence of that charge.
-          if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
-            const charged = await this.prisma.walletTransaction.findUnique({
-              where: { referenceNumber: chargeReference },
-              select: { id: true },
-            });
-            if (!charged) console.error('Daily subscription charge failed:', error);
-          }
-        }
-      }
-    }
-
-    if (isDailyPlan && dailySubscriptionFee > 0) {
-      const paidCharge = await this.prisma.walletTransaction.findUnique({
-        where: { referenceNumber: chargeReference },
-        select: { status: true },
-      });
-      if (paidCharge?.status === WalletTransactionStatus.completed) {
-        await this.coordinatorApplications.creditFixedFeeCommission(
-          merchant.id,
-          dailySubscriptionFee,
-          chargeReference,
-        );
-      }
-    }
-
-    const [currentWallet, currentCharge] = await Promise.all([
-      wallet ? this.prisma.wallet.findUnique({ where: { id: wallet.id } }) : null,
-      isDailyPlan
-        ? this.prisma.walletTransaction.findUnique({
-            where: { referenceNumber: chargeReference },
-            select: { id: true },
-          })
-        : null,
-    ]);
-    const walletBalance = Number(currentWallet?.balance || 0);
+    const chargeReference = dailySubscriptionReference(merchant.id, billingDay.key);
+    const currentCharge = isDailyPlan
+      ? await this.prisma.walletTransaction.findUnique({
+          where: { referenceNumber: chargeReference },
+          select: { id: true },
+        })
+      : null;
+    const walletBalance = Number(wallet?.balance || 0);
     const fundedDays = dailySubscriptionFee > 0
       ? Math.floor(walletBalance / dailySubscriptionFee)
       : 0;
@@ -283,19 +175,6 @@ export class MerchantsService {
       ? new Date(billingDay.periodEnd.getTime() + fundedDays * 24 * 60 * 60 * 1000)
       : null;
     const accountActive = !isDailyPlan || dailySubscriptionFee <= 0 || paidToday;
-    if (isDailyPlan) {
-      const nextStatus = accountActive
-        ? merchant.status === 'inactive' ? 'active' : merchant.status
-        : merchant.status === 'active' ? 'inactive' : merchant.status;
-      await this.prisma.merchant.update({
-        where: { id: merchant.id },
-        data: {
-          isActive: accountActive && nextStatus === 'active',
-          status: nextStatus,
-          subscriptionStatus: accountActive ? 'active' : 'inactive',
-        },
-      });
-    }
 
     return {
       wallet_balance: walletBalance,

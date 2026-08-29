@@ -57,6 +57,7 @@ import { PaymentPartnersModule } from './payment-partners/payment-partners.modul
 import { SocialAuthModule } from './social-auth/social-auth.module';
 import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.module';
 import { RfqModule } from './rfq/rfq.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { RfqModule } from './rfq/rfq.module';
     }),
 
     PrismaModule,
+    ScheduleModule.forRoot(),
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

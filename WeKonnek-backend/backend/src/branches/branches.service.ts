@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { randomBytes } from 'crypto';
 import { operationState } from './branch-operation';
+import { addOnQuantity, philippineBillingDay } from '../merchants/philippine-billing-day';
 
 const PASSKEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -13,17 +14,6 @@ const TAX_CLASSIFICATIONS = new Set([
   'government_entity',
   'boi_peza_registered',
 ]);
-
-function addOnQuantity(quantities: unknown, id: string) {
-  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
-  const value = Number((quantities as Record<string, unknown>)[id]);
-  return Number.isInteger(value) && value > 0 ? value : 1;
-}
-
-function philippineBillingKey(now = new Date()) {
-  const local = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  return `${local.getUTCFullYear()}${String(local.getUTCMonth() + 1).padStart(2, '0')}${String(local.getUTCDate()).padStart(2, '0')}`;
-}
 
 @Injectable()
 export class BranchesService {
@@ -103,7 +93,7 @@ export class BranchesService {
         );
       const paidToday = wallet
         ? await this.prisma.walletTransaction.findUnique({
-            where: { referenceNumber: `SUB-${merchant.id}-${philippineBillingKey()}` },
+            where: { referenceNumber: `SUB-${merchant.id}-${philippineBillingDay().key}` },
             select: { id: true },
           })
         : null;
