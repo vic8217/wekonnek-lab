@@ -387,8 +387,33 @@ model PaymentPartnerConfiguration {
   sources                            PaymentPartnerSourceConfig[]
   auditLogs                          PaymentPartnerAuditLog[]
   events                             PaymentPartnerEvent[]
+  paycoolsEnvironments               PayCoolsEnvironmentConfiguration[]
 
   @@map("payment_partner_configurations")
+}
+
+model PayCoolsEnvironmentConfiguration {
+  id                          String                       @id @default(uuid()) @db.Uuid
+  configurationId             String                       @map("configuration_id") @db.Uuid
+  environment                 String                       @db.VarChar(20)
+  baseUrl                     String?                      @map("base_url") @db.Text
+  appId                       String?                      @map("app_id") @db.Text
+  appName                     String?                      @map("app_name") @db.Text
+  merchantPublicKey           String?                      @map("merchant_public_key") @db.Text
+  encryptedMerchantPrivateKey String?                      @map("encrypted_merchant_private_key") @db.Text
+  encryptedCallbackSecret     String?                      @map("encrypted_callback_secret") @db.Text
+  channelCode                 String                       @default("QRPH_DYNAMIC_QR") @map("channel_code") @db.VarChar(100)
+  healthcheckUrl              String?                      @map("healthcheck_url") @db.Text
+  ipWhitelistRequired         Boolean                      @default(false) @map("ip_whitelist_required")
+  publicKeyRegistered         Boolean                      @default(false) @map("public_key_registered")
+  callbackRegistered          Boolean                      @default(false) @map("callback_registered")
+  ipWhitelistConfirmed        Boolean                      @default(false) @map("ip_whitelist_confirmed")
+  createdAt                   DateTime                     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  configuration               PaymentPartnerConfiguration  @relation(fields: [configurationId], references: [id], onDelete: Cascade)
+
+  @@unique([configurationId, environment])
+  @@map("paycools_environment_configurations")
 }
 
 model PaymentPartnerSourceConfig {

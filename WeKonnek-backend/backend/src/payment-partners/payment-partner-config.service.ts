@@ -1,65 +1,578 @@
-import { BadRequestException, Injectable, NotImplementedException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-base-to-string, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unused-vars */
+import {
+  BadRequestException,
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 const PROVIDER = 'PAYCOOLS';
-const SOURCE_DEFAULTS: Record<string, boolean> = { RESTAURANT_ORDER: true, RETAIL_ORDER: true, ADVANCE_ORDER: true, TAKE_OUT: true, RESERVATION: true, MERCHANT_SUBSCRIPTION: true, DELIVERY_ORDER: false, SERVICE_BOOKING: false, BAZAAR_LISTING: false, PROPERTY_LISTING: false };
-const MUTABLE_FIELDS = ['enabled', 'environment', 'dynamicQrEnabled', 'defaultQrExpirySeconds', 'refundEnabled', 'payoutEnabled', 'settlementMode', 'uatPublicKeyRegistrationConfirmed', 'uatIpWhitelistConfirmed', 'uatCallbackRegistrationConfirmed', 'prodPublicKeyRegistrationConfirmed', 'prodIpWhitelistConfirmed', 'prodCallbackRegistrationConfirmed'] as const;
-type Environment = 'uat' | 'production';
+const ENVIRONMENTS = ['uat', 'production'] as const;
+type Environment = (typeof ENVIRONMENTS)[number];
+const SOURCE_DEFAULTS: Record<string, boolean> = {
+  RESTAURANT_ORDER: true,
+  RETAIL_ORDER: true,
+  ADVANCE_ORDER: true,
+  TAKE_OUT: true,
+  RESERVATION: true,
+  MERCHANT_SUBSCRIPTION: true,
+  DELIVERY_ORDER: false,
+  SERVICE_BOOKING: false,
+  BAZAAR_LISTING: false,
+  PROPERTY_LISTING: false,
+};
+const MUTABLE_FIELDS = [
+  'enabled',
+  'environment',
+  'dynamicQrEnabled',
+  'defaultQrExpirySeconds',
+  'refundEnabled',
+  'payoutEnabled',
+  'settlementMode',
+] as const;
+const ENV_FIELDS = [
+  'baseUrl',
+  'appId',
+  'appName',
+  'merchantPublicKey',
+  'channelCode',
+  'healthcheckUrl',
+  'ipWhitelistRequired',
+  'publicKeyRegistered',
+  'callbackRegistered',
+  'ipWhitelistConfirmed',
+] as const;
 
 @Injectable()
 export class PaymentPartnerConfigService {
-  constructor(private prisma: PrismaService, private env: ConfigService) {}
-
-  private async ensureConfig() { return this.prisma.paymentPartnerConfiguration.upsert({ where: { providerCode: PROVIDER }, update: {}, create: { providerCode: PROVIDER, enabled: false, environment: 'uat', dynamicQrEnabled: true, sources: { create: Object.entries(SOURCE_DEFAULTS).map(([sourceType, enabled]) => ({ providerCode: PROVIDER, sourceType, enabled })) } }, include: { sources: true } }); }
-  private credentials(environment: string) { const prefix = environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT'; return { baseUrlConfigured: Boolean(this.env.get(`${prefix}_BASE_URL`)), appIdConfigured: Boolean(this.env.get(`${prefix}_APP_ID`)), appNameConfigured: Boolean(this.env.get(`${prefix}_APP_NAME`)), privateKeyConfigured: Boolean(this.env.get(`${prefix}_PRIVATE_KEY_BASE64`)), callbackSecretConfigured: Boolean(this.env.get(`${prefix}_CALLBACK_SECRET`)) }; }
-  private ipWhitelistRequired(environment: string) { const prefix = environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT'; return this.env.get<string>(`${prefix}_IP_WHITELIST_REQUIRED`) === 'true'; }
-  private callbackUrls() { const base = (this.env.get<string>('PUBLIC_API_URL') || 'https://api.wekonnek.biz').replace(/\/$/, ''); return { payment: `${base}/api/payments/callbacks/paycools/payment` }; }
-  private confirmations(config: any, environment: Environment) { const prefix = environment === 'production' ? 'prod' : 'uat'; return { publicKeyRegistrationConfirmed: Boolean(config[`${prefix}PublicKeyRegistrationConfirmed`]), ipWhitelistConfirmed: Boolean(config[`${prefix}IpWhitelistConfirmed`]), callbackRegistrationConfirmed: Boolean(config[`${prefix}CallbackRegistrationConfirmed`]) }; }
-  private connection(config: any, environment: Environment, credentials = this.credentials(environment)) { const prefix = environment === 'production' ? 'prod' : 'uat'; const testAt = config[`${prefix}LastConnectionTestAt`]; const successful = config[`${prefix}LastConnectionTestSuccessful`]; const errorCode = config[`${prefix}LastConnectionTestErrorCode`]; const status = !Object.values(credentials).every(Boolean) ? 'NOT_CONFIGURED' : successful === true ? 'HEALTHY' : testAt && successful === false ? 'ERROR' : 'READY_TO_TEST'; return { status, lastConnectionTestAt: testAt, lastConnectionTestSuccessful: successful, lastConnectionTestErrorCode: errorCode }; }
-  private readiness(config: any, environment: Environment) { const credentials = this.credentials(environment); const configurationComplete = Object.values(credentials).every(Boolean); const confirmations = this.confirmations(config, environment); const connection = this.connection(config, environment, credentials); const ipWhitelistRequired = this.ipWhitelistRequired(environment); const missing = [...(!credentials.baseUrlConfigured ? ['BASE_URL'] : []), ...(!credentials.appIdConfigured ? ['APP_ID'] : []), ...(!credentials.appNameConfigured ? ['APP_NAME'] : []), ...(!credentials.privateKeyConfigured ? ['PRIVATE_KEY'] : []), ...(!credentials.callbackSecretConfigured ? ['CALLBACK_SECRET'] : []), ...(!confirmations.publicKeyRegistrationConfirmed ? ['PUBLIC_KEY_REGISTRATION'] : []), ...(!confirmations.callbackRegistrationConfirmed ? ['CALLBACK_REGISTRATION'] : []), ...(ipWhitelistRequired && !confirmations.ipWhitelistConfirmed ? ['IP_WHITELIST'] : []), ...(connection.status !== 'HEALTHY' ? ['CONNECTION_TEST'] : []), ...(!config.dynamicQrEnabled ? ['DYNAMIC_QR'] : [])]; const ready = missing.length === 0; return { credentials, configurationComplete, confirmations, connection, ipWhitelistRequired, missing, ready, uatStatus: !configurationComplete ? 'NOT_READY' : ready ? (config.enabled ? 'ACTIVE' : 'READY') : 'READY_FOR_TESTING', operationallyActive: Boolean(config.enabled && ready) }; }
-  private checklist(config: any, readiness: any) { const types = new Set((config.events || []).filter((e: any) => e.success).map((e: any) => e.type)); const { credentials, confirmations, connection } = readiness; return [['UAT Base URL', credentials.baseUrlConfigured, true], ['App ID', credentials.appIdConfigured, true], ['Application Name', credentials.appNameConfigured, true], ['Private Key Installed', credentials.privateKeyConfigured, true], ['Public Key Registered', confirmations.publicKeyRegistrationConfirmed, false], ['Callback Secret', credentials.callbackSecretConfigured, true], ['Callback URL Registered', confirmations.callbackRegistrationConfirmed, false], ['IP Whitelist Confirmed', !readiness.ipWhitelistRequired || confirmations.ipWhitelistConfirmed, false], ['Connection Test', connection.status === 'HEALTHY', true], ['Dynamic QR Enabled', Boolean(config.dynamicQrEnabled), true], ['Test QR Generated', types.has('UAT_QR_CREATED'), true], ['Test Payment Received', types.has('UAT_PAYMENT_COMPLETED'), true], ['Callback Verified', types.has('CALLBACK_VERIFIED'), true], ['Order Marked Paid', types.has('ORDER_MARKED_PAID'), true]].map(([label, complete, automatic]) => ({ label, complete, automatic })); }
-
+  constructor(
+    private prisma: PrismaService,
+    private env: ConfigService,
+  ) {}
+  private key() {
+    const value = this.env.get<string>('INTEGRATION_ENCRYPTION_KEY');
+    if (!value)
+      throw new BadRequestException(
+        'INTEGRATION_ENCRYPTION_KEY must be configured before saving PayCools secrets',
+      );
+    return createHash('sha256').update(value).digest();
+  }
+  private encrypt(value: string) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.key(), iv);
+    const encrypted = Buffer.concat([
+      cipher.update(value, 'utf8'),
+      cipher.final(),
+    ]);
+    return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+  }
+  private decrypt(value: string) {
+    const [ivValue, tagValue, encrypted] = value.split('.');
+    if (!ivValue || !tagValue || !encrypted)
+      throw new BadRequestException('Stored PayCools secret is invalid');
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      this.key(),
+      Buffer.from(ivValue, 'base64url'),
+    );
+    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encrypted, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+  private normalizeEnvironment(value: string): Environment {
+    if (!ENVIRONMENTS.includes(value as Environment))
+      throw new BadRequestException('Environment must be uat or production');
+    return value as Environment;
+  }
+  private dbEnvironment(environment: Environment) {
+    return environment === 'production' ? 'PRODUCTION' : 'UAT';
+  }
+  private prefix(environment: Environment) {
+    return environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT';
+  }
+  private callbackUrls() {
+    const base = (
+      this.env.get<string>('PUBLIC_API_URL') || 'https://api.wekonnek.biz'
+    ).replace(/\/$/, '');
+    return { payment: `${base}/api/payments/callbacks/paycools/payment` };
+  }
+  private async ensureConfig() {
+    return this.prisma.paymentPartnerConfiguration.upsert({
+      where: { providerCode: PROVIDER },
+      update: {},
+      create: {
+        providerCode: PROVIDER,
+        enabled: false,
+        environment: 'uat',
+        dynamicQrEnabled: true,
+        sources: {
+          create: Object.entries(SOURCE_DEFAULTS).map(
+            ([sourceType, enabled]) => ({
+              providerCode: PROVIDER,
+              sourceType,
+              enabled,
+            }),
+          ),
+        },
+      },
+      include: { sources: true, paycoolsEnvironments: true },
+    });
+  }
+  private async ensureEnvironment(
+    configurationId: string,
+    environment: Environment,
+  ) {
+    return this.prisma.payCoolsEnvironmentConfiguration.upsert({
+      where: {
+        configurationId_environment: {
+          configurationId,
+          environment: this.dbEnvironment(environment),
+        },
+      },
+      update: {},
+      create: { configurationId, environment: this.dbEnvironment(environment) },
+    });
+  }
+  private fallback(environment: Environment) {
+    const p = this.prefix(environment);
+    return {
+      baseUrl: (this.env.get<string>(`${p}_BASE_URL`) || '').replace(/\/$/, ''),
+      appId: this.env.get<string>(`${p}_APP_ID`) || '',
+      appName: this.env.get<string>(`${p}_APP_NAME`) || '',
+      privateKeyBase64: this.env.get<string>(`${p}_PRIVATE_KEY_BASE64`) || '',
+      callbackSecret: this.env.get<string>(`${p}_CALLBACK_SECRET`) || '',
+      channelCode:
+        this.env.get<string>(`${p}_CHANNEL_CODE`) || 'QRPH_DYNAMIC_QR',
+      healthcheckUrl: this.env.get<string>(`${p}_HEALTHCHECK_URL`) || '',
+      ipWhitelistRequired:
+        this.env.get<string>(`${p}_IP_WHITELIST_REQUIRED`) === 'true',
+    };
+  }
+  /** DB is primary. PAYCOOLS_<ENV>_* is a deprecated transition fallback for missing DB fields. */
+  private effective(row: any, environment: Environment) {
+    const fallback = this.fallback(environment);
+    return {
+      baseUrl: (row?.baseUrl || fallback.baseUrl).replace(/\/$/, ''),
+      appId: row?.appId || fallback.appId,
+      appName: row?.appName || fallback.appName,
+      privateKeyBase64: row?.encryptedMerchantPrivateKey
+        ? this.decrypt(row.encryptedMerchantPrivateKey)
+        : fallback.privateKeyBase64,
+      callbackSecret: row?.encryptedCallbackSecret
+        ? this.decrypt(row.encryptedCallbackSecret)
+        : fallback.callbackSecret,
+      channelCode: row?.channelCode || fallback.channelCode,
+      healthcheckUrl: row?.healthcheckUrl || fallback.healthcheckUrl,
+      ipWhitelistRequired:
+        row?.ipWhitelistRequired ?? fallback.ipWhitelistRequired,
+      usingEnvFallback:
+        !row?.baseUrl ||
+        !row?.appId ||
+        !row?.appName ||
+        !row?.encryptedMerchantPrivateKey ||
+        !row?.encryptedCallbackSecret,
+    };
+  }
+  private safeEnvironment(row: any, environment: Environment) {
+    const f = this.fallback(environment);
+    return {
+      environment,
+      baseUrl: row?.baseUrl || '',
+      appId: row?.appId || '',
+      appName: row?.appName || '',
+      merchantPublicKey: row?.merchantPublicKey || '',
+      channelCode: row?.channelCode || 'QRPH_DYNAMIC_QR',
+      healthcheckUrl: row?.healthcheckUrl || '',
+      ipWhitelistRequired: row?.ipWhitelistRequired ?? false,
+      publicKeyRegistered: row?.publicKeyRegistered ?? false,
+      callbackRegistered: row?.callbackRegistered ?? false,
+      ipWhitelistConfirmed: row?.ipWhitelistConfirmed ?? false,
+      privateKeyConfigured: Boolean(
+        row?.encryptedMerchantPrivateKey || f.privateKeyBase64,
+      ),
+      callbackSecretConfigured: Boolean(
+        row?.encryptedCallbackSecret || f.callbackSecret,
+      ),
+      dbConfigurationComplete: Boolean(
+        row?.baseUrl &&
+        row?.appId &&
+        row?.appName &&
+        row?.encryptedMerchantPrivateKey &&
+        row?.encryptedCallbackSecret,
+      ),
+      usingDeprecatedEnvFallback:
+        !row?.baseUrl ||
+        !row?.appId ||
+        !row?.appName ||
+        !row?.encryptedMerchantPrivateKey ||
+        !row?.encryptedCallbackSecret,
+      createdAt: row?.createdAt,
+      updatedAt: row?.updatedAt,
+    };
+  }
+  private readiness(config: any, row: any, environment: Environment) {
+    const r = this.effective(row, environment);
+    const credentials = {
+      baseUrlConfigured: Boolean(r.baseUrl),
+      appIdConfigured: Boolean(r.appId),
+      appNameConfigured: Boolean(r.appName),
+      privateKeyConfigured: Boolean(r.privateKeyBase64),
+      callbackSecretConfigured: Boolean(r.callbackSecret),
+    };
+    const prefix = environment === 'production' ? 'prod' : 'uat';
+    const successful = config[`${prefix}LastConnectionTestSuccessful`];
+    const testAt = config[`${prefix}LastConnectionTestAt`];
+    const connection = {
+      status: !Object.values(credentials).every(Boolean)
+        ? 'NOT_CONFIGURED'
+        : successful === true
+          ? 'HEALTHY'
+          : testAt && successful === false
+            ? 'ERROR'
+            : 'READY_TO_TEST',
+      lastConnectionTestAt: testAt,
+      lastConnectionTestSuccessful: successful,
+      lastConnectionTestErrorCode:
+        config[`${prefix}LastConnectionTestErrorCode`],
+    };
+    const missing = [
+      ...(!credentials.baseUrlConfigured ? ['BASE_URL'] : []),
+      ...(!credentials.appIdConfigured ? ['APP_ID'] : []),
+      ...(!credentials.appNameConfigured ? ['APP_NAME'] : []),
+      ...(!credentials.privateKeyConfigured ? ['PRIVATE_KEY'] : []),
+      ...(!credentials.callbackSecretConfigured ? ['CALLBACK_SECRET'] : []),
+      ...(!row?.publicKeyRegistered ? ['PUBLIC_KEY_REGISTRATION'] : []),
+      ...(!row?.callbackRegistered ? ['CALLBACK_REGISTRATION'] : []),
+      ...(r.ipWhitelistRequired && !row?.ipWhitelistConfirmed
+        ? ['IP_WHITELIST']
+        : []),
+      ...(connection.status !== 'HEALTHY' ? ['CONNECTION_TEST'] : []),
+      ...(!config.dynamicQrEnabled ? ['DYNAMIC_QR'] : []),
+    ];
+    return {
+      credentials,
+      connection,
+      missing,
+      ready: missing.length === 0,
+      operationallyActive: Boolean(config.enabled && missing.length === 0),
+      ipWhitelistRequired: r.ipWhitelistRequired,
+      usingDeprecatedEnvFallback: r.usingEnvFallback,
+    };
+  }
   paymentCallbackUrl() {
     return this.callbackUrls().payment;
   }
-
-  /** Runtime PayCools credentials. Never expose this object from admin GET. */
   async getPayCoolsRuntime() {
     const config = await this.ensureConfig();
-    const environment = (config.environment === 'production' ? 'production' : 'uat') as Environment;
-    const prefix = environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT';
+    const environment = this.normalizeEnvironment(config.environment);
+    const row = await this.ensureEnvironment(config.id, environment);
+    const runtime = this.effective(row, environment);
     return {
       environment,
       defaultQrExpirySeconds: config.defaultQrExpirySeconds,
-      baseUrl: (this.env.get<string>(`${prefix}_BASE_URL`) || '').replace(/\/$/, ''),
-      appId: this.env.get<string>(`${prefix}_APP_ID`) || '',
-      privateKeyBase64: this.env.get<string>(`${prefix}_PRIVATE_KEY_BASE64`) || '',
-      appName: this.env.get<string>(`${prefix}_APP_NAME`) || '',
-      callbackSecret: this.env.get<string>(`${prefix}_CALLBACK_SECRET`) || '',
-      channelCode: this.env.get<string>(`${prefix}_CHANNEL_CODE`) || 'QRPH_DYNAMIC_QR',
+      ...runtime,
       notifyUrl: this.callbackUrls().payment,
     };
   }
-
-  async get() { const config = await this.ensureConfig(); const events = await this.prisma.paymentPartnerEvent.findMany({ where: { configurationId: config.id }, orderBy: { createdAt: 'desc' }, take: 20 }); const expanded = { ...config, events }; const readiness = this.readiness(expanded, config.environment as Environment); return { ...config, credentials: readiness.credentials, configurationComplete: readiness.configurationComplete, confirmations: readiness.confirmations, connection: readiness.connection, readiness: { missing: readiness.missing, ready: readiness.ready, uatStatus: readiness.uatStatus, operationallyActive: readiness.operationallyActive, ipWhitelistRequired: readiness.ipWhitelistRequired }, callbackUrls: this.callbackUrls(), checklist: this.checklist(expanded, readiness), events }; }
-  async getActiveProvider(sourceType: string) { const config = await this.ensureConfig(); const source = config.sources.find((entry) => entry.sourceType === sourceType); const readiness = this.readiness(config, config.environment as Environment); if (!readiness.operationallyActive || !config.dynamicQrEnabled || !source?.enabled) throw new BadRequestException('This payment method is currently unavailable'); return { providerCode: config.providerCode, environment: config.environment, defaultQrExpirySeconds: config.defaultQrExpirySeconds }; }
-
-  async update(body: Record<string, unknown>, actor: { id: string }, context: { ip?: string; userAgent?: string }) {
-    const current = await this.ensureConfig(); const data: Record<string, unknown> = {}; for (const field of MUTABLE_FIELDS) if (body[field] !== undefined) data[field] = body[field];
-    if (data.environment && !['uat', 'production'].includes(String(data.environment))) throw new BadRequestException('Environment must be uat or production');
-    if (data.defaultQrExpirySeconds !== undefined && (!Number.isInteger(data.defaultQrExpirySeconds) || Number(data.defaultQrExpirySeconds) < 300 || Number(data.defaultQrExpirySeconds) > 3600)) throw new BadRequestException('QR expiry must be between 300 and 3600 seconds');
-    if (data.settlementMode && data.settlementMode !== 'MANUAL') throw new BadRequestException('Only manual settlement is supported'); if (data.refundEnabled === true) throw new BadRequestException('PayCools refunds are not implemented and remain disabled until refund UAT passes'); if (data.payoutEnabled === true) throw new BadRequestException('PayCools payouts are not part of this configuration and remain disabled');
-    const targetEnvironment = (data.environment || current.environment) as Environment; if (targetEnvironment !== current.environment) data.enabled = false;
-    const readiness = this.readiness({ ...current, ...data }, targetEnvironment); if (data.enabled === true && !readiness.ready) throw new BadRequestException({ code: 'PAYCOOLS_NOT_READY', message: 'PayCools cannot be enabled because UAT configuration is incomplete.', missing: readiness.missing });
-    const highRisk = (data.environment === 'production' && current.environment !== 'production') || (current.environment === 'production' && current.enabled && data.enabled === false); if (highRisk && body.confirmation !== 'CONFIRM PAYCOOLS CHANGE') throw new BadRequestException('Elevated confirmation is required for this change');
-    const sourceUpdates: Array<[string, unknown]> = body.sources && typeof body.sources === 'object' ? Object.entries(body.sources as Record<string, unknown>) : []; const changedEntries: Array<[string, unknown]> = [...Object.entries(data), ...sourceUpdates.map(([key, value]): [string, unknown] => [`source:${key}`, value])]; if (!changedEntries.length) throw new BadRequestException('No supported settings supplied');
-    const changes = changedEntries.map(([field, value]) => ({ field, oldValue: field.startsWith('source:') ? current.sources.find((s) => s.sourceType === field.slice(7))?.enabled : (current as Record<string, unknown>)[field], newValue: value }));
-    await this.prisma.$transaction(async (tx) => { await tx.paymentPartnerConfiguration.update({ where: { id: current.id }, data }); for (const [sourceType, enabled] of sourceUpdates) { if (!(sourceType in SOURCE_DEFAULTS) || typeof enabled !== 'boolean') throw new BadRequestException(`Unsupported source ${sourceType}`); await tx.paymentPartnerSourceConfig.upsert({ where: { providerCode_sourceType: { providerCode: PROVIDER, sourceType } }, update: { enabled }, create: { configurationId: current.id, providerCode: PROVIDER, sourceType, enabled } }); } await tx.paymentPartnerAuditLog.create({ data: { configurationId: current.id, actorId: actor.id, action: 'PAYCOOLS_CONFIGURATION_UPDATED', changes: changes as Prisma.InputJsonValue, ipAddress: context.ip, userAgent: context.userAgent } }); for (const [field, value] of Object.entries(data)) if (field.includes('Confirmed')) await tx.paymentPartnerEvent.create({ data: { configurationId: current.id, type: field.toUpperCase(), message: `${field.replace(/([A-Z])/g, ' $1').trim()} ${value ? 'confirmed' : 'unconfirmed'}`, success: Boolean(value), reference: actor.id } }); if (data.enabled !== undefined) await tx.paymentPartnerEvent.create({ data: { configurationId: current.id, type: data.enabled ? 'PAYCOOLS_ENABLED' : 'PAYCOOLS_DISABLED', message: `PayCools ${data.enabled ? 'enabled' : 'disabled'}`, success: true, reference: actor.id } }); });
+  async get() {
+    const config = await this.ensureConfig();
+    const environment = this.normalizeEnvironment(config.environment);
+    const rows = await Promise.all(
+      ENVIRONMENTS.map((item) => this.ensureEnvironment(config.id, item)),
+    );
+    const active = rows.find(
+      (row) => row.environment === this.dbEnvironment(environment),
+    );
+    const readiness = this.readiness(config, active, environment);
+    const events = await this.prisma.paymentPartnerEvent.findMany({
+      where: { configurationId: config.id },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return {
+      ...config,
+      paycoolsEnvironments: rows.map((row, index) =>
+        this.safeEnvironment(row, ENVIRONMENTS[index]),
+      ),
+      activeEnvironmentConfig: this.safeEnvironment(active, environment),
+      credentials: readiness.credentials,
+      connection: readiness.connection,
+      configurationComplete: Object.values(readiness.credentials).every(
+        Boolean,
+      ),
+      readiness: {
+        missing: readiness.missing,
+        ready: readiness.ready,
+        operationallyActive: readiness.operationallyActive,
+        ipWhitelistRequired: readiness.ipWhitelistRequired,
+        usingDeprecatedEnvFallback: readiness.usingDeprecatedEnvFallback,
+        uatStatus: !Object.values(readiness.credentials).every(Boolean)
+          ? 'NOT_READY'
+          : readiness.ready
+            ? config.enabled
+              ? 'ACTIVE'
+              : 'READY'
+            : 'READY_FOR_TESTING',
+      },
+      callbackUrls: this.callbackUrls(),
+      events,
+    };
+  }
+  async getEnvironment(environment: string) {
+    const config = await this.ensureConfig();
+    const env = this.normalizeEnvironment(environment);
+    return this.safeEnvironment(
+      await this.ensureEnvironment(config.id, env),
+      env,
+    );
+  }
+  async updateEnvironment(
+    environment: string,
+    body: Record<string, unknown>,
+    actorId: string,
+  ) {
+    const config = await this.ensureConfig();
+    const env = this.normalizeEnvironment(environment);
+    const data: Record<string, unknown> = {};
+    for (const key of ENV_FIELDS)
+      if (body[key] !== undefined) data[key] = body[key];
+    for (const key of ['baseUrl', 'healthcheckUrl'])
+      if (
+        data[key] !== undefined &&
+        data[key] !== '' &&
+        !/^https:\/\//.test(String(data[key]))
+      )
+        throw new BadRequestException(`${key} must use HTTPS`);
+    if (data.channelCode !== undefined && !String(data.channelCode).trim())
+      throw new BadRequestException('channelCode is required');
+    const row = await this.prisma.payCoolsEnvironmentConfiguration.update({
+      where: {
+        configurationId_environment: {
+          configurationId: config.id,
+          environment: this.dbEnvironment(env),
+        },
+      },
+      data,
+    });
+    await this.prisma.paymentPartnerAuditLog.create({
+      data: {
+        configurationId: config.id,
+        actorId,
+        action: 'PAYCOOLS_ENVIRONMENT_CONFIGURATION_UPDATED',
+        changes: {
+          environment: env,
+          fields: Object.keys(data),
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return this.safeEnvironment(row, env);
+  }
+  async replaceSecret(
+    environment: string,
+    field: 'merchantPrivateKey' | 'callbackSecret',
+    value: unknown,
+    actorId: string,
+  ) {
+    if (typeof value !== 'string' || !value.trim())
+      throw new BadRequestException('A non-empty secret is required');
+    const config = await this.ensureConfig();
+    const env = this.normalizeEnvironment(environment);
+    const data =
+      field === 'merchantPrivateKey'
+        ? { encryptedMerchantPrivateKey: this.encrypt(value.trim()) }
+        : { encryptedCallbackSecret: this.encrypt(value.trim()) };
+    const row = await this.prisma.payCoolsEnvironmentConfiguration.update({
+      where: {
+        configurationId_environment: {
+          configurationId: config.id,
+          environment: this.dbEnvironment(env),
+        },
+      },
+      data,
+    });
+    await this.prisma.paymentPartnerAuditLog.create({
+      data: {
+        configurationId: config.id,
+        actorId,
+        action: 'PAYCOOLS_SECRET_REPLACED',
+        changes: { environment: env, secret: field } as Prisma.InputJsonValue,
+      },
+    });
+    return this.safeEnvironment(row, env);
+  }
+  async getActiveProvider(sourceType: string) {
+    const config = await this.ensureConfig();
+    const environment = this.normalizeEnvironment(config.environment);
+    const row = await this.ensureEnvironment(config.id, environment);
+    const source = config.sources.find(
+      (entry) => entry.sourceType === sourceType,
+    );
+    const readiness = this.readiness(config, row, environment);
+    if (
+      !readiness.operationallyActive ||
+      !config.dynamicQrEnabled ||
+      !source?.enabled
+    )
+      throw new BadRequestException(
+        'This payment method is currently unavailable',
+      );
+    return {
+      providerCode: config.providerCode,
+      environment,
+      defaultQrExpirySeconds: config.defaultQrExpirySeconds,
+    };
+  }
+  async update(
+    body: Record<string, unknown>,
+    actor: { id: string },
+    context: { ip?: string; userAgent?: string },
+  ) {
+    const current = await this.ensureConfig();
+    const data: Record<string, unknown> = {};
+    for (const field of MUTABLE_FIELDS)
+      if (body[field] !== undefined) data[field] = body[field];
+    if (data.environment) this.normalizeEnvironment(String(data.environment));
+    if (
+      data.defaultQrExpirySeconds !== undefined &&
+      (!Number.isInteger(data.defaultQrExpirySeconds) ||
+        Number(data.defaultQrExpirySeconds) < 300 ||
+        Number(data.defaultQrExpirySeconds) > 3600)
+    )
+      throw new BadRequestException(
+        'QR expiry must be between 300 and 3600 seconds',
+      );
+    if (data.refundEnabled === true || data.payoutEnabled === true)
+      throw new BadRequestException(
+        'PayCools refunds and payouts are not implemented',
+      );
+    const target = this.normalizeEnvironment(
+      String(data.environment || current.environment),
+    );
+    if (target !== current.environment) data.enabled = false;
+    const targetRow = await this.ensureEnvironment(current.id, target);
+    const readiness = this.readiness(
+      { ...current, ...data },
+      targetRow,
+      target,
+    );
+    if (data.enabled === true && !readiness.ready)
+      throw new BadRequestException({
+        code: 'PAYCOOLS_NOT_READY',
+        message:
+          'PayCools cannot be enabled because configuration is incomplete.',
+        missing: readiness.missing,
+      });
+    const sourceUpdates =
+      body.sources && typeof body.sources === 'object'
+        ? Object.entries(body.sources as Record<string, unknown>)
+        : [];
+    if (!Object.keys(data).length && !sourceUpdates.length)
+      throw new BadRequestException('No supported settings supplied');
+    await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(data).length)
+        await tx.paymentPartnerConfiguration.update({
+          where: { id: current.id },
+          data,
+        });
+      for (const [sourceType, enabled] of sourceUpdates) {
+        if (!(sourceType in SOURCE_DEFAULTS) || typeof enabled !== 'boolean')
+          throw new BadRequestException(`Unsupported source ${sourceType}`);
+        await tx.paymentPartnerSourceConfig.upsert({
+          where: {
+            providerCode_sourceType: { providerCode: PROVIDER, sourceType },
+          },
+          update: { enabled },
+          create: {
+            configurationId: current.id,
+            providerCode: PROVIDER,
+            sourceType,
+            enabled,
+          },
+        });
+      }
+      await tx.paymentPartnerAuditLog.create({
+        data: {
+          configurationId: current.id,
+          actorId: actor.id,
+          action: 'PAYCOOLS_CONFIGURATION_UPDATED',
+          changes: {
+            fields: [
+              ...Object.keys(data),
+              ...sourceUpdates.map(([key]) => `source:${key}`),
+            ],
+          } as Prisma.InputJsonValue,
+          ipAddress: context.ip,
+          userAgent: context.userAgent,
+        },
+      });
+    });
     return this.get();
   }
-
-  async testConnection(actorId: string) { const config = await this.ensureConfig(); const environment = config.environment as Environment; const credentials = this.credentials(environment); if (!Object.values(credentials).every(Boolean)) throw new BadRequestException({ code: 'PAYCOOLS_NOT_CONFIGURED', message: 'Complete UAT credentials before testing the connection.' }); const prefix = environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT'; const endpoint = this.env.get<string>(`${prefix}_HEALTHCHECK_URL`); if (!endpoint) throw new NotImplementedException('A documented PayCools health-check endpoint must be configured before connection testing is available'); const field = environment === 'production' ? 'prod' : 'uat'; try { const response = await fetch(endpoint, { method: 'GET', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'AUTHENTICATION_REJECTED' : response.status === 408 ? 'TIMEOUT' : 'PROVIDER_UNAVAILABLE'); const now = new Date(); await this.prisma.paymentPartnerConfiguration.update({ where: { id: config.id }, data: { [`${field}LastConnectionTestAt`]: now, [`${field}LastConnectionTestSuccessful`]: true, [`${field}LastConnectionTestErrorCode`]: null, lastSuccessfulRequestAt: now } }); await this.prisma.paymentPartnerEvent.create({ data: { configurationId: config.id, type: 'CONNECTION_TEST_SUCCESSFUL', message: 'PayCools UAT connection test successful', success: true, reference: actorId } }); return this.get(); } catch (error) { const code = error instanceof Error && ['AUTHENTICATION_REJECTED', 'TIMEOUT', 'PROVIDER_UNAVAILABLE'].includes(error.message) ? error.message : 'PROVIDER_UNAVAILABLE'; await this.prisma.paymentPartnerConfiguration.update({ where: { id: config.id }, data: { [`${field}LastConnectionTestAt`]: new Date(), [`${field}LastConnectionTestSuccessful`]: false, [`${field}LastConnectionTestErrorCode`]: code } }); await this.prisma.paymentPartnerEvent.create({ data: { configurationId: config.id, type: 'CONNECTION_TEST_FAILED', message: `PayCools connection test failed: ${code.replaceAll('_', ' ').toLowerCase()}`, success: false, reference: actorId } }); throw new BadRequestException(`Connection test failed: ${code.replaceAll('_', ' ').toLowerCase()}`); } }
-  reconcile() { throw new NotImplementedException('PayCools reconciliation API specifications are required before reconciliation can run'); }
+  async testConnection(actorId: string) {
+    const config = await this.ensureConfig();
+    const environment = this.normalizeEnvironment(config.environment);
+    const row = await this.ensureEnvironment(config.id, environment);
+    const runtime = this.effective(row, environment);
+    if (
+      !runtime.baseUrl ||
+      !runtime.appId ||
+      !runtime.appName ||
+      !runtime.privateKeyBase64 ||
+      !runtime.callbackSecret
+    )
+      throw new BadRequestException({
+        code: 'PAYCOOLS_NOT_CONFIGURED',
+        message: 'Complete PayCools credentials before testing the connection.',
+      });
+    if (!runtime.healthcheckUrl)
+      throw new NotImplementedException(
+        'A documented PayCools health-check endpoint must be configured before connection testing is available',
+      );
+    const field = environment === 'production' ? 'prod' : 'uat';
+    try {
+      const response = await fetch(runtime.healthcheckUrl, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error();
+      const now = new Date();
+      await this.prisma.paymentPartnerConfiguration.update({
+        where: { id: config.id },
+        data: {
+          [`${field}LastConnectionTestAt`]: now,
+          [`${field}LastConnectionTestSuccessful`]: true,
+          [`${field}LastConnectionTestErrorCode`]: null,
+          lastSuccessfulRequestAt: now,
+        },
+      });
+      return this.get();
+    } catch {
+      await this.prisma.paymentPartnerConfiguration.update({
+        where: { id: config.id },
+        data: {
+          [`${field}LastConnectionTestAt`]: new Date(),
+          [`${field}LastConnectionTestSuccessful`]: false,
+          [`${field}LastConnectionTestErrorCode`]: 'PROVIDER_UNAVAILABLE',
+        },
+      });
+      throw new BadRequestException(
+        'Connection test failed: provider unavailable',
+      );
+    }
+  }
+  reconcile() {
+    throw new NotImplementedException(
+      'PayCools reconciliation API specifications are required before reconciliation can run',
+    );
+  }
 }
