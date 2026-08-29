@@ -121,7 +121,7 @@ function createStore(
       update: jest.fn(async ({ where, data }: any) => {
         if (where.id !== wallet.id) throw new Error('wallet missing');
         if (data.balance?.increment !== undefined)
-          wallet.balance += data.balance.increment;
+          wallet.balance += Number(data.balance.increment);
         return { ...wallet };
       }),
     },

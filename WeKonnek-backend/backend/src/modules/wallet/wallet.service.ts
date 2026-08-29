@@ -12,14 +12,37 @@ import {
   WalletPaymentGateway,
   NotificationType,
 } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PaymentGatewayService } from './payment-gateway.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WalletLedgerService } from './wallet-ledger.service';
+import {
+  moneyDecimal,
+  moneyNumber,
+  serializeWallet,
+  serializeWalletTransaction,
+} from './wallet-money';
+
+const PIN_HASH_ROUNDS = 12;
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MS = 15 * 60 * 1000;
+const INVALID_PIN = 'Invalid wallet PIN';
 
 function addOnQuantity(quantities: unknown, id: string) {
   if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
   const value = Number((quantities as Record<string, unknown>)[id]);
   return Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+export function scopedWalletReference(prefix: string, userId: string, idempotencyKey: string) {
+  const key = idempotencyKey.trim();
+  if (key.length < 8 || key.length > 80) {
+    throw new BadRequestException('Idempotency key must be 8–80 characters');
+  }
+  if (!/^[A-Za-z0-9._:-]+$/.test(key)) {
+    throw new BadRequestException('Idempotency key contains unsupported characters');
+  }
+  return { reference: `${prefix}-${userId}-${key}`, key };
 }
 
 @Injectable()
@@ -39,6 +62,10 @@ export class WalletService {
     return wallet;
   }
 
+  async getPublicWallet(userId: string) {
+    return serializeWallet(await this.getOrCreateWallet(userId));
+  }
+
   async getWallet(userId: string) {
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Wallet not found');
@@ -47,33 +74,49 @@ export class WalletService {
 
   async getBalance(userId: string) {
     const wallet = await this.getOrCreateWallet(userId);
-    return { balance: wallet.balance };
+    return { balance: moneyNumber(wallet.balance) };
   }
 
   async setPin(userId: string, pin: string) {
-    if (pin.length !== 6) {
+    if (!/^\d{6}$/.test(pin || '')) {
       throw new BadRequestException('PIN must be 6 digits');
     }
     const wallet = await this.getOrCreateWallet(userId);
+    const pinHash = await bcrypt.hash(pin, PIN_HASH_ROUNDS);
     await this.prisma.wallet.update({
       where: { id: wallet.id },
-      data: { pin, pinSet: true },
+      data: {
+        pinHash,
+        pin: null,
+        pinSet: true,
+        pinFailedAttempts: 0,
+        pinLockedUntil: null,
+      },
     });
     return { message: 'PIN set successfully' };
   }
 
   async verifyPin(userId: string, pin: string): Promise<boolean> {
-    const wallet = await this.getWallet(userId);
-    if (!wallet.pinSet) throw new BadRequestException('No PIN set');
-    return wallet.pin === pin;
+    await this.assertPin(userId, pin);
+    return true;
   }
 
   async topUp(userId: string, amount: number, gateway: WalletPaymentGateway, paymentMethod: string) {
-    if (amount < 50) throw new BadRequestException('Minimum top-up is ₱50');
-    if (amount > 50000) throw new BadRequestException('Maximum top-up is ₱50,000');
+    if (
+      gateway === WalletPaymentGateway.paymongo ||
+      gateway === WalletPaymentGateway.maya ||
+      gateway === WalletPaymentGateway.xendit
+    ) {
+      throw new BadRequestException(
+        'This top-up provider is disabled until official webhook signature verification is configured.',
+      );
+    }
+    if (moneyNumber(amount) < 50) throw new BadRequestException('Minimum top-up is ₱50');
+    if (moneyNumber(amount) > 50000) throw new BadRequestException('Maximum top-up is ₱50,000');
 
     const wallet = await this.getOrCreateWallet(userId);
     const refNumber = this.generateRefNumber('TU');
+    const money = moneyDecimal(amount);
 
     const txn = await this.prisma.walletTransaction.create({
       data: {
@@ -82,17 +125,18 @@ export class WalletService {
         type: WalletTransactionType.top_up,
         status: WalletTransactionStatus.pending,
         gateway,
-        amount,
+        amount: money,
         fee: 0,
-        netAmount: amount,
+        netAmount: money,
         description: `Top-up via ${gateway} (${paymentMethod})`,
         gatewayPaymentMethod: paymentMethod,
+        purpose: 'legacy_top_up',
       },
     });
 
     const paymentResult = await this.gatewayService.createPayment({
       gateway,
-      amount,
+      amount: moneyNumber(amount),
       description: `WeKonnek Pay Top-up - ${refNumber}`,
       paymentMethod,
       redirectSuccess: `wekonnek://wallet/topup-success?ref=${refNumber}`,
@@ -109,42 +153,51 @@ export class WalletService {
       },
     });
 
-    return { transaction: updatedTxn, paymentUrl: paymentResult.paymentUrl };
+    return {
+      transaction: serializeWalletTransaction(updatedTxn as unknown as Record<string, unknown>),
+      paymentUrl: paymentResult.paymentUrl,
+    };
   }
 
   async pay(userId: string, amount: number, orderId: string, pin: string, description?: string) {
-    const pinValid = await this.verifyPin(userId, pin);
-    if (!pinValid) throw new ForbiddenException('Invalid wallet PIN');
+    await this.assertPin(userId, pin);
     if (!orderId) throw new BadRequestException('Order ID is required');
     const wallet = await this.getWallet(userId);
     const result = await this.ledger.debitWalletAtomic({
       walletId: wallet.id,
-      amount,
+      amount: moneyNumber(amount),
       reference: `PAY-${userId}-${orderId}`,
       type: WalletTransactionType.payment,
       orderId,
       description: description || `Payment for Order ${orderId}`,
-      metadata: { purpose: 'wallet_pay', orderId },
+      metadata: { orderId },
+      purpose: 'wallet_pay',
+      idempotencyKey: `PAY-${orderId}`,
     });
-    return result.transaction;
+    return serializeWalletTransaction(result.transaction as unknown as Record<string, unknown>);
   }
 
   async cashOut(
-    userId: string, amount: number, gateway: WalletPaymentGateway,
-    bankCode: string, accountNumber: string, accountName: string, pin: string,
+    userId: string,
+    amount: number,
+    gateway: WalletPaymentGateway,
+    bankCode: string,
+    accountNumber: string,
+    accountName: string,
+    pin: string,
+    idempotencyKey: string,
   ) {
-    const pinValid = await this.verifyPin(userId, pin);
-    if (!pinValid) throw new ForbiddenException('Invalid wallet PIN');
-    if (amount < 100) throw new BadRequestException('Minimum cash-out is ₱100');
+    await this.assertPin(userId, pin);
+    if (moneyNumber(amount) < 100) throw new BadRequestException('Minimum cash-out is ₱100');
+    const { reference, key } = scopedWalletReference('CO', userId, idempotencyKey);
 
     const wallet = await this.getWallet(userId);
-    const fee = this.calculateCashOutFee(amount);
-    const refNumber = this.generateRefNumber('CO');
+    const fee = this.calculateCashOutFee(moneyNumber(amount));
     const result = await this.ledger.debitWalletAtomic({
       walletId: wallet.id,
-      amount,
+      amount: moneyNumber(amount),
       fee,
-      reference: refNumber,
+      reference,
       type: WalletTransactionType.cash_out,
       status: WalletTransactionStatus.processing,
       gateway,
@@ -152,15 +205,19 @@ export class WalletService {
       cashOutBank: bankCode,
       cashOutAccountNumber: accountNumber,
       cashOutAccountName: accountName,
+      purpose: 'cash_out_hold',
+      idempotencyKey: key,
       metadata: {
-        purpose: 'cash_out_hold',
         externalPayout: false,
         bankCode,
       },
     });
     return {
-      transaction: result.transaction,
+      transaction: serializeWalletTransaction(
+        result.transaction as unknown as Record<string, unknown>,
+      ),
       disbursed: false,
+      duplicate: result.duplicate,
       message:
         'Cash-out is recorded internally and deducted from the wallet. External payout is not available in this release.',
     };
@@ -177,14 +234,16 @@ export class WalletService {
     const wallet = await this.getOrCreateWallet(userId);
     const result = await this.ledger.creditWalletAtomic({
       walletId: wallet.id,
-      amount,
+      amount: moneyNumber(amount),
       reference: `ERN-${orderId}`,
       type: WalletTransactionType.earning,
       orderId,
       description: description || `Earning from Order ${orderId}`,
-      metadata: { purpose: 'earning', orderId },
+      metadata: { orderId },
+      purpose: 'earning',
+      idempotencyKey: `ERN-${orderId}`,
     });
-    return result.transaction;
+    return serializeWalletTransaction(result.transaction as unknown as Record<string, unknown>);
   }
 
   async creditRefund(userId: string, amount: number, orderId: string, description?: string) {
@@ -192,14 +251,16 @@ export class WalletService {
     const wallet = await this.getOrCreateWallet(userId);
     const result = await this.ledger.creditWalletAtomic({
       walletId: wallet.id,
-      amount,
+      amount: moneyNumber(amount),
       reference: `REFUND-${orderId}`,
       type: WalletTransactionType.refund,
       orderId,
       description: description || `Refund for Order ${orderId}`,
-      metadata: { purpose: 'refund', orderId },
+      metadata: { orderId },
+      purpose: 'refund',
+      idempotencyKey: `REFUND-${orderId}`,
     });
-    return result.transaction;
+    return serializeWalletTransaction(result.transaction as unknown as Record<string, unknown>);
   }
 
   async handleWebhook(gateway: WalletPaymentGateway, body: any, headers: Record<string, string>) {
@@ -216,7 +277,7 @@ export class WalletService {
       if (!credited.duplicate && credited.wallet) {
         await this.syncMerchantSubscriptionStatus(
           credited.wallet.userId,
-          credited.wallet.balance,
+          moneyNumber(credited.wallet.balance),
         );
       }
       return {
@@ -243,18 +304,68 @@ export class WalletService {
     const where: Record<string, unknown> = { walletId: wallet.id };
     if (options?.type) where.type = options.type;
 
-    return this.prisma.walletTransaction.findMany({
+    const rows = await this.prisma.walletTransaction.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: options?.limit || 20,
       skip: options?.offset || 0,
     });
+    return rows.map((row) =>
+      serializeWalletTransaction(row as unknown as Record<string, unknown>),
+    );
   }
 
   private generateRefNumber(prefix: string): string {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     return `WHP-${prefix}-${timestamp}${random}`;
+  }
+
+  private async assertPin(userId: string, pin: string) {
+    const wallet = await this.getWallet(userId);
+    if (wallet.pinLockedUntil && wallet.pinLockedUntil.getTime() > Date.now()) {
+      throw new ForbiddenException(INVALID_PIN);
+    }
+    const offered = String(pin || '');
+    let matched = false;
+    if (wallet.pinHash) {
+      matched = await bcrypt.compare(offered, wallet.pinHash);
+    } else if (wallet.pin) {
+      matched = wallet.pin === offered;
+    }
+    if (!matched) {
+      const next = (wallet.pinFailedAttempts || 0) + 1;
+      await this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data:
+          next >= PIN_MAX_ATTEMPTS
+            ? {
+                pinFailedAttempts: next,
+                pinLockedUntil: new Date(Date.now() + PIN_LOCK_MS),
+              }
+            : { pinFailedAttempts: next },
+      });
+      throw new ForbiddenException(INVALID_PIN);
+    }
+    if (!wallet.pinHash && wallet.pin) {
+      await this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          pinHash: await bcrypt.hash(offered, PIN_HASH_ROUNDS),
+          pin: null,
+          pinSet: true,
+          pinFailedAttempts: 0,
+          pinLockedUntil: null,
+        },
+      });
+      return;
+    }
+    if (wallet.pinFailedAttempts > 0 || wallet.pinLockedUntil) {
+      await this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: { pinFailedAttempts: 0, pinLockedUntil: null },
+      });
+    }
   }
 
   private async syncMerchantSubscriptionStatus(userId: string, walletBalance: number) {
@@ -272,10 +383,11 @@ export class WalletService {
           select: { id: true, amount: true },
         })
       : [];
-    const dailyFee = Number(application?.subscriptionAmount ?? merchant.subscriptionAmount)
-      + addOns.reduce(
+    const dailyFee =
+      moneyNumber(application?.subscriptionAmount ?? merchant.subscriptionAmount) +
+      addOns.reduce(
         (sum, addOn) =>
-          sum + Number(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
+          sum + moneyNumber(addOn.amount) * addOnQuantity(application?.selectedAddOnQuantities, addOn.id),
         0,
       );
     const hasCoverage = walletBalance >= dailyFee;

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WalletPaymentGateway as PaymentGateway } from '@prisma/client';
 
@@ -311,42 +311,23 @@ export class PaymentGatewayService {
   }
 
   // ─── WEBHOOK VERIFICATION ────────────────────
-  private async verifyPayMongoWebhook(payload: WebhookPayload): Promise<WebhookResult> {
-    // PayMongo sends event.data.attributes
-    const event = payload.body;
-    const paymentData = event?.data?.attributes;
-    const status = paymentData?.status === 'paid' ? 'completed' : 'failed';
-
-    return {
-      transactionId: event?.data?.id || '',
-      status,
-      amount: (paymentData?.amount || 0) / 100, // Convert from centavos
-      metadata: paymentData?.metadata,
-    };
+  // Official PayMongo/Maya/Xendit signing secrets and algorithms are not in
+  // this repo. Unsigned acceptance is not allowed. Do not invent HMAC rules.
+  private async verifyPayMongoWebhook(_payload: WebhookPayload): Promise<WebhookResult> {
+    throw new UnauthorizedException(
+      'PayMongo webhook signatures are not configured. Wallet credit is blocked.',
+    );
   }
 
-  private async verifyMayaWebhook(payload: WebhookPayload): Promise<WebhookResult> {
-    const event = payload.body;
-    const status =
-      event?.status === 'PAYMENT_SUCCESS' ? 'completed' : 'failed';
-
-    return {
-      transactionId: event?.id || '',
-      status,
-      amount: event?.totalAmount?.value || 0,
-      metadata: event?.metadata,
-    };
+  private async verifyMayaWebhook(_payload: WebhookPayload): Promise<WebhookResult> {
+    throw new UnauthorizedException(
+      'Maya webhook signatures are not configured. Wallet credit is blocked.',
+    );
   }
 
-  private async verifyXenditWebhook(payload: WebhookPayload): Promise<WebhookResult> {
-    const event = payload.body;
-    const status = event?.status === 'PAID' ? 'completed' : 'failed';
-
-    return {
-      transactionId: event?.id || '',
-      status,
-      amount: event?.amount || 0,
-      metadata: event?.metadata,
-    };
+  private async verifyXenditWebhook(_payload: WebhookPayload): Promise<WebhookResult> {
+    throw new UnauthorizedException(
+      'Xendit webhook signatures are not configured. Wallet credit is blocked.',
+    );
   }
 }

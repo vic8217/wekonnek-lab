@@ -1,3 +1,6 @@
+import { Prisma } from '@prisma/client';
+import { moneyDecimal, moneyNumber } from '../modules/wallet/wallet-money';
+
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 /** Asia/Manila calendar day. The Philippines does not observe DST, so UTC+8 matches Asia/Manila. */
@@ -37,13 +40,14 @@ export function computeDailySubscriptionFee(
 ) {
   const addOnFee = addOns.reduce(
     (sum, addOn) =>
-      sum + Number(addOn.amount) * addOnQuantity(quantities, addOn.id),
-    0,
+      sum.plus(moneyDecimal(addOn.amount).times(addOnQuantity(quantities, addOn.id))),
+    new Prisma.Decimal(0),
   );
+  const dailySubscriptionFee = moneyDecimal(planFee).plus(addOnFee);
   return {
-    planFee,
-    addOnFee,
-    dailySubscriptionFee: planFee + addOnFee,
+    planFee: moneyNumber(planFee),
+    addOnFee: moneyNumber(addOnFee),
+    dailySubscriptionFee: moneyNumber(dailySubscriptionFee),
   };
 }
 

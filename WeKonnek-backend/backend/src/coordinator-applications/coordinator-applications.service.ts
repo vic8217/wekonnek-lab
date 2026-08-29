@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
 import { NotificationType, UserRole } from '@prisma/client';
 import { NotificationsService } from '../modules/notifications/notifications.service';
+import { moneyNumber } from '../modules/wallet/wallet-money';
 
 @Injectable()
 export class CoordinatorApplicationsService {
@@ -156,7 +157,7 @@ export class CoordinatorApplicationsService {
       where: { userId: { in: userIds } },
       select: { userId: true, transactions: { where: { type: 'earning', status: 'completed', createdAt: { gte: monthStart } }, select: { amount: true } } },
     }) : [];
-    const commissionByUser = new Map(wallets.map(wallet => [wallet.userId, wallet.transactions.reduce((sum, transaction) => sum + transaction.amount, 0)]));
+    const commissionByUser = new Map(wallets.map(wallet => [wallet.userId, wallet.transactions.reduce((sum, transaction) => sum + moneyNumber(transaction.amount), 0)]));
     return coordinators.map(coordinator => ({ ...coordinator, currentMonthCommission: coordinator.userId ? commissionByUser.get(coordinator.userId) || 0 : 0 }));
   }
 
@@ -182,9 +183,9 @@ export class CoordinatorApplicationsService {
       const merchantName = order?.merchant.name ?? String(metadata.merchant_name ?? metadata.merchantName ?? transaction.description ?? 'Unattributed commission');
       const merchantKey = merchantId ? String(merchantId) : merchantName;
       const merchant = month.merchants.get(merchantKey) || { merchant_id: merchantId, merchant_name: merchantName, amount: 0, transactions: 0 };
-      merchant.amount += transaction.amount;
+      merchant.amount += moneyNumber(transaction.amount);
       merchant.transactions += 1;
-      month.total += transaction.amount;
+      month.total += moneyNumber(transaction.amount);
       month.merchants.set(merchantKey, merchant);
       months.set(key, month);
     });

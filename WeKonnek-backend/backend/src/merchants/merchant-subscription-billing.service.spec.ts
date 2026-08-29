@@ -19,16 +19,24 @@ function billingNow() {
 }
 
 function createStore(
-  initial: { balance?: number; plan?: string; status?: string } = {},
+  initial: {
+    balance?: number;
+    plan?: string;
+    status?: string;
+    subscriptionAmount?: number;
+    includeAddOns?: boolean;
+  } = {},
 ) {
   const billingDay = philippineBillingDay(billingNow());
+  const planFee = initial.subscriptionAmount ?? 80;
+  const includeAddOns = initial.includeAddOns !== false;
   const merchant = {
     id: 9,
     userId: USER_ID,
     merchantCode: 'WK-9',
     subscriptionPlan: initial.plan ?? 'daily',
     subscriptionTier: 'basic',
-    subscriptionAmount: 80,
+    subscriptionAmount: planFee,
     subscriptionStatus: 'active',
     status: initial.status ?? 'active',
     isActive: true,
@@ -40,9 +48,9 @@ function createStore(
   };
   const application = {
     merchantCode: 'WK-9',
-    subscriptionAmount: 80,
-    selectedAddOnIds: [ADDON_ID],
-    selectedAddOnQuantities: { [ADDON_ID]: 2 },
+    subscriptionAmount: planFee,
+    selectedAddOnIds: includeAddOns ? [ADDON_ID] : [],
+    selectedAddOnQuantities: includeAddOns ? { [ADDON_ID]: 2 } : {},
   };
   const addOn = { id: ADDON_ID, amount: 10 };
   const walletTxns = new Map<string, any>();
@@ -77,6 +85,14 @@ function createStore(
           return walletTxns.get(data.referenceNumber);
         }),
       ),
+      update: jest.fn(async ({ where, data }: any) => {
+        const row =
+          [...walletTxns.values()].find((item) => item.id === where.id) ||
+          walletTxns.get(where.referenceNumber);
+        if (!row) throw new Error('wallet transaction missing');
+        Object.assign(row, data);
+        return row;
+      }),
     },
     wallet: {
       updateMany: jest.fn(async ({ where, data }: any) =>
@@ -84,24 +100,29 @@ function createStore(
           if (where.id !== wallet.id) return { count: 0 };
           if (
             where.balance?.gte !== undefined &&
-            wallet.balance < where.balance.gte
+            Number(wallet.balance) < Number(where.balance.gte)
           ) {
             return { count: 0 };
           }
           if (data.balance?.decrement !== undefined)
-            wallet.balance -= data.balance.decrement;
+            wallet.balance =
+              Number(wallet.balance) - Number(data.balance.decrement);
           if (data.balance?.increment !== undefined)
-            wallet.balance += data.balance.increment;
+            wallet.balance =
+              Number(wallet.balance) + Number(data.balance.increment);
           return { count: 1 };
         }),
       ),
       update: jest.fn(async ({ data }: any) =>
         serialize(() => {
           if (data.balance?.increment !== undefined)
-            wallet.balance += data.balance.increment;
+            wallet.balance =
+              Number(wallet.balance) + Number(data.balance.increment);
           return { ...wallet };
         }),
       ),
+      findUniqueOrThrow: jest.fn(async () => ({ ...wallet })),
+      findUnique: jest.fn(async () => ({ ...wallet })),
     },
     subscriptionPayment: {
       create: jest.fn(async ({ data }: any) => {
@@ -126,6 +147,7 @@ function createStore(
     },
     wallet: {
       findUnique: jest.fn(async () => ({ ...wallet })),
+      findUniqueOrThrow: jest.fn(async () => ({ ...wallet })),
       updateMany: tx.wallet.updateMany,
       update: tx.wallet.update,
     },
@@ -137,9 +159,13 @@ function createStore(
     },
     walletTransaction: {
       findUnique: jest.fn(
-        async ({ where }: any) => walletTxns.get(where.referenceNumber) || null,
+        async ({ where }: any) =>
+          [...walletTxns.values()].find((row) => row.id === where.id) ||
+          walletTxns.get(where.referenceNumber) ||
+          null,
       ),
       create: tx.walletTransaction.create,
+      update: tx.walletTransaction.update,
     },
     subscriptionPayment: {
       create: tx.subscriptionPayment.create,
@@ -223,6 +249,18 @@ describe('subscription coverage GET', () => {
     const result = await coverage.getSubscriptionCoverage(USER_ID);
     expect(result.funded_days).toBe(days);
     expect(result.daily_subscription_fee).toBe(100);
+  });
+
+  it('counts 0 funded days when balance 260 cannot cover a 270 fee', async () => {
+    const { coverage } = createStore({
+      balance: 260,
+      subscriptionAmount: 270,
+      includeAddOns: false,
+    });
+    const result = await coverage.getSubscriptionCoverage(USER_ID);
+    expect(result.daily_subscription_fee).toBe(270);
+    expect(result.funded_days).toBe(0);
+    expect(result.wallet_balance).toBe(260);
   });
 });
 

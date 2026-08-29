@@ -33,7 +33,7 @@ export class WalletController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get wallet info & balance' })
   getWallet(@Req() req: any) {
-    return this.walletService.getOrCreateWallet(req.user.id);
+    return this.walletService.getPublicWallet(req.user.id);
   }
 
   @Get('balance')
@@ -147,6 +147,7 @@ export class WalletController {
       accountNumber: string;
       accountName: string;
       pin: string;
+      idempotencyKey: string;
     },
   ) {
     return this.walletService.cashOut(
@@ -157,6 +158,7 @@ export class WalletController {
       body.accountNumber,
       body.accountName,
       body.pin,
+      body.idempotencyKey,
     );
   }
 

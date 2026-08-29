@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { randomBytes } from 'crypto';
 import { operationState } from './branch-operation';
 import { addOnQuantity, dailySubscriptionReference } from '../merchants/philippine-billing-day';
+import { moneyNumber } from '../modules/wallet/wallet-money';
 
 const PASSKEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -75,7 +76,7 @@ export class BranchesService {
           ? this.prisma.wallet.findUnique({ where: { userId: merchant.userId } })
           : Promise.resolve(null)
       );
-      walletBalance = Number(wallet?.balance || 0);
+      walletBalance = moneyNumber(wallet?.balance || 0);
       const addOns = application?.selectedAddOnIds.length
         ? await this.prisma.subscriptionAddOnPackage.findMany({
             where: { id: { in: application.selectedAddOnIds } },

@@ -12,6 +12,7 @@ import {
   dailySubscriptionReference,
   philippineBillingDay,
 } from './philippine-billing-day';
+import { moneyDecimal, moneyNumber } from '../modules/wallet/wallet-money';
 
 export type DailyBillingResultCode =
   'charged' | 'alreadyBilled' | 'insufficient' | 'skipped' | 'failed';
@@ -183,21 +184,22 @@ export class MerchantSubscriptionBillingService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
-        await tx.walletTransaction.create({
+        const fee = moneyDecimal(fees.dailySubscriptionFee);
+        const created = await tx.walletTransaction.create({
           data: {
             referenceNumber: reference,
             walletId: wallet.id,
             type: WalletTransactionType.payment,
             status: WalletTransactionStatus.completed,
             gateway: WalletPaymentGateway.internal,
-            amount: fees.dailySubscriptionFee,
+            amount: fee,
             fee: 0,
-            netAmount: fees.dailySubscriptionFee,
+            netAmount: fee,
+            purpose: 'daily_subscription',
             description: `Daily ${merchant.subscriptionTier} subscription fee`,
             metadata: {
               merchantId: merchant.id,
               billingDate: billingDay.key,
-              purpose: 'daily_subscription',
               shops: coveredShops.map((shop) => ({
                 id: shop.id,
                 name: shop.name,
@@ -209,13 +211,24 @@ export class MerchantSubscriptionBillingService {
         const deduction = await tx.wallet.updateMany({
           where: {
             id: wallet.id,
-            balance: { gte: fees.dailySubscriptionFee },
+            balance: { gte: fee },
           },
-          data: { balance: { decrement: fees.dailySubscriptionFee } },
+          data: { balance: { decrement: fee } },
         });
         if (deduction.count !== 1) {
           throw new Error('INSUFFICIENT_WALLET_BALANCE');
         }
+        const updatedWallet = await tx.wallet.findUniqueOrThrow({
+          where: { id: wallet.id },
+        });
+        const balanceAfter = moneyDecimal(updatedWallet.balance);
+        await tx.walletTransaction.update({
+          where: { id: created.id },
+          data: {
+            balanceBefore: balanceAfter.plus(fee),
+            balanceAfter,
+          },
+        });
         await tx.subscriptionPayment.create({
           data: {
             merchantId: merchant.id,

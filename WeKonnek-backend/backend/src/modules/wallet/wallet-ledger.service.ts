@@ -10,6 +10,12 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  moneyDecimal,
+  moneyNumber,
+  requirePositiveMoney,
+  serializeWalletTransaction,
+} from './wallet-money';
 
 export class InsufficientWalletBalanceError extends Error {
   constructor() {
@@ -34,6 +40,9 @@ export type WalletDebitInput = {
   cashOutBank?: string;
   cashOutAccountNumber?: string;
   cashOutAccountName?: string;
+  purpose?: string;
+  actorUserId?: string;
+  idempotencyKey?: string;
 };
 
 export type WalletCreditInput = {
@@ -46,6 +55,9 @@ export type WalletCreditInput = {
   orderId?: string;
   status?: WalletTransactionStatus;
   gateway?: WalletPaymentGateway;
+  purpose?: string;
+  actorUserId?: string;
+  idempotencyKey?: string;
 };
 
 @Injectable()
@@ -53,9 +65,10 @@ export class WalletLedgerService {
   constructor(private readonly prisma: PrismaService) {}
 
   async debitWalletAtomic(input: WalletDebitInput) {
-    const amount = this.requirePositiveAmount(input.amount);
-    const fee = input.fee && input.fee > 0 ? input.fee : 0;
-    const total = amount + fee;
+    const amount = requirePositiveMoney(input.amount);
+    const fee =
+      input.fee && moneyNumber(input.fee) > 0 ? moneyDecimal(input.fee) : moneyDecimal(0);
+    const total = amount.plus(fee);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const created = await tx.walletTransaction.create({
@@ -73,6 +86,9 @@ export class WalletLedgerService {
             cashOutBank: input.cashOutBank,
             cashOutAccountNumber: input.cashOutAccountNumber,
             cashOutAccountName: input.cashOutAccountName,
+            purpose: input.purpose,
+            actorUserId: input.actorUserId,
+            idempotencyKey: input.idempotencyKey,
             metadata: (input.metadata || {}) as Prisma.InputJsonValue,
           },
         });
@@ -84,15 +100,11 @@ export class WalletLedgerService {
         const wallet = await tx.wallet.findUniqueOrThrow({
           where: { id: input.walletId },
         });
+        const balanceAfter = moneyDecimal(wallet.balance);
+        const balanceBefore = balanceAfter.plus(total);
         const transaction = await tx.walletTransaction.update({
           where: { id: created.id },
-          data: {
-            metadata: {
-              ...(input.metadata || {}),
-              balanceBefore: Number(wallet.balance) + total,
-              balanceAfter: Number(wallet.balance),
-            } as Prisma.InputJsonValue,
-          },
+          data: { balanceBefore, balanceAfter },
         });
         return { wallet, transaction, duplicate: false as const };
       });
@@ -108,7 +120,7 @@ export class WalletLedgerService {
   }
 
   async creditWalletAtomic(input: WalletCreditInput) {
-    const amount = this.requirePositiveAmount(input.amount);
+    const amount = requirePositiveMoney(input.amount);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const created = await tx.walletTransaction.create({
@@ -123,6 +135,9 @@ export class WalletLedgerService {
             netAmount: amount,
             orderId: input.orderId,
             description: input.description,
+            purpose: input.purpose,
+            actorUserId: input.actorUserId,
+            idempotencyKey: input.idempotencyKey,
             metadata: (input.metadata || {}) as Prisma.InputJsonValue,
           },
         });
@@ -134,15 +149,11 @@ export class WalletLedgerService {
         const wallet = await tx.wallet.findUniqueOrThrow({
           where: { id: input.walletId },
         });
+        const balanceAfter = moneyDecimal(wallet.balance);
+        const balanceBefore = balanceAfter.minus(amount);
         const transaction = await tx.walletTransaction.update({
           where: { id: created.id },
-          data: {
-            metadata: {
-              ...(input.metadata || {}),
-              balanceBefore: Number(wallet.balance) - amount,
-              balanceAfter: Number(wallet.balance),
-            } as Prisma.InputJsonValue,
-          },
+          data: { balanceBefore, balanceAfter },
         });
         return { wallet, transaction, duplicate: false as const };
       });
@@ -173,10 +184,7 @@ export class WalletLedgerService {
         const wallet = await tx.wallet.findUnique({ where: { id: txn.walletId } });
         return { wallet, transaction: txn, duplicate: true as const };
       }
-      const amount = Number(txn.netAmount);
-      if (!(amount > 0)) {
-        throw new BadRequestException('Pending credit amount must be greater than zero');
-      }
+      const amount = requirePositiveMoney(txn.netAmount);
       await tx.wallet.updateMany({
         where: { id: txn.walletId },
         data: { balance: { increment: amount } },
@@ -184,17 +192,12 @@ export class WalletLedgerService {
       const wallet = await tx.wallet.findUniqueOrThrow({
         where: { id: txn.walletId },
       });
-      const metadata = (txn.metadata && typeof txn.metadata === 'object' && !Array.isArray(txn.metadata)
-        ? txn.metadata
-        : {}) as JsonMeta;
+      const balanceAfter = moneyDecimal(wallet.balance);
       const transaction = await tx.walletTransaction.update({
         where: { id: txn.id },
         data: {
-          metadata: {
-            ...metadata,
-            balanceBefore: Number(wallet.balance) - amount,
-            balanceAfter: Number(wallet.balance),
-          } as Prisma.InputJsonValue,
+          balanceBefore: balanceAfter.minus(amount),
+          balanceAfter,
         },
       });
       return { wallet, transaction, duplicate: false as const };
@@ -222,42 +225,49 @@ export class WalletLedgerService {
     const reference =
       input.reference ||
       `ADJ-${wallet.id.replace(/-/g, '').slice(0, 12)}-${Date.now().toString(36).toUpperCase()}`;
+    const amount = moneyNumber(input.amount);
     const metadata = {
-      purpose: 'admin_adjustment',
       direction: input.direction,
       reason: input.reason.trim(),
-      actorUserId: input.actorUserId,
       ownerUserId: wallet.userId,
     };
     const result =
       input.direction === 'credit'
         ? await this.creditWalletAtomic({
             walletId: wallet.id,
-            amount: input.amount,
+            amount,
             reference,
             type: WalletTransactionType.top_up,
             description: `Admin credit: ${input.reason.trim()}`,
             metadata,
+            purpose: 'admin_adjustment',
+            actorUserId: input.actorUserId,
+            idempotencyKey: input.reference,
           })
         : await this.debitWalletAtomic({
             walletId: wallet.id,
-            amount: input.amount,
+            amount,
             reference,
             type: WalletTransactionType.payment,
             description: `Admin debit: ${input.reason.trim()}`,
             metadata,
+            purpose: 'admin_adjustment',
+            actorUserId: input.actorUserId,
+            idempotencyKey: input.reference,
           });
     return {
       walletId: wallet.id,
       ownerUserId: wallet.userId,
       direction: input.direction,
-      amount: input.amount,
+      amount,
       reason: input.reason.trim(),
       actorUserId: input.actorUserId,
       reference,
       duplicate: result.duplicate,
-      wallet_balance: Number(result.wallet?.balance ?? wallet.balance),
-      transaction: result.transaction,
+      wallet_balance: moneyNumber(result.wallet?.balance ?? wallet.balance),
+      transaction: serializeWalletTransaction(
+        result.transaction as unknown as Record<string, unknown>,
+      ),
     };
   }
 
@@ -270,12 +280,5 @@ export class WalletLedgerService {
       where: { id: transaction.walletId },
     });
     return { wallet, transaction, duplicate };
-  }
-
-  private requirePositiveAmount(amount: number) {
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new BadRequestException('Amount must be greater than zero');
-    }
-    return amount;
   }
 }

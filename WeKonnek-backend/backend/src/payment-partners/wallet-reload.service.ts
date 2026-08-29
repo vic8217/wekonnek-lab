@@ -18,6 +18,7 @@ import { PaymentPartnerConfigService } from './payment-partner-config.service';
 import { PayCoolsProvider } from './paycools.provider';
 import { PlatformPaymentService } from './platform-payment.service';
 import type { VerifiedWebhookPayment } from './payment-provider';
+import { moneyDecimal, moneyNumber } from '../modules/wallet/wallet-money';
 
 const RELOAD_PURPOSE = 'merchant_wallet_reload';
 const RELOAD_SOURCE = PlatformPaymentSourceType.MERCHANT_SUBSCRIPTION;
@@ -250,7 +251,7 @@ export class WalletReloadService {
       }
       await tx.wallet.update({
         where: { id: payment.walletId! },
-        data: { balance: { increment: Number(payment.amount) } },
+        data: { balance: { increment: moneyDecimal(payment.amount) } },
       });
       if (payment.sourceId) {
         await tx.walletTransaction.updateMany({
@@ -325,7 +326,7 @@ export class WalletReloadService {
     return {
       paymentId: payment.id,
       reference: payment.reference,
-      amount: Number(payment.amount),
+      amount: moneyNumber(payment.amount),
       currency: payment.currency,
       status: payment.status,
       provider: 'paycools',

@@ -13,6 +13,7 @@ import {
   philippineBillingDay,
 } from './philippine-billing-day';
 import { WalletLedgerService } from '../modules/wallet/wallet-ledger.service';
+import { moneyNumber } from '../modules/wallet/wallet-money';
 
 /**
  * The merchant/admin portals read snake_case fields while the customer
@@ -164,7 +165,7 @@ export class MerchantsService {
           select: { id: true },
         })
       : null;
-    const walletBalance = Number(wallet?.balance || 0);
+    const walletBalance = moneyNumber(wallet?.balance || 0);
     const fundedDays = dailySubscriptionFee > 0
       ? Math.floor(walletBalance / dailySubscriptionFee)
       : 0;
@@ -231,7 +232,7 @@ export class MerchantsService {
     }) : [];
     const addOnAmounts = new Map(addOns.map(addOn => [addOn.id, Number(addOn.amount)]));
     const paidByMerchant = new Map(paidPayments.map(payment => [payment.merchantId, Number(payment._sum.amount || 0)]));
-    const walletByUser = new Map(wallets.map(wallet => [wallet.userId, Number(wallet.balance || 0)]));
+    const walletByUser = new Map(wallets.map(wallet => [wallet.userId, moneyNumber(wallet.balance || 0)]));
     const credentials = new Map(applications.map(application => [application.merchantCode, application]));
     return merchants.map(merchant => {
       const application = merchant.merchantCode ? credentials.get(merchant.merchantCode) : undefined;

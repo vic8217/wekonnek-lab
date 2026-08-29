@@ -23,13 +23,13 @@ model Category {
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   ownerMerchantId Int?     @map("owner_merchant_id")
 
-  subCategories      SubCategory[]
-  products           Product[]
-  customerPromotions CustomerPromotion[]
-  staffPosts         StaffPost[]
-  productCategories  ProductCategory[]
+  subCategories            SubCategory[]
+  products                 Product[]
+  customerPromotions       CustomerPromotion[]
+  staffPosts               StaffPost[]
+  productCategories        ProductCategory[]
   productStudioGenerations ProductStudioGeneration[]
-  ownerMerchant      Merchant?           @relation("MerchantOwnedCategories", fields: [ownerMerchantId], references: [id], onDelete: Cascade)
+  ownerMerchant            Merchant?                 @relation("MerchantOwnedCategories", fields: [ownerMerchantId], references: [id], onDelete: Cascade)
 
   @@index([ownerMerchantId])
   @@map("categories")
@@ -93,82 +93,82 @@ model SubCategory {
 }
 
 model Merchant {
-  id                     Int       @id @default(autoincrement())
-  merchantCode           String?   @unique @map("merchant_code") @db.VarChar(20)
-  userId                 String?   @map("user_id") @db.Uuid
-  name                   String    @db.VarChar(255)
-  slug                   String    @unique @db.VarChar(255)
-  description            String?   @db.Text
-  categoryId             Int?      @map("category_id")
-  subCategoryId          Int?      @map("sub_category_id")
-  businessType           String?   @map("business_type") @db.VarChar(50)
+  id                     Int             @id @default(autoincrement())
+  merchantCode           String?         @unique @map("merchant_code") @db.VarChar(20)
+  userId                 String?         @map("user_id") @db.Uuid
+  name                   String          @db.VarChar(255)
+  slug                   String          @unique @db.VarChar(255)
+  description            String?         @db.Text
+  categoryId             Int?            @map("category_id")
+  subCategoryId          Int?            @map("sub_category_id")
+  businessType           String?         @map("business_type") @db.VarChar(50)
   commerceDomain         CommerceDomain? @map("commerce_domain")
-  phone                  String?   @db.VarChar(20)
-  email                  String?   @db.VarChar(255)
-  website                String?   @db.VarChar(255)
-  address                String?   @db.Text
-  latitude               Decimal?  @db.Decimal(10, 8)
-  longitude              Decimal?  @db.Decimal(11, 8)
-  city                   String?   @db.VarChar(100)
-  region                 String?   @db.VarChar(100)
-  councilDistrict        String?   @map("council_district") @db.VarChar(100)
-  geographicArea         String?   @map("geographic_area") @db.VarChar(150)
-  state                  String?   @db.VarChar(100)
-  zipCode                String?   @map("zip_code") @db.VarChar(20)
-  country                String    @default("Philippines") @db.VarChar(100)
-  logoUrl                String?   @map("logo_url") @db.VarChar(500)
-  coverImageUrl          String?   @map("cover_image_url") @db.VarChar(500)
-  isActive               Boolean   @default(true) @map("is_active")
-  isVerified             Boolean   @default(false) @map("is_verified")
-  status                 String    @default("active") @db.VarChar(50)
-  subscriptionTier       String    @default("basic") @map("subscription_tier") @db.VarChar(50)
-  subscriptionPlan       String    @default("weekly") @map("subscription_plan") @db.VarChar(50)
-  subscriptionAmount     Decimal   @default(0.00) @map("subscription_amount") @db.Decimal(10, 2)
-  subscriptionStatus     String    @default("active") @map("subscription_status") @db.VarChar(50)
-  subscriptionStartedAt  DateTime? @map("subscription_started_at") @db.Timestamptz
-  subscriptionExpiresAt  DateTime? @map("subscription_expires_at") @db.Timestamptz
-  autoRenew              Boolean   @default(false) @map("auto_renew")
-  paymentMethod          String?   @map("payment_method") @db.VarChar(50)
-  taxClassification      String    @default("") @map("tax_classification") @db.VarChar(50)
-  tin                    String?   @db.VarChar(30)
-  registeredBusinessName String?   @map("registered_business_name") @db.VarChar(255)
-  suspensionReason       String?   @map("suspension_reason") @db.Text
-  suspensionDuration     Int?      @map("suspension_duration")
-  suspendedUntil         DateTime? @map("suspended_until") @db.Timestamptz
-  rating                 Decimal   @default(0.00) @db.Decimal(3, 2)
-  totalReviews           Int       @default(0) @map("total_reviews")
-  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  phone                  String?         @db.VarChar(20)
+  email                  String?         @db.VarChar(255)
+  website                String?         @db.VarChar(255)
+  address                String?         @db.Text
+  latitude               Decimal?        @db.Decimal(10, 8)
+  longitude              Decimal?        @db.Decimal(11, 8)
+  city                   String?         @db.VarChar(100)
+  region                 String?         @db.VarChar(100)
+  councilDistrict        String?         @map("council_district") @db.VarChar(100)
+  geographicArea         String?         @map("geographic_area") @db.VarChar(150)
+  state                  String?         @db.VarChar(100)
+  zipCode                String?         @map("zip_code") @db.VarChar(20)
+  country                String          @default("Philippines") @db.VarChar(100)
+  logoUrl                String?         @map("logo_url") @db.VarChar(500)
+  coverImageUrl          String?         @map("cover_image_url") @db.VarChar(500)
+  isActive               Boolean         @default(true) @map("is_active")
+  isVerified             Boolean         @default(false) @map("is_verified")
+  status                 String          @default("active") @db.VarChar(50)
+  subscriptionTier       String          @default("basic") @map("subscription_tier") @db.VarChar(50)
+  subscriptionPlan       String          @default("weekly") @map("subscription_plan") @db.VarChar(50)
+  subscriptionAmount     Decimal         @default(0.00) @map("subscription_amount") @db.Decimal(10, 2)
+  subscriptionStatus     String          @default("active") @map("subscription_status") @db.VarChar(50)
+  subscriptionStartedAt  DateTime?       @map("subscription_started_at") @db.Timestamptz
+  subscriptionExpiresAt  DateTime?       @map("subscription_expires_at") @db.Timestamptz
+  autoRenew              Boolean         @default(false) @map("auto_renew")
+  paymentMethod          String?         @map("payment_method") @db.VarChar(50)
+  taxClassification      String          @default("") @map("tax_classification") @db.VarChar(50)
+  tin                    String?         @db.VarChar(30)
+  registeredBusinessName String?         @map("registered_business_name") @db.VarChar(255)
+  suspensionReason       String?         @map("suspension_reason") @db.Text
+  suspensionDuration     Int?            @map("suspension_duration")
+  suspendedUntil         DateTime?       @map("suspended_until") @db.Timestamptz
+  rating                 Decimal         @default(0.00) @db.Decimal(3, 2)
+  totalReviews           Int             @default(0) @map("total_reviews")
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  category             MerchantCategory?            @relation(fields: [categoryId], references: [id])
-  subCategory          MerchantSubCategory?         @relation(fields: [subCategoryId], references: [id])
-  products             Product[]
-  orders               WkOrder[]
-  trustTradeTransactions TrustTradeTransaction[]
-  reservations         Reservation[]
-  promotions           Promotion[]
-  reviews              Review[]
-  staffPosts           StaffPost[]
-  subscriptionPayments SubscriptionPayment[]
-  branches             Branch[]
-  merchantStaff        MerchantStaff[]
-  floorTables          FloorTable[]
-  shopProducts         ShopProduct[]
-  shopInventories      ShopInventory[]
-  inventoryMovements   InventoryMovement[]
-  inventoryDailyCounts InventoryDailyCount[]
-  featureGrants        MerchantFeatureGrant[]
-  crewDevices          CrewDevice[]
-  crewPairingTokens    CrewPairingToken[]
-  dineInAuditLogs      DineInAuditLog[]
-  dineInChanges        DineInChange[]
-  platformPayments     PlatformPaymentTransaction[]
-  ownedCategories      Category[]                   @relation("MerchantOwnedCategories")
-  ownedSubCategories   SubCategory[]                @relation("MerchantOwnedSubCategories")
+  category                 MerchantCategory?            @relation(fields: [categoryId], references: [id])
+  subCategory              MerchantSubCategory?         @relation(fields: [subCategoryId], references: [id])
+  products                 Product[]
+  orders                   WkOrder[]
+  trustTradeTransactions   TrustTradeTransaction[]
+  reservations             Reservation[]
+  promotions               Promotion[]
+  reviews                  Review[]
+  staffPosts               StaffPost[]
+  subscriptionPayments     SubscriptionPayment[]
+  branches                 Branch[]
+  merchantStaff            MerchantStaff[]
+  floorTables              FloorTable[]
+  shopProducts             ShopProduct[]
+  shopInventories          ShopInventory[]
+  inventoryMovements       InventoryMovement[]
+  inventoryDailyCounts     InventoryDailyCount[]
+  featureGrants            MerchantFeatureGrant[]
+  crewDevices              CrewDevice[]
+  crewPairingTokens        CrewPairingToken[]
+  dineInAuditLogs          DineInAuditLog[]
+  dineInChanges            DineInChange[]
+  platformPayments         PlatformPaymentTransaction[]
+  ownedCategories          Category[]                   @relation("MerchantOwnedCategories")
+  ownedSubCategories       SubCategory[]                @relation("MerchantOwnedSubCategories")
   productStudioGenerations ProductStudioGeneration[]
-  visualIndexes ProductVisualIndex[]
-  rfqs          RequestForQuotation[]
-  quotations    MerchantQuotation[]
+  visualIndexes            ProductVisualIndex[]
+  rfqs                     RequestForQuotation[]
+  quotations               MerchantQuotation[]
 
   @@index([userId])
   @@index([categoryId])
@@ -532,48 +532,48 @@ model SubscriptionAddOnPackage {
 }
 
 model Product {
-  id                 Int      @id @default(autoincrement())
-  merchantId         Int      @map("merchant_id")
-  name               String   @db.VarChar(255)
-  description        String?  @db.Text
-  notes              Json     @default("[]")
-  productCode        String?  @map("product_code") @db.VarChar(100)
-  sku                String?  @db.VarChar(100)
-  price              Decimal? @db.Decimal(10, 2)
-  quantity           Int      @default(0)
-  imageUrl           String?  @map("image_url") @db.VarChar(500)
-  isAvailable        Boolean  @default(true) @map("is_available")
-  lowStockThreshold  Int      @default(10) @map("low_stock_threshold")
-  categoryId         Int?     @map("category_id")
-  subCategoryId      Int?     @map("sub_category_id")
-  productType        String   @default("Retail Product") @map("product_type") @db.VarChar(50)
+  id                 Int             @id @default(autoincrement())
+  merchantId         Int             @map("merchant_id")
+  name               String          @db.VarChar(255)
+  description        String?         @db.Text
+  notes              Json            @default("[]")
+  productCode        String?         @map("product_code") @db.VarChar(100)
+  sku                String?         @db.VarChar(100)
+  price              Decimal?        @db.Decimal(10, 2)
+  quantity           Int             @default(0)
+  imageUrl           String?         @map("image_url") @db.VarChar(500)
+  isAvailable        Boolean         @default(true) @map("is_available")
+  lowStockThreshold  Int             @default(10) @map("low_stock_threshold")
+  categoryId         Int?            @map("category_id")
+  subCategoryId      Int?            @map("sub_category_id")
+  productType        String          @default("Retail Product") @map("product_type") @db.VarChar(50)
   commerceDomain     CommerceDomain? @map("commerce_domain")
-  brand              String?  @db.VarChar(150)
-  unit               String   @default("Piece") @db.VarChar(50)
-  baseSku            String?  @map("base_sku") @db.VarChar(100)
-  barcode            String?  @db.VarChar(100)
-  costPrice          Decimal? @map("cost_price") @db.Decimal(10, 2)
-  sellingPrice       Decimal? @map("selling_price") @db.Decimal(10, 2)
-  discountPrice      Decimal? @map("discount_price") @db.Decimal(10, 2)
-  hasVariants        Boolean  @default(false) @map("has_variants")
-  trackInventory     Boolean  @default(false) @map("track_inventory")
-  availabilityStatus String   @default("Available") @map("availability_status") @db.VarChar(30)
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  brand              String?         @db.VarChar(150)
+  unit               String          @default("Piece") @db.VarChar(50)
+  baseSku            String?         @map("base_sku") @db.VarChar(100)
+  barcode            String?         @db.VarChar(100)
+  costPrice          Decimal?        @map("cost_price") @db.Decimal(10, 2)
+  sellingPrice       Decimal?        @map("selling_price") @db.Decimal(10, 2)
+  discountPrice      Decimal?        @map("discount_price") @db.Decimal(10, 2)
+  hasVariants        Boolean         @default(false) @map("has_variants")
+  trackInventory     Boolean         @default(false) @map("track_inventory")
+  availabilityStatus String          @default("Available") @map("availability_status") @db.VarChar(30)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  merchant             Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  category             Category?             @relation(fields: [categoryId], references: [id])
-  subCategory          SubCategory?          @relation(fields: [subCategoryId], references: [id])
-  orderItems           OrderItem[]
-  reviews              Review[]
-  productCategories    ProductCategory[]
-  options              ProductOption[]
-  variants             ProductVariant[]
-  shopProducts         ShopProduct[]
-  shopInventories      ShopInventory[]
-  inventoryMovements   InventoryMovement[]
-  inventoryDailyCounts InventoryDailyCount[]
-  visualIndexes         ProductVisualIndex[]
+  merchant                 Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  category                 Category?                 @relation(fields: [categoryId], references: [id])
+  subCategory              SubCategory?              @relation(fields: [subCategoryId], references: [id])
+  orderItems               OrderItem[]
+  reviews                  Review[]
+  productCategories        ProductCategory[]
+  options                  ProductOption[]
+  variants                 ProductVariant[]
+  shopProducts             ShopProduct[]
+  shopInventories          ShopInventory[]
+  inventoryMovements       InventoryMovement[]
+  inventoryDailyCounts     InventoryDailyCount[]
+  visualIndexes            ProductVisualIndex[]
   productStudioGenerations ProductStudioGeneration[]
   rfqs                     RequestForQuotation[]
 
@@ -659,17 +659,17 @@ model ProductCategory {
 }
 
 model ProductStudioGeneration {
-  id              String   @id @default(uuid()) @db.Uuid
-  merchantId      Int      @map("merchant_id")
-  productId       Int      @map("product_id")
-  categoryId      Int      @map("category_id")
-  originalMediaId String   @map("original_media_id") @db.Uuid
-  generatedMediaId String? @map("generated_media_id") @db.Uuid
-  style           String   @db.VarChar(100)
-  status          String   @default("review") @db.VarChar(30)
-  creditsUsed     Int      @default(1) @map("credits_used")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id               String   @id @default(uuid()) @db.Uuid
+  merchantId       Int      @map("merchant_id")
+  productId        Int      @map("product_id")
+  categoryId       Int      @map("category_id")
+  originalMediaId  String   @map("original_media_id") @db.Uuid
+  generatedMediaId String?  @map("generated_media_id") @db.Uuid
+  style            String   @db.VarChar(100)
+  status           String   @default("review") @db.VarChar(30)
+  creditsUsed      Int      @default(1) @map("credits_used")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -681,22 +681,23 @@ model ProductStudioGeneration {
 }
 
 model ProductVisualIndex {
-  id               String   @id @default(uuid()) @db.Uuid
-  productId        Int      @map("product_id")
-  mediaId          String   @map("media_id") @db.Uuid
-  merchantId       Int      @map("merchant_id")
-  imageType        String   @map("image_type") @db.VarChar(40)
-  provider         String   @default("mock") @db.VarChar(40)
-  embeddingVersion String   @default("v1") @map("embedding_version") @db.VarChar(40)
-  externalRef      String?  @map("external_ref") @db.VarChar(255)
-  status           String   @default("PENDING") @db.VarChar(20)
-  isSearchEligible Boolean  @default(true) @map("is_search_eligible")
-  searchPriority   Int      @default(100) @map("search_priority")
+  id               String    @id @default(uuid()) @db.Uuid
+  productId        Int       @map("product_id")
+  mediaId          String    @map("media_id") @db.Uuid
+  merchantId       Int       @map("merchant_id")
+  imageType        String    @map("image_type") @db.VarChar(40)
+  provider         String    @default("mock") @db.VarChar(40)
+  embeddingVersion String    @default("v1") @map("embedding_version") @db.VarChar(40)
+  externalRef      String?   @map("external_ref") @db.VarChar(255)
+  status           String    @default("PENDING") @db.VarChar(20)
+  isSearchEligible Boolean   @default(true) @map("is_search_eligible")
+  searchPriority   Int       @default(100) @map("search_priority")
   indexedAt        DateTime? @map("indexed_at") @db.Timestamptz
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  merchant         Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
   @@unique([productId, mediaId])
   @@index([status, isSearchEligible])
   @@map("product_visual_indexes")
@@ -895,12 +896,12 @@ model WkOrder {
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  merchant        Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  shop            Branch?                @relation(fields: [shopId], references: [id], onDelete: SetNull)
-  orderItems      OrderItem[]
-  serviceRequests DineInServiceRequest[]
+  merchant              Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop                  Branch?                @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  orderItems            OrderItem[]
+  serviceRequests       DineInServiceRequest[]
   trustTradeTransaction TrustTradeTransaction?
-  originatingQuotation MerchantQuotation? @relation("QuotationOrder")
+  originatingQuotation  MerchantQuotation?     @relation("QuotationOrder")
 
   @@index([userId])
   @@index([merchantId])
@@ -1099,23 +1100,23 @@ model AuthIdentity {
 }
 
 model SocialAuthProvider {
-  id                    String   @id @default(cuid())
+  id                    String    @id @default(cuid())
   provider              String
-  enabled               Boolean  @default(false)
-  environment           String   @default("SANDBOX")
-  clientId              String?  @map("client_id")
-  encryptedClientSecret String?  @map("encrypted_client_secret")
-  teamId                String?  @map("team_id")
-  keyId                 String?  @map("key_id")
-  encryptedPrivateKey   String?  @map("encrypted_private_key")
-  callbackUrl           String?  @map("callback_url")
-  scopes                String[] @default([])
-  status                String   @default("NOT_TESTED")
+  enabled               Boolean   @default(false)
+  environment           String    @default("SANDBOX")
+  clientId              String?   @map("client_id")
+  encryptedClientSecret String?   @map("encrypted_client_secret")
+  teamId                String?   @map("team_id")
+  keyId                 String?   @map("key_id")
+  encryptedPrivateKey   String?   @map("encrypted_private_key")
+  callbackUrl           String?   @map("callback_url")
+  scopes                String[]  @default([])
+  status                String    @default("NOT_TESTED")
   lastTestedAt          DateTime? @map("last_tested_at")
-  lastTestResult        String?  @map("last_test_result")
-  updatedById           String?  @map("updated_by_id") @db.Uuid
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  lastTestResult        String?   @map("last_test_result")
+  updatedById           String?   @map("updated_by_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@unique([provider, environment])
   @@map("social_auth_providers")
@@ -1588,9 +1589,9 @@ model Order {
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  customer User   @relation("OrderCustomer", fields: [customerId], references: [id])
-  rider    User?  @relation("OrderRider", fields: [riderId], references: [id])
-  store    Store? @relation(fields: [storeId], references: [id])
+  customer               User                    @relation("OrderCustomer", fields: [customerId], references: [id])
+  rider                  User?                   @relation("OrderRider", fields: [riderId], references: [id])
+  store                  Store?                  @relation(fields: [storeId], references: [id])
   trustTradeTransactions TrustTradeTransaction[]
 
   @@map("orders_v2")
@@ -1696,15 +1697,18 @@ model PushDevice {
 }
 
 model Wallet {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     String   @unique @map("user_id") @db.Uuid
-  balance    Float    @default(0)
-  isActive   Boolean  @default(true) @map("is_active")
-  isVerified Boolean  @default(false) @map("is_verified")
-  pin        String?
-  pinSet     Boolean  @default(false) @map("pin_set")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @unique @map("user_id") @db.Uuid
+  balance           Decimal   @default(0.00) @db.Decimal(14, 2)
+  isActive          Boolean   @default(true) @map("is_active")
+  isVerified        Boolean   @default(false) @map("is_verified")
+  pin               String?
+  pinHash           String?   @map("pin_hash")
+  pinSet            Boolean   @default(false) @map("pin_set")
+  pinFailedAttempts Int       @default(0) @map("pin_failed_attempts")
+  pinLockedUntil    DateTime? @map("pin_locked_until")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
 
   user             User                         @relation(fields: [userId], references: [id])
   transactions     WalletTransaction[]
@@ -1745,9 +1749,14 @@ model WalletTransaction {
   type                 WalletTransactionType
   status               WalletTransactionStatus @default(pending)
   gateway              WalletPaymentGateway    @default(internal)
-  amount               Float
-  fee                  Float                   @default(0)
-  netAmount            Float                   @default(0) @map("net_amount")
+  amount               Decimal                 @db.Decimal(14, 2)
+  fee                  Decimal                 @default(0.00) @db.Decimal(14, 2)
+  netAmount            Decimal                 @default(0.00) @map("net_amount") @db.Decimal(14, 2)
+  balanceBefore        Decimal?                @map("balance_before") @db.Decimal(14, 2)
+  balanceAfter         Decimal?                @map("balance_after") @db.Decimal(14, 2)
+  idempotencyKey       String?                 @map("idempotency_key") @db.VarChar(80)
+  purpose              String?                 @db.VarChar(50)
+  actorUserId          String?                 @map("actor_user_id") @db.Uuid
   description          String?
   gatewayTransactionId String?                 @map("gateway_transaction_id")
   gatewayPaymentUrl    String?                 @map("gateway_payment_url")
@@ -1762,6 +1771,7 @@ model WalletTransaction {
 
   wallet Wallet @relation(fields: [walletId], references: [id])
 
+  @@unique([walletId, type, idempotencyKey])
   @@map("wallet_transactions")
 }
 
@@ -2326,10 +2336,10 @@ model RequestForQuotation {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  merchant       Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  shop           Branch          @relation(fields: [shopId], references: [id], onDelete: Restrict)
-  product        Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
-  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  merchant       Merchant            @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  shop           Branch              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  product        Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant?     @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
   quotations     MerchantQuotation[]
 
   @@index([buyerId, createdAt])
@@ -2370,9 +2380,9 @@ model MerchantQuotation {
   updatedAt               DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
   rfq      RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Restrict)
-  merchant Merchant             @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  shop     Branch               @relation(fields: [shopId], references: [id], onDelete: Restrict)
-  wkOrder  WkOrder?             @relation("QuotationOrder", fields: [wkOrderId], references: [id], onDelete: Restrict)
+  merchant Merchant            @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  shop     Branch              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  wkOrder  WkOrder?            @relation("QuotationOrder", fields: [wkOrderId], references: [id], onDelete: Restrict)
 
   @@unique([rfqId, version])
   @@index([buyerId, status])
@@ -2381,34 +2391,34 @@ model MerchantQuotation {
 }
 
 model OrderDomainLink {
-  id        String   @id @default(uuid()) @db.Uuid
-  wkOrderId Int?     @unique @map("wk_order_id")
-  orderV2Id String?  @unique @map("order_v2_id") @db.Uuid
-  merchantId Int     @map("merchant_id")
-  shopId    Int?     @map("shop_id")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id         String   @id @default(uuid()) @db.Uuid
+  wkOrderId  Int?     @unique @map("wk_order_id")
+  orderV2Id  String?  @unique @map("order_v2_id") @db.Uuid
+  merchantId Int      @map("merchant_id")
+  shopId     Int?     @map("shop_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([merchantId, shopId])
   @@map("order_domain_links")
 }
 
 model TrustTradeTransaction {
-  id          String   @id @default(uuid()) @db.Uuid
-  trustTradeId String  @unique @map("trust_trade_id") @db.VarChar(40)
-  wkOrderId   Int?     @unique @map("wk_order_id")
-  orderV2Id   String?  @unique @map("order_v2_id") @db.Uuid
-  merchantId  Int      @map("merchant_id")
-  shopId      Int?     @map("shop_id")
-  buyerId     String   @map("buyer_id") @db.Uuid
-  sourceType  String   @map("source_type") @db.VarChar(30)
-  status      String   @default("ORDER_CONFIRMED") @db.VarChar(40)
-  agreementSnapshot Json @map("agreement_snapshot")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                String   @id @default(uuid()) @db.Uuid
+  trustTradeId      String   @unique @map("trust_trade_id") @db.VarChar(40)
+  wkOrderId         Int?     @unique @map("wk_order_id")
+  orderV2Id         String?  @unique @map("order_v2_id") @db.Uuid
+  merchantId        Int      @map("merchant_id")
+  shopId            Int?     @map("shop_id")
+  buyerId           String   @map("buyer_id") @db.Uuid
+  sourceType        String   @map("source_type") @db.VarChar(30)
+  status            String   @default("ORDER_CONFIRMED") @db.VarChar(40)
+  agreementSnapshot Json     @map("agreement_snapshot")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  wkOrder WkOrder? @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
-  orderV2 Order? @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
+  wkOrder  WkOrder? @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  orderV2  Order?   @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
 
   @@index([buyerId, createdAt])
@@ -2449,49 +2459,53 @@ model DeliveryProvider {
   configuration DeliveryProviderConfiguration?
   credentials   DeliveryProviderCredential[]
   audits        DeliveryProviderAuditLog[]
+
   @@map("delivery_providers")
 }
 
 model DeliveryProviderConfiguration {
-  id                        String   @id @default(uuid()) @db.Uuid
-  providerId                String   @unique @map("provider_id") @db.Uuid
-  environment               String   @default("uat") @db.VarChar(20)
-  market                    String   @default("PH") @db.VarChar(8)
-  showAtCheckout            Boolean  @default(false) @map("show_at_checkout")
-  automaticSelectionEnabled Boolean  @default(false) @map("automatic_selection_enabled")
-  platformMarkup            Decimal  @default(0) @map("platform_markup") @db.Decimal(12, 2)
-  maximumCustomerFee        Decimal? @map("maximum_customer_fee") @db.Decimal(12, 2)
-  availableFor              Json     @default("{}") @map("available_for")
-  lastConnectionStatus      String   @default("NOT_TESTED") @map("last_connection_status") @db.VarChar(30)
-  lastTestedAt              DateTime? @map("last_tested_at") @db.Timestamptz
-  lastSuccessfulApiAt       DateTime? @map("last_successful_api_at") @db.Timestamptz
-  lastError                 String?  @map("last_error") @db.VarChar(300)
-  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                        String           @id @default(uuid()) @db.Uuid
+  providerId                String           @unique @map("provider_id") @db.Uuid
+  environment               String           @default("uat") @db.VarChar(20)
+  market                    String           @default("PH") @db.VarChar(8)
+  showAtCheckout            Boolean          @default(false) @map("show_at_checkout")
+  automaticSelectionEnabled Boolean          @default(false) @map("automatic_selection_enabled")
+  platformMarkup            Decimal          @default(0) @map("platform_markup") @db.Decimal(12, 2)
+  maximumCustomerFee        Decimal?         @map("maximum_customer_fee") @db.Decimal(12, 2)
+  availableFor              Json             @default("{}") @map("available_for")
+  lastConnectionStatus      String           @default("NOT_TESTED") @map("last_connection_status") @db.VarChar(30)
+  lastTestedAt              DateTime?        @map("last_tested_at") @db.Timestamptz
+  lastSuccessfulApiAt       DateTime?        @map("last_successful_api_at") @db.Timestamptz
+  lastError                 String?          @map("last_error") @db.VarChar(300)
+  createdAt                 DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime         @updatedAt @map("updated_at") @db.Timestamptz
   provider                  DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
   @@map("delivery_provider_configurations")
 }
 
 model DeliveryProviderCredential {
-  id             String   @id @default(uuid()) @db.Uuid
-  providerId     String   @map("provider_id") @db.Uuid
-  credentialKey  String   @map("credential_key") @db.VarChar(60)
-  encryptedValue String   @map("encrypted_value") @db.Text
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id             String           @id @default(uuid()) @db.Uuid
+  providerId     String           @map("provider_id") @db.Uuid
+  credentialKey  String           @map("credential_key") @db.VarChar(60)
+  encryptedValue String           @map("encrypted_value") @db.Text
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
   provider       DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
   @@unique([providerId, credentialKey])
   @@map("delivery_provider_credentials")
 }
 
 model DeliveryProviderAuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  providerId String   @map("provider_id") @db.Uuid
-  actorId    String   @map("actor_id") @db.Uuid
-  action     String   @db.VarChar(80)
+  id         String           @id @default(uuid()) @db.Uuid
+  providerId String           @map("provider_id") @db.Uuid
+  actorId    String           @map("actor_id") @db.Uuid
+  action     String           @db.VarChar(80)
   changes    Json?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz
   provider   DeliveryProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
   @@index([providerId, createdAt])
   @@map("delivery_provider_audit_logs")
 }

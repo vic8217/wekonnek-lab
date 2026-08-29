@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '@prisma/client';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import { moneyDecimal, moneyNumber } from './wallet-money';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const WALLET_ID = '33333333-3333-3333-3333-333333333333';
@@ -52,7 +54,10 @@ function createStore(
     balance: initial.balance ?? 100,
     isActive: true,
     pin: '123456',
+    pinHash: null as string | null,
     pinSet: true,
+    pinFailedAttempts: 0,
+    pinLockedUntil: null as Date | null,
   };
   const merchant = {
     id: 9,
@@ -194,17 +199,24 @@ function createStore(
     wallet: {
       updateMany: jest.fn(async ({ where, data }: any) => {
         if (where.id !== wallet.id) return { count: 0 };
-        if (where.balance?.gte !== undefined && wallet.balance < where.balance.gte) {
+        if (where.balance?.gte !== undefined && Number(wallet.balance) < Number(where.balance.gte)) {
           return { count: 0 };
         }
-        if (data.balance?.decrement !== undefined) wallet.balance -= data.balance.decrement;
-        if (data.balance?.increment !== undefined) wallet.balance += data.balance.increment;
+        if (data.balance?.decrement !== undefined)
+          wallet.balance = Number(wallet.balance) - Number(data.balance.decrement);
+        if (data.balance?.increment !== undefined)
+          wallet.balance = Number(wallet.balance) + Number(data.balance.increment);
         return { count: 1 };
       }),
       update: jest.fn(async ({ where, data }: any) => {
-        if (where.id !== wallet.id) throw new Error('wallet missing');
-        if (data.balance?.increment !== undefined) wallet.balance += data.balance.increment;
-        if (data.balance?.decrement !== undefined) wallet.balance -= data.balance.decrement;
+        if (where?.id && where.id !== wallet.id) throw new Error('wallet missing');
+        const { balance, ...rest } = data;
+        Object.assign(wallet, rest);
+        if (balance?.increment !== undefined)
+          wallet.balance = Number(wallet.balance) + Number(balance.increment);
+        else if (balance?.decrement !== undefined)
+          wallet.balance = Number(wallet.balance) - Number(balance.decrement);
+        else if (balance !== undefined) wallet.balance = Number(balance);
         return { ...wallet };
       }),
       findUnique: jest.fn(async ({ where }: any) => {
@@ -539,8 +551,8 @@ describe('WalletLedgerService Stage 3 concurrency', () => {
       type: WalletTransactionType.payment,
     });
     expect(wallet.balance).toBe(0);
-    expect((result.transaction.metadata as any).balanceBefore).toBe(42);
-    expect((result.transaction.metadata as any).balanceAfter).toBe(0);
+    expect(Number(result.transaction.balanceBefore)).toBe(42);
+    expect(Number(result.transaction.balanceAfter)).toBe(0);
   });
 
   it('leaves the wallet unchanged when funds are insufficient', async () => {
@@ -606,9 +618,10 @@ describe('WalletLedgerService admin adjustments', () => {
     expect(result.actorUserId).toBe(ADMIN_ID);
     expect(result.ownerUserId).toBe(USER_ID);
     expect(result.reason).toBe('UAT correction');
-    expect((result.transaction.metadata as any).purpose).toBe('admin_adjustment');
-    expect((result.transaction.metadata as any).balanceBefore).toBe(5);
-    expect((result.transaction.metadata as any).balanceAfter).toBe(20);
+    expect((result.transaction.metadata as any).purpose).toBeUndefined();
+    expect(result.transaction.purpose).toBe('admin_adjustment');
+    expect(Number(result.transaction.balanceBefore)).toBe(5);
+    expect(Number(result.transaction.balanceAfter)).toBe(20);
   });
 
   it('debits with the same audited path', async () => {
@@ -623,7 +636,7 @@ describe('WalletLedgerService admin adjustments', () => {
     });
     expect(wallet.balance).toBe(38);
     expect((result.transaction.metadata as any).direction).toBe('debit');
-    expect((result.transaction.metadata as any).actorUserId).toBe(ADMIN_ID);
+    expect(result.transaction.actorUserId).toBe(ADMIN_ID);
   });
 
   it('rejects an insufficient admin debit without changing balance', async () => {
@@ -700,10 +713,40 @@ describe('WalletService Stage 3 paths', () => {
       '1234567890',
       'Test User',
       '123456',
+      'CASHOUT01',
     );
     expect(result.disbursed).toBe(false);
     expect(wallet.balance).toBe(85);
     expect(result.transaction.status).toBe(WalletTransactionStatus.processing);
+  });
+
+  it('does not debit twice on sequential cash-out retries with the same key', async () => {
+    const { walletService, wallet } = createStore({ balance: 200 });
+    const first = await walletService.cashOut(
+      USER_ID,
+      100,
+      WalletPaymentGateway.maya,
+      'BDO',
+      '1234567890',
+      'Test User',
+      '123456',
+      'CASHOUT-RETRY-1',
+    );
+    const second = await walletService.cashOut(
+      USER_ID,
+      100,
+      WalletPaymentGateway.maya,
+      'BDO',
+      '1234567890',
+      'Test User',
+      '123456',
+      'CASHOUT-RETRY-1',
+    );
+    expect(first.duplicate).toBe(false);
+    expect(second.duplicate).toBe(true);
+    expect(second.disbursed).toBe(false);
+    expect(second.transaction.id).toBe(first.transaction.id);
+    expect(wallet.balance).toBe(85);
   });
 
   it('credits earnings and refunds once per order', async () => {
@@ -779,6 +822,100 @@ describe('Wallet admin HTTP contract', () => {
       actorUserId: ADMIN_ID,
       reference: 'ADJ-HTTP-1',
     });
+  });
+});
+
+describe('Stage 4 money precision and PIN', () => {
+  it('does not drift on 0.1 + 0.2 style credits', async () => {
+    const { ledger, wallet } = createStore({ balance: 0 });
+    const first = await ledger.creditWalletAtomic({
+      walletId: WALLET_ID,
+      amount: 0.1,
+      reference: 'CR-PREC-1',
+      type: WalletTransactionType.top_up,
+    });
+    const second = await ledger.creditWalletAtomic({
+      walletId: WALLET_ID,
+      amount: 0.2,
+      reference: 'CR-PREC-2',
+      type: WalletTransactionType.top_up,
+    });
+    expect(moneyNumber(wallet.balance)).toBe(0.3);
+    expect(Number(first.transaction.balanceAfter)).toBe(0.1);
+    expect(Number(second.transaction.balanceAfter)).toBe(0.3);
+    expect(moneyNumber(moneyDecimal(0.1).plus(moneyDecimal(0.2)))).toBe(0.3);
+  });
+
+  it('does not drift across ten repeated 0.10 credits or debits', async () => {
+    const { ledger, wallet } = createStore({ balance: 0 });
+    for (let i = 0; i < 10; i += 1) {
+      await ledger.creditWalletAtomic({
+        walletId: WALLET_ID,
+        amount: 0.1,
+        reference: `CR-LOOP-${i}`,
+        type: WalletTransactionType.top_up,
+      });
+    }
+    expect(moneyNumber(wallet.balance)).toBe(1);
+    for (let i = 0; i < 10; i += 1) {
+      await ledger.debitWalletAtomic({
+        walletId: WALLET_ID,
+        amount: 0.1,
+        reference: `DR-LOOP-${i}`,
+        type: WalletTransactionType.payment,
+      });
+    }
+    expect(moneyNumber(wallet.balance)).toBe(0);
+  });
+
+  it('stores hashed PINs and never returns plaintext', async () => {
+    const { walletService, wallet, prisma } = createStore({ balance: 10 });
+    wallet.pin = null;
+    wallet.pinSet = false;
+    const publicWallet = await walletService.getPublicWallet(USER_ID);
+    expect((publicWallet as any).pin).toBeUndefined();
+    expect((publicWallet as any).pinHash).toBeUndefined();
+    await walletService.setPin(USER_ID, '654321');
+    expect(wallet.pin).toBeNull();
+    expect(wallet.pinHash).toMatch(/^\$2[aby]?\$/);
+    expect(prisma.wallet.update).toHaveBeenCalled();
+    await expect(walletService.verifyPin(USER_ID, '654321')).resolves.toBe(true);
+  });
+
+  it('rejects an invalid PIN with a generic error', async () => {
+    const { walletService } = createStore();
+    await expect(walletService.verifyPin(USER_ID, '000000')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(walletService.verifyPin(USER_ID, '000000')).rejects.toThrow(
+      'Invalid wallet PIN',
+    );
+  });
+
+  it('migrates a legacy plaintext PIN on success and clears plaintext', async () => {
+    const { walletService, wallet } = createStore();
+    wallet.pin = '123456';
+    wallet.pinHash = null;
+    await expect(walletService.verifyPin(USER_ID, '123456')).resolves.toBe(true);
+    expect(wallet.pinHash).toMatch(/^\$2[aby]?\$/);
+    expect(wallet.pin).toBeNull();
+    await expect(walletService.verifyPin(USER_ID, '123456')).resolves.toBe(true);
+  });
+
+  it('applies a Decimal admin adjustment with typed snapshots', async () => {
+    const { ledger, wallet } = createStore({ balance: 1.15 });
+    const result = await ledger.adjustWallet({
+      walletId: WALLET_ID,
+      amount: 0.15,
+      direction: 'credit',
+      reason: 'cent correction',
+      actorUserId: ADMIN_ID,
+      reference: 'ADJ-CENTS-1',
+    });
+    expect(result.wallet_balance).toBe(1.3);
+    expect(Number(result.transaction.balanceBefore)).toBe(1.15);
+    expect(Number(result.transaction.balanceAfter)).toBe(1.3);
+    expect(moneyNumber(wallet.balance)).toBe(1.3);
   });
 });
 
