@@ -140,7 +140,13 @@ export class PaymentPartnerConfigService {
         },
       },
       update: {},
-      create: { configurationId, environment: this.dbEnvironment(environment) },
+      // Do not persist QRPH defaults merely by opening the admin page. The UI
+      // may suggest them, but an administrator must explicitly save them.
+      create: {
+        configurationId,
+        environment: this.dbEnvironment(environment),
+        channelCode: '',
+      },
     });
   }
   private fallback(environment: Environment) {
