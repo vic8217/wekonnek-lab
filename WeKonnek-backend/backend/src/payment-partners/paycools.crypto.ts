@@ -1,4 +1,4 @@
-import { createSign, createVerify } from 'crypto';
+import { createHash, createSign, createVerify, timingSafeEqual } from 'crypto';
 
 const SIGN_ALGORITHMS = ['RSA-SHA256', 'RSA-SHA1'] as const;
 
@@ -35,6 +35,42 @@ export function canonicalCallbackContent(payload: Record<string, unknown>) {
     .sort()
     .map((key) => `${key}=${String(payload[key])}`)
     .join('&');
+}
+
+/** Philippine QRPH signs canonical request/callback fields, not a JSON param. */
+export function canonicalPhilippinePayCoolsContent(
+  payload: Record<string, unknown>,
+) {
+  return canonicalCallbackContent(payload);
+}
+
+export function signPhilippinePayCoolsPayload(
+  payload: Record<string, unknown>,
+  privateKeyBase64: string,
+) {
+  return signPayCoolsParam(
+    canonicalPhilippinePayCoolsContent(payload),
+    privateKeyBase64,
+  );
+}
+
+/** PayCools PH callback rule: SHA-1(canonical-fields + "&secret=<secret>"). */
+export function verifyPhilippinePayCoolsCallback(
+  payload: Record<string, unknown>,
+  secret: string,
+) {
+  const sign = typeof payload.sign === 'string' ? payload.sign : '';
+  if (!sign || !secret) return false;
+  const canonical = canonicalPhilippinePayCoolsContent(payload);
+  const expected = createHash('sha1')
+    .update(`${canonical}&secret=${secret}`, 'utf8')
+    .digest('hex');
+  const supplied = sign.toLowerCase();
+  if (supplied.length !== expected.length) return false;
+  return timingSafeEqual(
+    Buffer.from(expected, 'utf8'),
+    Buffer.from(supplied, 'utf8'),
+  );
 }
 
 export function verifyPayCoolsSign(

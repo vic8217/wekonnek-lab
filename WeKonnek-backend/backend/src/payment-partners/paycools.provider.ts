@@ -6,10 +6,8 @@ import {
 } from '@nestjs/common';
 import { PaymentPartnerConfigService } from './payment-partner-config.service';
 import {
-  canonicalCallbackContent,
-  looksLikePemKey,
-  signPayCoolsParam,
-  verifyPayCoolsSign,
+  signPhilippinePayCoolsPayload,
+  verifyPhilippinePayCoolsCallback,
 } from './paycools.crypto';
 import type {
   CreateProviderPaymentInput,
@@ -40,42 +38,49 @@ export class PayCoolsProvider implements PaymentProvider {
     input: CreateProviderPaymentInput,
   ): Promise<CreateProviderPaymentResult> {
     const runtime = await this.config.getPayCoolsRuntime();
-    if (!runtime.baseUrl || !runtime.appId || !runtime.privateKeyBase64) {
+    if (
+      !runtime.baseUrl ||
+      !runtime.appId ||
+      !runtime.appName ||
+      !runtime.privateKeyBase64
+    ) {
       throw new BadRequestException({
         code: 'PAYCOOLS_NOT_CONFIGURED',
         message: 'PayCools create-payment credentials are incomplete.',
       });
     }
-    const paramObject = {
+    const request = {
+      appId: runtime.appId,
+      appName: runtime.appName,
       amount: input.amountMinor,
+      callbackUrl: input.notifyUrl || runtime.notifyUrl,
       channelCode: runtime.channelCode,
       mchOrderId: input.reference,
-      notifyUrl: input.notifyUrl || runtime.notifyUrl,
-      timestamp: Date.now(),
     };
-    const param = JSON.stringify(paramObject);
     const body = JSON.stringify({
-      appId: runtime.appId,
-      param,
-      sign: signPayCoolsParam(param, runtime.privateKeyBase64),
+      ...request,
+      sign: signPhilippinePayCoolsPayload(request, runtime.privateKeyBase64),
     });
-    const response = await fetch(`${runtime.baseUrl}/open-api/qr/generate`, {
+    const response = await fetch(`${runtime.baseUrl}/api/v1/qrcode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
     });
     const payload = (await response.json().catch(() => ({}))) as {
-      code?: number;
+      code?: number | string;
       message?: string;
       data?: {
-        qrCodeId?: string;
-        qrCodeContent?: string;
-        qrCodeUrl?: string;
-        paymentUrl?: string;
-        qrStatus?: string;
+        qrcodeId?: string;
+        qrcodeContent?: string;
+        qrLink?: string;
+        status?: string;
       };
     };
-    if (!response.ok || payload.code !== 10000 || !payload.data?.qrCodeId) {
+    if (
+      !response.ok ||
+      String(payload.code) !== '1000' ||
+      !payload.data?.qrcodeId
+    ) {
       this.logger.warn(
         `paycools_create_rejected reference=${input.reference} http=${response.status}`,
       );
@@ -87,13 +92,13 @@ export class PayCoolsProvider implements PaymentProvider {
       ? new Date(Date.now() + input.expiresInSeconds * 1000)
       : undefined;
     this.logger.log(
-      `paycools_qr_created reference=${input.reference} qrCodeId=${payload.data.qrCodeId}`,
+      `paycools_qr_created reference=${input.reference} qrCodeId=${payload.data.qrcodeId}`,
     );
     return {
-      providerQrCodeId: payload.data.qrCodeId,
-      paymentUrl: payload.data.paymentUrl || payload.data.qrCodeUrl || null,
-      qrData: payload.data.qrCodeContent || null,
-      status: payload.data.qrStatus || 'ACTIVE',
+      providerQrCodeId: payload.data.qrcodeId,
+      paymentUrl: payload.data.qrLink || null,
+      qrData: payload.data.qrcodeContent || null,
+      status: payload.data.status || 'ACTIVE',
       expiresAt,
     };
   }
@@ -110,27 +115,25 @@ export class PayCoolsProvider implements PaymentProvider {
   ): Promise<VerifiedWebhookPayment> {
     void headers;
     const runtime = await this.config.getPayCoolsRuntime();
-    if (!looksLikePemKey(runtime.callbackPublicKeyBase64)) {
+    if (!runtime.callbackSecret) {
       this.logger.warn(
-        'paycools_callback_rejected reason=missing_callback_public_key',
+        'paycools_callback_rejected reason=missing_callback_secret',
       );
       throw new UnauthorizedException({
-        code: 'PAYCOOLS_CALLBACK_KEY_MISSING',
+        code: 'PAYCOOLS_CALLBACK_SECRET_MISSING',
         message:
-          'PayCools callback verification requires PAYCOOLS_<ENV>_CALLBACK_PUBLIC_KEY_BASE64 (PayCools RSA public key). CALLBACK_SECRET is not a signature algorithm.',
+          'PayCools Philippine QRPH callback verification requires PAYCOOLS_<ENV>_CALLBACK_SECRET.',
       });
     }
-    const envelope = this.parseEnvelope(body);
-    const valid = verifyPayCoolsSign(
-      envelope.content,
-      envelope.sign,
-      runtime.callbackPublicKeyBase64,
+    const payload = this.parseCallback(body);
+    const valid = verifyPhilippinePayCoolsCallback(
+      payload,
+      runtime.callbackSecret,
     );
     if (!valid) {
       this.logger.warn('paycools_callback_rejected reason=invalid_signature');
       throw new UnauthorizedException('Invalid PayCools callback signature');
     }
-    const payload = envelope.payload;
     const status = this.mapStatus(payload);
     const amountMinor = Number(payload.amount);
     const mchOrderId = scalar(payload.mchOrderId);
@@ -153,40 +156,13 @@ export class PayCoolsProvider implements PaymentProvider {
     };
   }
 
-  private parseEnvelope(body: unknown): {
-    content: string;
-    sign: string;
-    payload: Record<string, unknown>;
-  } {
+  private parseCallback(body: unknown): Record<string, unknown> {
     if (!body || typeof body !== 'object')
       throw new UnauthorizedException('Invalid PayCools callback');
     const record = body as Record<string, unknown>;
     if (typeof record.sign !== 'string' || !record.sign)
       throw new UnauthorizedException('PayCools callback is missing sign');
-    if (typeof record.param === 'string') {
-      let payload: Record<string, unknown>;
-      try {
-        payload = JSON.parse(record.param) as Record<string, unknown>;
-      } catch {
-        throw new UnauthorizedException(
-          'PayCools callback param is not valid JSON',
-        );
-      }
-      return { content: record.param, sign: record.sign, payload };
-    }
-    if (record.param && typeof record.param === 'object') {
-      const payload = record.param as Record<string, unknown>;
-      return {
-        content: canonicalCallbackContent(payload),
-        sign: record.sign,
-        payload,
-      };
-    }
-    return {
-      content: canonicalCallbackContent(record),
-      sign: record.sign,
-      payload: record,
-    };
+    return record;
   }
 
   private mapStatus(

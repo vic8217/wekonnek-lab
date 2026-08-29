@@ -1,7 +1,9 @@
-import { generateKeyPairSync } from 'crypto';
+import { createHash, generateKeyPairSync } from 'crypto';
 import {
   canonicalCallbackContent,
+  canonicalPhilippinePayCoolsContent,
   signPayCoolsParam,
+  verifyPhilippinePayCoolsCallback,
   verifyPayCoolsSign,
 } from './paycools.crypto';
 
@@ -40,5 +42,19 @@ describe('PayCools RSA helpers', () => {
     expect(
       canonicalCallbackContent({ sign: 'x', b: '2', a: '1', empty: '' }),
     ).toBe('a=1&b=2');
+  });
+
+  it('verifies Philippine callbacks using SHA-1 with the appended secret', () => {
+    const payload = { b: '2', a: '1', empty: '', sign: 'ignored' };
+    expect(canonicalPhilippinePayCoolsContent(payload)).toBe('a=1&b=2');
+    const signed = {
+      ...payload,
+      sign: createHash('sha1')
+        .update('a=1&b=2&secret=synthetic-secret')
+        .digest('hex'),
+    };
+    expect(verifyPhilippinePayCoolsCallback(signed, 'synthetic-secret')).toBe(
+      true,
+    );
   });
 });

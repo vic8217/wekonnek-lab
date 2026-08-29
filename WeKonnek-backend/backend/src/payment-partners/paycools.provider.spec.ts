@@ -1,118 +1,154 @@
-import { generateKeyPairSync } from 'crypto';
+import { createHash, generateKeyPairSync } from 'crypto';
 import { UnauthorizedException } from '@nestjs/common';
-import { signPayCoolsParam } from './paycools.crypto';
+import {
+  canonicalPhilippinePayCoolsContent,
+  signPhilippinePayCoolsPayload,
+  verifyPhilippinePayCoolsCallback,
+} from './paycools.crypto';
 import { PayCoolsProvider } from './paycools.provider';
 
-function rsaPair() {
-  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: 'spki', format: 'der' },
+function rsaPrivateKey() {
+  const { privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 4096,
     privateKeyEncoding: { type: 'pkcs8', format: 'der' },
   });
-  return {
-    publicKeyBase64: Buffer.from(publicKey).toString('base64'),
-    privateKeyBase64: Buffer.from(privateKey).toString('base64'),
-  };
+  return Buffer.from(privateKey).toString('base64');
 }
 
-describe('PayCoolsProvider', () => {
-  const keys = rsaPair();
+function callbackSign(payload: Record<string, unknown>, secret: string) {
+  return createHash('sha1')
+    .update(`${canonicalPhilippinePayCoolsContent(payload)}&secret=${secret}`)
+    .digest('hex');
+}
+
+describe('PayCoolsProvider Philippine QRPH', () => {
+  const callbackSecret = 'synthetic-callback-secret';
   const runtime = {
     environment: 'uat' as const,
     defaultQrExpirySeconds: 600,
     baseUrl: 'https://paycools.test',
     appId: 'app-1',
-    privateKeyBase64: keys.privateKeyBase64,
-    callbackPublicKeyBase64: keys.publicKeyBase64,
+    appName: 'WeKonnek UAT',
+    privateKeyBase64: rsaPrivateKey(),
+    callbackSecret,
     channelCode: 'QRPH_DYNAMIC_QR',
-    notifyUrl: 'http://localhost:3000/api/payments/callbacks/paycools/payment',
+    notifyUrl: 'https://example.test/api/payments/callbacks/paycools/payment',
   };
   const provider = new PayCoolsProvider({
     getPayCoolsRuntime: () => Promise.resolve(runtime),
   } as never);
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
+  afterEach(() => jest.restoreAllMocks());
 
-  it('creates a PayCools QR payment without treating the response as a wallet credit', async () => {
+  it('creates a direct Philippine QRPH request at /api/v1/qrcode', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       status: 200,
       json: () =>
         Promise.resolve({
-          code: 10000,
+          code: 1000,
           data: {
-            qrCodeId: 'qr-1',
-            qrCodeContent: '000201QRPH',
-            paymentUrl: 'https://paycools.test/pay/qr-1',
-            qrStatus: 'ACTIVE',
+            qrcodeId: 'qr-1',
+            qrcodeContent: '000201QRPH',
+            qrLink: 'https://paycools.test/pay/qr-1',
+            status: 'ACTIVE',
           },
         }),
     } as Response);
+
     const created = await provider.createPayment({
       reference: 'WK260829TESTREF0001',
       amountMinor: 50000,
       currency: 'PHP',
       notifyUrl: runtime.notifyUrl,
-      expiresInSeconds: 600,
     });
+
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://paycools.test/open-api/qr/generate',
+      'https://paycools.test/api/v1/qrcode',
       expect.objectContaining({ method: 'POST' }),
     );
+    const parsed: unknown = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(parsed).toEqual(expect.any(Object));
+    const body = parsed as Record<string, unknown>;
+    expect(body).toMatchObject({
+      appId: runtime.appId,
+      appName: runtime.appName,
+      channelCode: 'QRPH_DYNAMIC_QR',
+      mchOrderId: 'WK260829TESTREF0001',
+      amount: 50000,
+      callbackUrl: runtime.notifyUrl,
+    });
+    expect(body.param).toBeUndefined();
+    expect(body.sign).toBe(
+      signPhilippinePayCoolsPayload(
+        {
+          appId: runtime.appId,
+          appName: runtime.appName,
+          amount: 50000,
+          callbackUrl: runtime.notifyUrl,
+          channelCode: 'QRPH_DYNAMIC_QR',
+          mchOrderId: 'WK260829TESTREF0001',
+        },
+        runtime.privateKeyBase64,
+      ),
+    );
     expect(created.providerQrCodeId).toBe('qr-1');
-    expect(created.qrData).toBe('000201QRPH');
-    expect(created.paymentUrl).toBe('https://paycools.test/pay/qr-1');
   });
 
-  it('verifies an envelope callback signed with the PayCools public key', async () => {
-    const param = JSON.stringify({
+  it('accepts a valid Philippine callback signature', async () => {
+    const callback = {
       eventName: 'qrcode.payment.success',
       mchOrderId: 'WK260829TESTREF0001',
       transactionId: 'pc-txn-1',
       amount: 50000,
-      currency: 'PHP',
-      transactionStatus: 'COMPLETED',
-    });
-    const verified = await provider.verifyWebhook(
-      { param, sign: signPayCoolsParam(param, keys.privateKeyBase64) },
-      {},
-    );
-    expect(verified).toMatchObject({
-      reference: 'WK260829TESTREF0001',
-      providerTransactionId: 'pc-txn-1',
-      amountMinor: 50000,
-      currency: 'PHP',
+      empty: '',
+      optional: null,
+    };
+    await expect(
+      provider.verifyWebhook(
+        { ...callback, sign: callbackSign(callback, callbackSecret) },
+        {},
+      ),
+    ).resolves.toMatchObject({
+      reference: callback.mchOrderId,
       status: 'PAID',
     });
   });
 
-  it('rejects an unsigned or invalid callback', async () => {
+  it('rejects missing and invalid callback signatures', async () => {
     await expect(
-      provider.verifyWebhook({ param: '{}', sign: 'not-a-signature' }, {}),
+      provider.verifyWebhook({ mchOrderId: 'x' }, {}),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      provider.verifyWebhook({ mchOrderId: 'x', amount: 1, sign: 'bad' }, {}),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('fails closed when the callback public key is a shared secret instead of an RSA key', async () => {
-    const locked = new PayCoolsProvider({
-      getPayCoolsRuntime: () =>
-        Promise.resolve({
-          ...runtime,
-          callbackPublicKeyBase64: 'shared-secret',
-        }),
-    } as never);
-    try {
-      await locked.verifyWebhook(
-        { param: '{}', sign: 'x' },
-        { authorization: 'Bearer shared-secret' },
-      );
-      throw new Error('expected verification to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
-      expect((error as UnauthorizedException).getResponse()).toMatchObject({
-        code: 'PAYCOOLS_CALLBACK_KEY_MISSING',
-      });
-    }
+  it('uses canonical sorting, excludes empty values, and appends the secret', () => {
+    const payload = {
+      z: 'last',
+      sign: 'ignored',
+      a: 'first',
+      empty: '',
+      nil: null,
+    };
+    expect(canonicalPhilippinePayCoolsContent(payload)).toBe('a=first&z=last');
+    const signed = { ...payload, sign: callbackSign(payload, callbackSecret) };
+    expect(verifyPhilippinePayCoolsCallback(signed, callbackSecret)).toBe(true);
+    expect(verifyPhilippinePayCoolsCallback(signed, 'wrong-secret')).toBe(
+      false,
+    );
+  });
+
+  it('does not require a callback public key for Philippine QRPH', async () => {
+    const callback = { amount: 1, mchOrderId: 'x' };
+    await expect(
+      provider.verifyWebhook(
+        { ...callback, sign: callbackSign(callback, callbackSecret) },
+        {},
+      ),
+    ).resolves.toBeDefined();
   });
 });
