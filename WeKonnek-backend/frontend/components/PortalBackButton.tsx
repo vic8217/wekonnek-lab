@@ -47,9 +47,11 @@ const CONFIG: Record<string, PortalBackConfig> = {
       '/merchant/notifications',
       '/merchant/profile',
       '/merchant/settings/security',
+      '/merchant/rfqs',
     ],
     overrides: [
       { prefix: '/merchant/products', href: '/merchant/inventory', label: 'Back to Products' },
+      { prefix: '/merchant/rfqs', href: '/merchant/rfqs', label: 'Back to RFQs' },
     ],
   },
   '/admin': {
@@ -83,6 +85,7 @@ const CONFIG: Record<string, PortalBackConfig> = {
       '/customer/cart',
       '/customer/bookings',
       '/customer/orders',
+      '/customer/rfq',
       '/customer/wallet',
       '/customer/profile',
       '/customer/notifications',

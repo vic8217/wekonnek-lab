@@ -74,13 +74,14 @@ export class ProductsService {
     await this.media.assertMerchantOwnedUrls(merchantId, [createProductDto.imageUrl, ...(createProductDto.notes || []).map(note => note.iconUrl), ...(createProductDto.variants || []).map(variant => variant.imageUrl)]);
     const merchant = await this.prisma.merchant.findUnique({
       where: { id: merchantId },
-      select: { taxClassification: true, category: { select: { slug: true, name: true } } },
+      select: { taxClassification: true, commerceDomain: true, category: { select: { slug: true, name: true } } },
     });
     if (!merchant?.taxClassification?.trim()) {
       throw new BadRequestException(
         'Choose a business tax classification in your merchant profile before adding products.',
       );
     }
+    if (merchant.commerceDomain === 'MIXED' && !createProductDto.commerceDomain) throw new BadRequestException('Commerce type is required for Trust Trade eligibility.');
     const allowedTypes = productTypesForCategory(merchant.category?.slug);
     if (createProductDto.productType && !allowedTypes.includes(createProductDto.productType)) {
       throw new BadRequestException(

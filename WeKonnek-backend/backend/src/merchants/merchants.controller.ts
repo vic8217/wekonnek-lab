@@ -19,7 +19,7 @@ import { SearchMerchantsDto } from './dto/search-merchants.dto';
 import { AddDemoWalletCreditDto } from './dto/add-demo-wallet-credit.dto';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
-import { UserRole } from '@prisma/client';
+import { CommerceDomain, UserRole } from '@prisma/client';
 
 @ApiTags('merchants')
 @Controller('merchants')
@@ -98,6 +98,17 @@ export class MerchantsController {
     @Req() req: any,
   ) {
     return this.merchantsService.addDemoWalletCredit(id, body.amount, req.user.id);
+  }
+
+  @Patch('admin/:id/commerce-domain')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin)
+  @ApiBearerAuth()
+  setCommerceDomain(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { commerceDomain?: CommerceDomain | null },
+  ) {
+    return this.merchantsService.setCommerceDomain(id, body.commerceDomain ?? null);
   }
 
   @Get('search')

@@ -2,8 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { productsApi, type Product } from '@/lib/api';
+import { productsApi, type Merchant, type Product } from '@/lib/api';
 import { addToCart } from '@/lib/cart';
+
+type MerchantCommerceDomain = Merchant['commerceDomain'];
+type ProductCommerceDomain = Product['commerceDomain'];
+type BuyerProductDetail = Product & {
+  merchant?: { commerceDomain?: MerchantCommerceDomain };
+};
+
+/** RFQ CTA uses only merchant/product commerceDomain — never category or name inference. */
+function isRfqEligible(
+  merchantDomain: MerchantCommerceDomain | undefined,
+  productDomain: ProductCommerceDomain | undefined,
+): boolean {
+  if (merchantDomain === 'NON_FOOD') return true;
+  if (merchantDomain === 'MIXED') return productDomain === 'NON_FOOD';
+  return false;
+}
 
 const SAMPLE_PRODUCT: Product = {
   id: 101,
@@ -25,8 +41,10 @@ export default function ItemDetailPage() {
   const productId = Number(params.id);
   const merchantId = Number(searchParams.get('merchantId') || '0');
   const merchantSlug = searchParams.get('merchantSlug') || '';
+  const shopId = searchParams.get('shopId') || searchParams.get('shop') || '';
 
   const [product, setProduct] = useState<Product | null>(null);
+  const [merchantCommerceDomain, setMerchantCommerceDomain] = useState<MerchantCommerceDomain>(null);
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
@@ -36,9 +54,12 @@ export default function ItemDetailPage() {
 
     async function load() {
       setLoading(true);
+      setMerchantCommerceDomain(null);
       try {
-        const p = await productsApi.getById(productId);
-        if (!cancelled) setProduct(p);
+        const p = await productsApi.getById(productId) as BuyerProductDetail;
+        if (cancelled) return;
+        setProduct(p);
+        setMerchantCommerceDomain(p.merchant?.commerceDomain ?? null);
       } catch {
         if (!cancelled) setProduct({ ...SAMPLE_PRODUCT, id: productId, merchantId: merchantId || 1 });
       } finally {
@@ -50,7 +71,19 @@ export default function ItemDetailPage() {
     return () => { cancelled = true; };
   }, [productId, merchantId]);
 
-  const totalPrice = product ? product.price * quantity : 0;
+  const unitPrice = Number(product?.price ?? 0);
+  const totalPrice = product ? unitPrice * quantity : 0;
+  const showRequestQuote = isRfqEligible(merchantCommerceDomain, product?.commerceDomain);
+
+  const openRequestQuote = () => {
+    if (!product) return;
+    const query = new URLSearchParams();
+    query.set('productId', String(product.id));
+    query.set('merchantId', String(product.merchantId || merchantId));
+    if (shopId) query.set('shopId', shopId);
+    if (merchantSlug) query.set('merchantSlug', merchantSlug);
+    router.push(`/customer/rfq/new?${query.toString()}`);
+  };
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -58,7 +91,7 @@ export default function ItemDetailPage() {
     addToCart(mid, {
       product_id: product.id,
       product_name: product.name,
-      price: product.price,
+      price: unitPrice,
       image_url: product.imageUrl,
       merchant_id: mid,
       quantity,
@@ -128,7 +161,7 @@ export default function ItemDetailPage() {
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">{product.description}</p>
             )}
             <div className="mt-4">
-              <span className="text-2xl font-bold text-[#DB0002]">₱{product.price.toFixed(2)}</span>
+              <span className="text-2xl font-bold text-[#DB0002]">₱{(Number.isFinite(unitPrice) ? unitPrice : 0).toFixed(2)}</span>
             </div>
             {!product.isAvailable && (
               <div className="mt-3 inline-flex items-center gap-1 px-3 py-1 bg-red-50 text-red-500 text-xs font-semibold rounded-lg">
@@ -183,25 +216,36 @@ export default function ItemDetailPage() {
 
       {/* Bottom Action Bar */}
       <div className="sticky bottom-0 bg-white border-t border-gray-100 p-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
-        <div className="max-w-2xl mx-auto flex gap-3">
-          <button
-            onClick={handleAddToCart}
-            disabled={!product.isAvailable}
-            className="flex-1 py-3.5 bg-white border-2 border-[#DB0002] text-[#DB0002] rounded-2xl font-semibold text-[15px] active:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Add to Cart
-          </button>
-          <button
-            onClick={() => {
-              handleAddToCart();
-              router.push('/customer/cart');
-            }}
-            disabled={!product.isAvailable}
-            className="flex-[2] py-3.5 bg-[#DB0002] text-white rounded-2xl font-semibold text-[15px] flex items-center justify-center gap-2 active:bg-[#B80002] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Order Now
-            <span className="font-bold">₱{totalPrice.toFixed(0)}</span>
-          </button>
+        <div className="max-w-2xl mx-auto flex flex-col gap-3">
+          {showRequestQuote && (
+            <button
+              type="button"
+              onClick={openRequestQuote}
+              className="w-full py-3.5 bg-white border-2 border-[#DB0002] text-[#DB0002] rounded-2xl font-semibold text-[15px] active:bg-red-50 transition-colors"
+            >
+              Request a Quote
+            </button>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleAddToCart}
+              disabled={!product.isAvailable}
+              className="flex-1 py-3.5 bg-white border-2 border-[#DB0002] text-[#DB0002] rounded-2xl font-semibold text-[15px] active:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Add to Cart
+            </button>
+            <button
+              onClick={() => {
+                handleAddToCart();
+                router.push('/customer/cart');
+              }}
+              disabled={!product.isAvailable}
+              className="flex-[2] py-3.5 bg-[#DB0002] text-white rounded-2xl font-semibold text-[15px] flex items-center justify-center gap-2 active:bg-[#B80002] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Order Now
+              <span className="font-bold">₱{totalPrice.toFixed(0)}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

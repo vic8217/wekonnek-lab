@@ -56,6 +56,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { PaymentPartnersModule } from './payment-partners/payment-partners.module';
 import { SocialAuthModule } from './social-auth/social-auth.module';
 import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.module';
+import { RfqModule } from './rfq/rfq.module';
 
 @Module({
   imports: [
@@ -127,6 +128,7 @@ import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.mo
     PaymentPartnersModule,
     SocialAuthModule,
     DeliveryPartnersModule,
+    RfqModule,
   ],
   controllers: [AppController],
   providers: [AppService],

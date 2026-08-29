@@ -102,6 +102,7 @@ model Merchant {
   categoryId             Int?      @map("category_id")
   subCategoryId          Int?      @map("sub_category_id")
   businessType           String?   @map("business_type") @db.VarChar(50)
+  commerceDomain         CommerceDomain? @map("commerce_domain")
   phone                  String?   @db.VarChar(20)
   email                  String?   @db.VarChar(255)
   website                String?   @db.VarChar(255)
@@ -143,6 +144,7 @@ model Merchant {
   subCategory          MerchantSubCategory?         @relation(fields: [subCategoryId], references: [id])
   products             Product[]
   orders               WkOrder[]
+  trustTradeTransactions TrustTradeTransaction[]
   reservations         Reservation[]
   promotions           Promotion[]
   reviews              Review[]
@@ -165,6 +167,8 @@ model Merchant {
   ownedSubCategories   SubCategory[]                @relation("MerchantOwnedSubCategories")
   productStudioGenerations ProductStudioGeneration[]
   visualIndexes ProductVisualIndex[]
+  rfqs          RequestForQuotation[]
+  quotations    MerchantQuotation[]
 
   @@index([userId])
   @@index([categoryId])
@@ -543,6 +547,7 @@ model Product {
   categoryId         Int?     @map("category_id")
   subCategoryId      Int?     @map("sub_category_id")
   productType        String   @default("Retail Product") @map("product_type") @db.VarChar(50)
+  commerceDomain     CommerceDomain? @map("commerce_domain")
   brand              String?  @db.VarChar(150)
   unit               String   @default("Piece") @db.VarChar(50)
   baseSku            String?  @map("base_sku") @db.VarChar(100)
@@ -570,6 +575,7 @@ model Product {
   inventoryDailyCounts InventoryDailyCount[]
   visualIndexes         ProductVisualIndex[]
   productStudioGenerations ProductStudioGeneration[]
+  rfqs                     RequestForQuotation[]
 
   @@index([merchantId])
   @@index([categoryId])
@@ -617,6 +623,7 @@ model ProductVariant {
   inventoryMovements   InventoryMovement[]
   inventoryDailyCounts InventoryDailyCount[]
   orderItems           OrderItem[]
+  rfqs                 RequestForQuotation[]
 
   @@index([productId])
   @@map("product_variants")
@@ -892,6 +899,8 @@ model WkOrder {
   shop            Branch?                @relation(fields: [shopId], references: [id], onDelete: SetNull)
   orderItems      OrderItem[]
   serviceRequests DineInServiceRequest[]
+  trustTradeTransaction TrustTradeTransaction?
+  originatingQuotation MerchantQuotation? @relation("QuotationOrder")
 
   @@index([userId])
   @@index([merchantId])
@@ -1582,6 +1591,7 @@ model Order {
   customer User   @relation("OrderCustomer", fields: [customerId], references: [id])
   rider    User?  @relation("OrderRider", fields: [riderId], references: [id])
   store    Store? @relation(fields: [storeId], references: [id])
+  trustTradeTransactions TrustTradeTransaction[]
 
   @@map("orders_v2")
 }
@@ -2092,6 +2102,8 @@ model Branch {
   crewPairingTokens          CrewPairingToken[]
   dineInChanges              DineInChange[]
   dineInServiceRequests      DineInServiceRequest[]
+  rfqs                       RequestForQuotation[]
+  quotations                 MerchantQuotation[]
 
   @@map("branches")
 }
@@ -2256,6 +2268,152 @@ enum TableShape {
   round
   square
   rectangle
+}
+
+enum CommerceDomain {
+  FOOD
+  NON_FOOD
+  MIXED
+}
+
+enum RfqStatus {
+  DRAFT
+  SUBMITTED
+  VIEWED
+  QUOTED
+  REVISED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CONVERTED_TO_ORDER
+  CANCELLED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  REVISED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CONVERTED_TO_ORDER
+  CANCELLED
+}
+
+model RequestForQuotation {
+  id               String    @id @default(uuid()) @db.Uuid
+  rfqNumber        String    @unique @map("rfq_number") @db.VarChar(40)
+  buyerId          String    @map("buyer_id") @db.Uuid
+  merchantId       Int       @map("merchant_id")
+  shopId           Int       @map("shop_id")
+  productId        Int       @map("product_id")
+  productVariantId Int?      @map("product_variant_id")
+  quantity         Int
+  specifications   String?   @db.Text
+  size             String?   @db.VarChar(100)
+  color            String?   @db.VarChar(100)
+  customization    String?   @db.Text
+  requiredDate     DateTime? @map("required_date") @db.Date
+  deliveryAddress  String?   @map("delivery_address") @db.Text
+  notes            String?   @db.Text
+  snapshot         Json
+  status           RfqStatus @default(DRAFT)
+  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz
+  viewedAt         DateTime? @map("viewed_at") @db.Timestamptz
+  acceptedAt       DateTime? @map("accepted_at") @db.Timestamptz
+  declinedAt       DateTime? @map("declined_at") @db.Timestamptz
+  cancelledAt      DateTime? @map("cancelled_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant       Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  shop           Branch          @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  quotations     MerchantQuotation[]
+
+  @@index([buyerId, createdAt])
+  @@index([merchantId, shopId, status])
+  @@map("request_for_quotations")
+}
+
+model MerchantQuotation {
+  id                      String          @id @default(uuid()) @db.Uuid
+  quotationNumber         String          @unique @map("quotation_number") @db.VarChar(40)
+  rfqId                   String          @map("rfq_id") @db.Uuid
+  merchantId              Int             @map("merchant_id")
+  shopId                  Int             @map("shop_id")
+  buyerId                 String          @map("buyer_id") @db.Uuid
+  wkOrderId               Int?            @unique @map("wk_order_id")
+  version                 Int
+  status                  QuotationStatus @default(DRAFT)
+  unitPrice               Decimal         @map("unit_price") @db.Decimal(10, 2)
+  subtotal                Decimal         @db.Decimal(10, 2)
+  discount                Decimal         @default(0) @db.Decimal(10, 2)
+  tax                     Decimal         @default(0) @db.Decimal(10, 2)
+  deliveryCharge          Decimal         @default(0) @map("delivery_charge") @db.Decimal(10, 2)
+  otherCharges            Decimal         @default(0) @map("other_charges") @db.Decimal(10, 2)
+  total                   Decimal         @db.Decimal(10, 2)
+  leadTime                String?         @map("lead_time") @db.VarChar(255)
+  promisedDate            DateTime?       @map("promised_date") @db.Date
+  validUntil              DateTime        @map("valid_until") @db.Timestamptz
+  paymentTerms            String?         @map("payment_terms") @db.Text
+  merchantNotes           String?         @map("merchant_notes") @db.Text
+  returnCancellationTerms String?         @map("return_cancellation_terms") @db.Text
+  revisionRequest         String?         @map("revision_request") @db.Text
+  acceptedSnapshot        Json?           @map("accepted_snapshot")
+  sentAt                  DateTime?       @map("sent_at") @db.Timestamptz
+  acceptedAt              DateTime?       @map("accepted_at") @db.Timestamptz
+  declinedAt              DateTime?       @map("declined_at") @db.Timestamptz
+  convertedAt             DateTime?       @map("converted_at") @db.Timestamptz
+  createdAt               DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  rfq      RequestForQuotation @relation(fields: [rfqId], references: [id], onDelete: Restrict)
+  merchant Merchant             @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  shop     Branch               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  wkOrder  WkOrder?             @relation("QuotationOrder", fields: [wkOrderId], references: [id], onDelete: Restrict)
+
+  @@unique([rfqId, version])
+  @@index([buyerId, status])
+  @@index([merchantId, shopId, status])
+  @@map("merchant_quotations")
+}
+
+model OrderDomainLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  wkOrderId Int?     @unique @map("wk_order_id")
+  orderV2Id String?  @unique @map("order_v2_id") @db.Uuid
+  merchantId Int     @map("merchant_id")
+  shopId    Int?     @map("shop_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([merchantId, shopId])
+  @@map("order_domain_links")
+}
+
+model TrustTradeTransaction {
+  id          String   @id @default(uuid()) @db.Uuid
+  trustTradeId String  @unique @map("trust_trade_id") @db.VarChar(40)
+  wkOrderId   Int?     @unique @map("wk_order_id")
+  orderV2Id   String?  @unique @map("order_v2_id") @db.Uuid
+  merchantId  Int      @map("merchant_id")
+  shopId      Int?     @map("shop_id")
+  buyerId     String   @map("buyer_id") @db.Uuid
+  sourceType  String   @map("source_type") @db.VarChar(30)
+  status      String   @default("ORDER_CONFIRMED") @db.VarChar(40)
+  agreementSnapshot Json @map("agreement_snapshot")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder WkOrder? @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  orderV2 Order? @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+
+  @@index([buyerId, createdAt])
+  @@index([merchantId, status])
+  @@map("trust_trade_transactions")
 }
 
 model FloorTable {

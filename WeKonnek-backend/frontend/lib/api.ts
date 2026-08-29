@@ -104,6 +104,7 @@ export interface Merchant {
   country: string;
   logoUrl?: string;
   coverImageUrl?: string;
+  commerceDomain?: "FOOD" | "NON_FOOD" | "MIXED" | null;
   isActive: boolean;
   isVerified: boolean;
   subscriptionTier?: string;
@@ -270,6 +271,10 @@ export interface CreateMerchantData {
 }
 
 export const merchantsApi = {
+  getMine: async (): Promise<Merchant> => {
+    const response = await apiClient.get("/backend/merchants/me");
+    return response.data;
+  },
   getAll: async (signal?: AbortSignal): Promise<Merchant[]> => {
     const response = await apiClient.get("/backend/merchants", { signal });
     return response.data;
@@ -302,6 +307,7 @@ export const merchantsApi = {
 export interface Product {
   id: number;
   merchantId: number;
+  commerceDomain?: "FOOD" | "NON_FOOD" | null;
   name: string;
   description?: string;
   notes?: Array<{ title: string; text?: string; iconUrl?: string }>;
@@ -356,6 +362,7 @@ export interface Product {
 
 export interface CreateProductData {
   name: string;
+  commerceDomain?: "FOOD" | "NON_FOOD";
   productType?: string;
   description?: string;
   notes?: Array<{ title: string; text?: string; iconUrl?: string }>;

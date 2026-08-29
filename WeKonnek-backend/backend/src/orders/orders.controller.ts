@@ -161,4 +161,10 @@ export class OrdersController {
   ) {
     return this.ordersService.checkoutPayment(id, req.user.id, body.method);
   }
+
+  @Post(':id/payment-selection')
+  @ApiOperation({ summary: 'Select an online payment method for a non-dine-in order awaiting payment selection' })
+  selectPaymentMethod(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: { method: 'gcash' | 'maya' | 'card' }) {
+    return this.ordersService.selectPaymentMethod(id, req.user.id, body.method);
+  }
 }

@@ -27,6 +27,7 @@ interface Merchant {
   logo_url?: string;
   category?: { name?: string } | null;
   subCategory?: { name?: string } | null;
+  commerceDomain?: 'FOOD' | 'NON_FOOD' | 'MIXED' | null;
 }
 
 interface MerchantDetails extends Merchant {
@@ -93,6 +94,7 @@ export default function MerchantManagementPage() {
   const [ledger, setLedger] = useState<MerchantLedger | null>(null);
   const [dialogLoading, setDialogLoading] = useState(false);
   const [generatingRecoveryKey, setGeneratingRecoveryKey] = useState(false);
+  const [commerceDomainSaving, setCommerceDomainSaving] = useState(false);
   const [creditMerchant, setCreditMerchant] = useState<Merchant | null>(null);
   const [creditAmount, setCreditAmount] = useState('500');
   const [creditingWallet, setCreditingWallet] = useState(false);
@@ -232,6 +234,20 @@ export default function MerchantManagementPage() {
     } finally {
       setGeneratingRecoveryKey(false);
     }
+  };
+
+  const saveCommerceDomain = async (commerceDomain: Merchant['commerceDomain']) => {
+    if (!details) return;
+    setCommerceDomainSaving(true);
+    try {
+      const response = await fetch(`${API}/merchants/admin/${details.id}/commerce-domain`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` }, body: JSON.stringify({ commerceDomain }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.message || 'Unable to save commerce domain');
+      setDetails(current => current ? { ...current, commerceDomain: body.commerceDomain } : current);
+      setMerchants(current => current.map(merchant => merchant.id === details.id ? { ...merchant, commerceDomain: body.commerceDomain } : merchant));
+      toast.success('Commerce domain saved');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to save commerce domain'); }
+    finally { setCommerceDomainSaving(false); }
   };
 
   const confirmSuspend = async (merchantId: number, actionType: string, duration: number, reason: string) => {
@@ -457,7 +473,7 @@ export default function MerchantManagementPage() {
           onConfirm={confirmReinstate}
         />
       )}
-      {details && <MerchantDetailsModal details={details} generatingRecoveryKey={generatingRecoveryKey} onGenerateRecoveryKey={generateRecoveryKey} onClose={() => setDetails(null)} />}
+      {details && <MerchantDetailsModal details={details} generatingRecoveryKey={generatingRecoveryKey} commerceDomainSaving={commerceDomainSaving} onGenerateRecoveryKey={generateRecoveryKey} onSaveCommerceDomain={saveCommerceDomain} onClose={() => setDetails(null)} />}
       {ledger && <MerchantLedgerModal ledger={ledger} onClose={() => setLedger(null)} />}
       {creditMerchant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
@@ -504,7 +520,8 @@ function FeeBreakdown({ breakdown }: { breakdown: MerchantDetails['fee_breakdown
   </div>;
 }
 
-function MerchantDetailsModal({ details, generatingRecoveryKey, onGenerateRecoveryKey, onClose }: { details: MerchantDetails; generatingRecoveryKey: boolean; onGenerateRecoveryKey: () => void; onClose: () => void }) {
+function MerchantDetailsModal({ details, generatingRecoveryKey, commerceDomainSaving, onGenerateRecoveryKey, onSaveCommerceDomain, onClose }: { details: MerchantDetails; generatingRecoveryKey: boolean; commerceDomainSaving: boolean; onGenerateRecoveryKey: () => void; onSaveCommerceDomain: (commerceDomain: Merchant['commerceDomain']) => Promise<void>; onClose: () => void }) {
+  const [selectedCommerceDomain, setSelectedCommerceDomain] = useState<Merchant['commerceDomain']>(details.commerceDomain ?? null);
   const copyRecoveryKey = async () => {
     if (!details.recovery_key) return;
     try {
@@ -529,6 +546,7 @@ function MerchantDetailsModal({ details, generatingRecoveryKey, onGenerateRecove
           {coordinatesAvailable && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Map location</p><a href={`https://www.openstreetmap.org/?mlat=${details.latitude}&mlon=${details.longitude}#map=17/${details.latitude}/${details.longitude}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-bold text-blue-700 underline">Open merchant location</a></div>}
           <ProfileField label="About the business" value={details.description} wide />
         </div></section>
+        <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Commerce domain</h4><div className="max-w-md rounded-xl border border-slate-200 bg-slate-50 p-4"><label className="block text-sm font-bold text-slate-800" htmlFor="commerce-domain">Commerce Domain</label><select id="commerce-domain" value={selectedCommerceDomain ?? ''} disabled={commerceDomainSaving} onChange={event => setSelectedCommerceDomain((event.target.value || null) as Merchant['commerceDomain'])} className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"><option value="">Unclassified</option><option value="FOOD">Food</option><option value="NON_FOOD">Non-Food</option><option value="MIXED">Mixed</option></select><div className="mt-3 flex items-center gap-3"><button type="button" disabled={commerceDomainSaving || selectedCommerceDomain === (details.commerceDomain ?? null)} onClick={() => void onSaveCommerceDomain(selectedCommerceDomain)} className="rounded-lg bg-[#e60012] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{commerceDomainSaving ? 'Saving...' : selectedCommerceDomain === (details.commerceDomain ?? null) ? 'Saved' : 'Save'}</button>{selectedCommerceDomain !== (details.commerceDomain ?? null) && <span className="text-xs font-medium text-amber-700">Unsaved changes</span>}</div></div></section>
         <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Account access</h4><div className="grid gap-3 sm:grid-cols-2"><ProfileField label="Store ID / Merchant code" value={details.merchant_code} mono /><ProfileField label="Temporary password" value={details.temporary_password} mono /></div>
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold uppercase text-amber-700">Recovery key</p><p className="mt-1 break-all font-mono text-sm font-bold text-amber-900">{details.recovery_key || 'Generate only when the merchant needs password recovery.'}</p></div><div className="flex gap-2">{details.recovery_key && <button type="button" onClick={copyRecoveryKey} className="rounded-lg border border-amber-600 bg-white px-4 py-2 text-sm font-bold text-amber-700">Copy key</button>}<button onClick={onGenerateRecoveryKey} disabled={generatingRecoveryKey} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{generatingRecoveryKey ? 'Generating...' : details.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div></div>
         </section>

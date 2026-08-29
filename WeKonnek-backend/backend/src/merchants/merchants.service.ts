@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CommerceDomain } from '@prisma/client';
 import { CreateMerchantDto } from './dto/create-merchant.dto';
 import { UpdateMerchantDto } from './dto/update-merchant.dto';
 import { SearchMerchantsDto } from './dto/search-merchants.dto';
@@ -742,6 +743,12 @@ export class MerchantsService {
       },
     });
     return serializeMerchant(merchant);
+  }
+
+  async setCommerceDomain(id: number, commerceDomain: CommerceDomain | null) {
+    if (commerceDomain !== null && !Object.values(CommerceDomain).includes(commerceDomain)) throw new BadRequestException('Invalid commerce domain');
+    await this.findOne(id);
+    return this.prisma.merchant.update({ where: { id }, data: { commerceDomain } });
   }
 
   async remove(id: number) {

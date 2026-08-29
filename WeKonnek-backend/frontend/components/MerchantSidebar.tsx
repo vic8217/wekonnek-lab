@@ -56,6 +56,7 @@ export default function MerchantSidebar({
     { href: "/merchant/branches", label: "Shops", icon: "building" },
     { href: "/merchant/staff", label: "Staff", icon: "users" },
     { href: "/merchant/products", label: "Products", icon: "box" },
+    { href: "/merchant/rfqs", label: "RFQs", icon: "document" },
     { href: "/merchant/ai-product-studio", label: "AI Product Studio", icon: "sparkles" },
     {
       href: "/merchant/inventory-summary",
@@ -81,6 +82,7 @@ export default function MerchantSidebar({
     "Shops",
     "Staff",
     "Products",
+    "RFQs",
     "Inventory",
     "Profile",
     "Settings",

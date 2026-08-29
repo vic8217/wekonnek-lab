@@ -27,6 +27,7 @@ export class ProductNoteInput {
 }
 
 export class CreateProductDto {
+  @IsOptional() @IsIn(['FOOD', 'NON_FOOD']) commerceDomain?: 'FOOD' | 'NON_FOOD';
   @ApiProperty({ example: 'Polo Shirt' }) @IsString() name: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ProductNoteInput) notes?: ProductNoteInput[];

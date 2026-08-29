@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -12,9 +13,10 @@ import { NotificationsService } from '../modules/notifications/notifications.ser
 import { VouchersService } from '../modules/vouchers/vouchers.service';
 import { InvoicesService } from '../modules/invoices/invoices.service';
 import { DineInSyncService } from '../dine-in-crew/dine-in-sync.service';
-import { WalletPaymentGateway, NotificationType } from '@prisma/client';
+import { Prisma, WalletPaymentGateway, NotificationType } from '@prisma/client';
 import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
+import { TrustTradeService } from '../trust-trade/trust-trade.service';
 
 interface OrderItemInput {
   product_id?: number;
@@ -49,6 +51,21 @@ interface CreateOrderInput {
 }
 
 export type CrewOrderInput = CreateOrderInput;
+
+/** Trusted server-side terms produced by quotation acceptance, never a public DTO. */
+export interface AcceptedQuotationOrderInput {
+  buyerId: string;
+  merchantId: number;
+  shopId: number;
+  deliveryAddress?: string | null;
+  notes?: string | null;
+  total: number;
+  deliveryCharge: number;
+  discount: number;
+  tax: number;
+  otherCharges: number;
+  items: Array<{ productId: number; variantId?: number | null; productName: string; quantity: number; unitPrice: number; lineTotal: number }>;
+}
 
 /** Online payment methods that require a gateway checkout. */
 const ONLINE_METHODS = new Set(['gcash', 'grab_pay', 'card', 'maya', 'xendit']);
@@ -142,6 +159,7 @@ function serializeOrder(order: any) {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentGateway: PaymentGatewayService,
@@ -150,6 +168,7 @@ export class OrdersService {
     private readonly invoices: InvoicesService,
     private readonly dineInSync: DineInSyncService,
     private readonly coordinatorApplications: CoordinatorApplicationsService,
+    private readonly trustTrade: TrustTradeService,
   ) {}
 
   private generateOrderCode(): string {
@@ -161,6 +180,18 @@ export class OrdersService {
   }
 
   async create(userId: string, input: CreateOrderInput) {
+    return this.createOrder(userId, input);
+  }
+
+  async createFromAcceptedQuotation(tx: Prisma.TransactionClient, accepted: AcceptedQuotationOrderInput) {
+    const subtotal = accepted.items.reduce((sum, item) => sum + item.lineTotal, 0);
+    if (!accepted.items.length || accepted.items.some(item => !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0 || !Number.isFinite(item.lineTotal) || Math.abs(item.unitPrice * item.quantity - item.lineTotal) > 0.005) || !Number.isFinite(accepted.total) || Math.abs(subtotal - accepted.discount + accepted.tax + accepted.deliveryCharge + accepted.otherCharges - accepted.total) > 0.005) {
+      throw new BadRequestException('Accepted quotation totals are invalid');
+    }
+    return this.createOrder(accepted.buyerId, { merchantId: accepted.merchantId, shopId: accepted.shopId, orderType: 'delivery', totalAmount: accepted.total, delivery_address: accepted.deliveryAddress ?? undefined, delivery_fee: accepted.deliveryCharge, notes: accepted.notes ?? undefined, payment_method: 'pending_selection', items: accepted.items.map(item => ({ productId: item.productId, variantId: item.variantId ?? undefined, productName: item.productName, quantity: item.quantity, price: item.unitPrice, subtotal: item.lineTotal })) }, accepted, tx);
+  }
+
+  private async createOrder(userId: string, input: CreateOrderInput, acceptedQuotation?: AcceptedQuotationOrderInput, existingTx?: Prisma.TransactionClient) {
     const merchantId = input.merchant_id ?? input.merchantId;
     if (!merchantId) {
       throw new BadRequestException('merchant_id is required');
@@ -169,7 +200,8 @@ export class OrdersService {
       throw new BadRequestException('At least one order item is required');
     }
 
-    const merchant = await this.prisma.merchant.findUnique({
+    const db = existingTx ?? this.prisma;
+    const merchant = await db.merchant.findUnique({
       where: { id: Number(merchantId) },
     });
     if (!merchant) {
@@ -177,14 +209,14 @@ export class OrdersService {
     }
     const requestedShopId = input.shop_id ?? input.shopId;
     if (!requestedShopId) throw new BadRequestException('shop_id is required so availability and inventory are scoped to a shop');
-    const shop = await this.prisma.branch.findFirst({ where: { id: Number(requestedShopId), merchantId: Number(merchantId), isActive: true } });
+    const shop = await db.branch.findFirst({ where: { id: Number(requestedShopId), merchantId: Number(merchantId), isActive: true } });
     if (!shop) throw new BadRequestException('The selected shop is unavailable');
 
     const items = await Promise.all(input.items.map(async (it) => {
       const quantity = Number(it.quantity) || 1;
       const productId = it.product_id ?? it.productId ?? null;
       const variantId = it.variant_id ?? it.variantId ?? null;
-      const product = productId ? await this.prisma.product.findFirst({
+      const product = productId ? await db.product.findFirst({
         where: { id: Number(productId), merchantId: Number(merchantId) },
         include: { variants: { where: { id: variantId ? Number(variantId) : -1, isActive: true } } },
       }) : null;
@@ -192,10 +224,16 @@ export class OrdersService {
       if (product?.hasVariants && !variantId) throw new BadRequestException(`Select a variant for ${product.name}`);
       const variant = variantId ? product?.variants?.[0] : undefined;
       if (variantId && !variant) throw new BadRequestException(`The selected variant for ${product?.name || 'this product'} is unavailable`);
-      const price = product
+      const acceptedItem = acceptedQuotation?.items.find(
+        item => item.productId === productId && (item.variantId ?? null) === variantId,
+      );
+      if (acceptedQuotation && !acceptedItem) throw new BadRequestException('Accepted quotation product reference is invalid');
+      const price = acceptedItem
+        ? acceptedItem.unitPrice
+        : product
         ? Number(variant?.price ?? product.discountPrice ?? product.sellingPrice ?? product.price)
         : Number(it.price) || 0;
-      const subtotal = price * quantity;
+      const subtotal = acceptedItem ? acceptedItem.lineTotal : price * quantity;
       return {
         productId,
         productName: product?.name ?? it.product_name ?? it.productName ?? 'Item',
@@ -209,15 +247,17 @@ export class OrdersService {
     const itemsSubtotal = items.reduce((s, it) => s + it.subtotal, 0);
     const deliveryFee = Number(input.delivery_fee) || 0;
     const totalAmount =
-      input.total_amount != null
-        ? Number(input.total_amount)
+      (input.total_amount ?? input.totalAmount) != null
+        ? Number(input.total_amount ?? input.totalAmount)
         : itemsSubtotal + deliveryFee;
+    if (acceptedQuotation && Math.abs(totalAmount - acceptedQuotation.total) > 0.005) throw new BadRequestException('Accepted quotation total is inconsistent');
 
     const paymentMethod = (input.payment_method || 'cod').toLowerCase();
     const isOnline = ONLINE_METHODS.has(paymentMethod);
     const orderType = input.order_type ?? input.orderType ?? 'delivery';
 
-    const created = await this.prisma.wkOrder.create({
+    const createOrderCore = async (tx: Prisma.TransactionClient) => {
+    const created = await tx.wkOrder.create({
       data: {
         orderCode: this.generateOrderCode(),
         userId,
@@ -234,6 +274,7 @@ export class OrdersService {
         notes: input.notes ?? null,
         paymentMethod,
         paymentStatus: 'pending',
+        discountAmount: acceptedQuotation?.discount ?? 0,
         orderItems: {
           create: items.map((it) => ({
             productId: it.productId,
@@ -255,19 +296,17 @@ export class OrdersService {
 
     // Sales affect only the selected shop and variant. A tracked product can
     // never fall back to the legacy merchant-wide Product.quantity field.
-    try {
       const tracked = items.filter(
         (it): it is typeof it & { productId: number } => it.productId != null,
       );
 
       if (tracked.length > 0) {
         const ids = tracked.map((it) => it.productId);
-        const products = await this.prisma.product.findMany({ where: { id: { in: ids }, merchantId: Number(merchantId) } });
+        const products = await tx.product.findMany({ where: { id: { in: ids }, merchantId: Number(merchantId) } });
         const byId = new Map(products.map(product => [product.id, product]));
-        const assignments = await this.prisma.shopProduct.findMany({ where: { shopId: shop.id, productId: { in: ids }, isEnabled: true } });
+        const assignments = await tx.shopProduct.findMany({ where: { shopId: shop.id, productId: { in: ids }, isEnabled: true } });
         const assignedIds = new Set(assignments.map(assignment => assignment.productId));
-        await this.prisma.$transaction(async tx => {
-          for (const item of tracked) {
+        for (const item of tracked) {
             const product = byId.get(item.productId);
             if (!product || !assignedIds.has(item.productId)) throw new BadRequestException(`${item.productName} is not sold by the selected shop`);
             if (!product.trackInventory) continue;
@@ -279,51 +318,13 @@ export class OrdersService {
             if (changed.count !== 1) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
             const updated = await tx.shopInventory.findUniqueOrThrow({ where: { id: balance.id } });
             await tx.inventoryMovement.create({ data: { merchantId: Number(merchantId), shopId: shop.id, productId: item.productId, variantId: item.variantId, type: 'reservation', quantityChange: item.quantity, balanceAfter: updated.quantity, reference: created.orderCode, referenceType: 'order', referenceId: String(created.id), createdBy: userId } });
-          }
-        });
-
-        const ownerUserId = merchant.userId;
-        if (ownerUserId) {
-          const low = await this.prisma.shopInventory.findMany({ where: { merchantId: Number(merchantId), shopId: shop.id, productId: { in: ids } }, include: { product: true } });
-          for (const balance of low.filter(item => item.quantity - item.reservedQuantity <= item.reorderLevel)) {
-            const available = balance.quantity - balance.reservedQuantity;
-            await this.notifications.notify({ userId: ownerUserId, title: available === 0 ? 'Out of stock' : 'Low stock alert', body: `${balance.product.name} has ${available} available at ${shop.name}.`, type: NotificationType.inventory_alert, data: { kind: available === 0 ? 'out_of_stock' : 'low_stock', productId: String(balance.productId), shopId: String(shop.id) } }).catch(() => undefined);
-          }
         }
       }
-    } catch (error) {
-      await this.prisma.wkOrder.delete({ where: { id: created.id } }).catch(() => undefined);
-      throw error;
-    }
-
-    // Notify the merchant of the incoming order (best-effort).
-    try {
-      if (merchant.userId) {
-        const itemCount = items.reduce((n, it) => n + it.quantity, 0);
-        await this.notifications
-          .notify({
-            userId: merchant.userId,
-            title: 'New order received',
-            body: `Order ${created.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${totalAmount.toFixed(2)}`,
-            type: NotificationType.order_update,
-            data: {
-              kind: 'new_order',
-              orderId: String(created.id),
-              orderCode: created.orderCode,
-              shopId: String(shop.id),
-              orderType: created.orderType,
-              url: merchantOrderNotificationUrl({ orderId: created.id, shopId: shop.id, orderType: created.orderType }),
-            },
-            orderId: String(created.id),
-          })
-          .catch(() => undefined);
-      }
-    } catch {
-      // swallow — merchant alerts are non-critical to order creation
-    }
-    // Publish every order type to the branch's operational stream. The shop
-    // counter uses this for live delivery/pickup badges as well as dine-in.
-    await this.dineInSync.recordOrder(created.id, 'ORDER_CREATED');
+      return created;
+    };
+    const created = existingTx ? await createOrderCore(existingTx) : await this.prisma.$transaction(createOrderCore);
+    if (existingTx) return created;
+    await this.runOrderCreatedPostCommitEffects(created);
 
     // Online payment → create a gateway checkout and attach the redirect URL.
     if (isOnline) {
@@ -372,6 +373,18 @@ export class OrdersService {
     }
 
     return serializeOrder(created);
+  }
+
+  /** Shared post-commit effects for every newly persisted WkOrder. */
+  async runOrderCreatedPostCommitEffects(order: { id: number; orderCode: string; orderType: string; totalAmount: { toString(): string }; shopId: number | null; merchant?: { userId?: string | null }; orderItems?: Array<{ quantity: number }> }) {
+    try {
+      if (order.merchant?.userId) {
+        const itemCount = (order.orderItems || []).reduce((count, item) => count + item.quantity, 0);
+        await this.notifications.notify({ userId: order.merchant.userId, title: 'New order received', body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`, type: NotificationType.order_update, data: { kind: 'new_order', orderId: String(order.id), orderCode: order.orderCode, shopId: String(order.shopId), orderType: order.orderType, url: merchantOrderNotificationUrl({ orderId: order.id, shopId: order.shopId || 0, orderType: order.orderType }) }, orderId: String(order.id) }).catch(() => undefined);
+      }
+    } catch { /* merchant alerts are non-critical */ }
+    await this.dineInSync.recordOrder(order.id, 'ORDER_CREATED');
+    await this.trustTrade.ensureForWkOrder(order.id).catch((error: unknown) => this.logger.warn(`trust_trade_create_failed wkOrderId=${order.id} reason=${error instanceof Error ? error.message : 'unknown'}`));
   }
 
   private resolveGateway(
@@ -703,6 +716,18 @@ export class OrdersService {
     });
     const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: method, paymentRef: result.gatewayTransactionId, paymentUrl: result.paymentUrl }, include: { orderItems: true, merchant: { include: { category: true } } } });
     await this.dineInSync.recordOrder(id, 'PAYMENT_METHOD_SELECTED');
+    return serializeOrder(updated);
+  }
+
+  /** Select a payment method for a non-dine-in order already awaiting buyer selection. */
+  async selectPaymentMethod(id: number, userId: string, method: 'gcash' | 'maya' | 'card') {
+    const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
+    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
+    if (existing.orderType === 'dine_in') throw new BadRequestException('Use bill-out payment for dine-in orders');
+    if (existing.paymentMethod !== 'pending_selection' || existing.paymentStatus === 'paid' || ['cancelled', 'completed', 'delivered'].includes(existing.status)) throw new BadRequestException('Order is not eligible for payment selection');
+    if (!['gcash', 'maya', 'card'].includes(method)) throw new BadRequestException('Unsupported payment method');
+    const result = await this.paymentGateway.createPayment({ gateway: this.resolveGateway(undefined, method), amount: Number(existing.totalAmount), description: `WeKonnek Order ${existing.orderCode}`, paymentMethod: method === 'maya' ? 'gcash' : method, redirectSuccess: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=1`, redirectFailed: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=0`, metadata: { orderId: String(id), orderCode: existing.orderCode } });
+    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: method, paymentRef: result.gatewayTransactionId, paymentUrl: result.paymentUrl }, include: { orderItems: true, merchant: { include: { category: true } } } });
     return serializeOrder(updated);
   }
 

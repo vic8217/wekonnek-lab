@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { categoriesApi, CreateProductData, Product, productsApi, subCategoriesApi, uploadApi } from '@/lib/api';
+import { categoriesApi, CreateProductData, Merchant, merchantsApi, Product, productsApi, subCategoriesApi, uploadApi } from '@/lib/api';
 import { syncProductCategories } from '@/lib/product-categories';
 
 const UNITS = ['Piece', 'Pack', 'Bottle', 'Can', 'Cup', 'Glass', 'Plate', 'Serving', 'Bowl', 'Kilogram', 'Gram', 'Liter', 'Milliliter', 'Box', 'Pair', 'Roll', 'Meter', 'Set'];
@@ -37,7 +37,8 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   const [options, setOptions] = useState<OptionRow[]>([]);
   const [variants, setVariants] = useState<VariantRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [form, setForm] = useState({ name: '', description: '', brand: '', categoryId: '', subCategoryId: '', unit: 'Piece', sellingPrice: '', costPrice: '', discountPrice: '', baseSku: '', barcode: '', hasVariants: false, trackInventory: false, availabilityStatus: 'Available' });
+  const [merchant, setMerchant] = useState<Merchant | null>(null);
+  const [form, setForm] = useState({ name: '', description: '', brand: '', categoryId: '', subCategoryId: '', unit: 'Piece', sellingPrice: '', costPrice: '', discountPrice: '', baseSku: '', barcode: '', commerceDomain: '', hasVariants: false, trackInventory: false, availabilityStatus: 'Available' });
 
   useEffect(() => {
     if (productId) return;
@@ -58,6 +59,7 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   }, [draftKey, productId]);
 
   useEffect(() => { categoriesApi.getMine().then(data => setCategories(data || [])).catch(() => toast.error('Unable to load categories')); }, []);
+  useEffect(() => { if (basePath === '/merchant') merchantsApi.getMine().then(setMerchant).catch(() => toast.error('Unable to load merchant profile')); }, [basePath]);
   useEffect(() => {
     if (!form.categoryId) return;
     subCategoriesApi.getMineByCategory(Number(form.categoryId)).then(data => setSubcategories((data || []).map(item => ({ id: item.id, name: item.name }))));
@@ -67,7 +69,7 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
     productsApi.getById(productId).then((product: Product) => {
       setCustomUnit(Boolean(product.unit && !UNITS.includes(product.unit)));
       setForm({
-        name: product.name || '', description: product.description || '', brand: product.brand || '', categoryId: String(product.categoryId || ''), subCategoryId: String(product.subCategoryId || ''), unit: product.unit || 'Piece', sellingPrice: String(product.sellingPrice ?? product.price ?? ''), costPrice: String(product.costPrice ?? ''), discountPrice: String(product.discountPrice ?? ''), baseSku: product.baseSku || product.sku || product.productCode || '', barcode: product.barcode || '', hasVariants: Boolean(product.hasVariants), trackInventory: Boolean(product.trackInventory), availabilityStatus: product.availabilityStatus || (product.isAvailable ? 'Available' : 'Unavailable'),
+        name: product.name || '', description: product.description || '', brand: product.brand || '', categoryId: String(product.categoryId || ''), subCategoryId: String(product.subCategoryId || ''), unit: product.unit || 'Piece', sellingPrice: String(product.sellingPrice ?? product.price ?? ''), costPrice: String(product.costPrice ?? ''), discountPrice: String(product.discountPrice ?? ''), baseSku: product.baseSku || product.sku || product.productCode || '', barcode: product.barcode || '', commerceDomain: product.commerceDomain || '', hasVariants: Boolean(product.hasVariants), trackInventory: Boolean(product.trackInventory), availabilityStatus: product.availabilityStatus || (product.isAvailable ? 'Available' : 'Unavailable'),
       });
       setPreview(product.imageUrl || null);
       setOptions((product.options || []).map(option => ({ name: option.name, values: option.values.map(value => value.value).join(', ') })));
@@ -109,6 +111,7 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
     if (form.hasVariants && (!options.length || !variants.length)) return toast.error('Add at least one option and variant.');
     if (form.hasVariants && variants.some(variant => !variant.sku.trim())) return toast.error('Every variant needs a unique SKU.');
     if (needsBasePrice && !form.sellingPrice.trim()) return toast.error('Enter a selling price because one or more variants use the base price.');
+    if (merchant?.commerceDomain === 'MIXED' && !form.commerceDomain && !productId) return toast.error('Commerce Type is required for Trust Trade eligibility.');
     setSaving(true);
     let draftPreview = preview;
     try {
@@ -125,6 +128,7 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
       })));
       const payload: CreateProductData = {
         name: form.name, description: form.description || undefined, notes: savedNotes, brand: form.brand || undefined,
+        commerceDomain: form.commerceDomain ? form.commerceDomain as 'FOOD' | 'NON_FOOD' : undefined,
         categoryId: form.categoryId ? Number(form.categoryId) : undefined, subCategoryId: form.subCategoryId ? Number(form.subCategoryId) : undefined,
         unit: form.unit, sellingPrice: needsBasePrice ? Number(form.sellingPrice) : 0, costPrice: form.costPrice ? Number(form.costPrice) : undefined, discountPrice: needsBasePrice && form.discountPrice ? Number(form.discountPrice) : undefined,
         baseSku: form.baseSku || undefined, barcode: form.barcode || undefined, imageUrl, hasVariants: form.hasVariants, trackInventory: form.trackInventory, availabilityStatus: form.availabilityStatus,
@@ -158,6 +162,7 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
         <Field label="Category" required><div className="flex gap-2"><select required autoFocus value={form.categoryId} onChange={e => { update('categoryId', e.target.value); update('subCategoryId', ''); }} className="input"><option value="" disabled>{categories.length ? 'Select a category' : 'Create a category first'}</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" onClick={() => openCategoryDialog('category')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50">+ Create</button></div></Field>
         <Field label="Subcategory (optional)"><div className="flex gap-2"><select value={form.subCategoryId} onChange={e => update('subCategoryId', e.target.value)} className="input" disabled={!form.categoryId}><option value="">{form.categoryId ? 'None' : 'Select a category first'}</option>{subcategories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select><button type="button" disabled={!form.categoryId} onClick={() => openCategoryDialog('subcategory')} className="shrink-0 rounded-lg border border-red-600 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400">+ Create</button></div></Field>
         <Field label="Product Name" required><input required value={form.name} onChange={e => update('name', e.target.value)} className="input" /></Field>
+        {merchant?.commerceDomain === 'MIXED' && <Field label="Commerce Type" required><select required={!productId} value={form.commerceDomain} onChange={e => update('commerceDomain', e.target.value)} className="input"><option value="">Unclassified</option><option value="FOOD">Food</option><option value="NON_FOOD">Non-Food</option></select><p className="mt-1 text-xs text-gray-500">{productId && !form.commerceDomain ? 'This product is not eligible for Trust Trade until a commerce type is selected.' : 'Required for Trust Trade eligibility.'}</p></Field>}
         <Field label="Brand (optional)"><input value={form.brand} onChange={e => update('brand', e.target.value)} className="input" /></Field>
         <Field label="Unit" required>{customUnit ? <div className="flex gap-2"><input required autoFocus value={form.unit} onChange={e => update('unit', e.target.value)} className="input" placeholder="Enter your unit, e.g. Tray" /><button type="button" onClick={() => { setCustomUnit(false); update('unit', 'Piece'); }} className="shrink-0 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50">Use supplied units</button></div> : <select required value={form.unit} onChange={e => { if (e.target.value === '__custom__') { setCustomUnit(true); update('unit', ''); } else update('unit', e.target.value); }} className="input">{UNITS.map(value => <option key={value}>{value}</option>)}<option value="__custom__">+ Add custom unit</option></select>}</Field>
           <div className="md:col-span-2"><Field label="Description"><textarea rows={4} value={form.description} onChange={e => update('description', e.target.value)} className="input" /></Field></div>
