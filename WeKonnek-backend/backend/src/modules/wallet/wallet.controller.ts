@@ -16,11 +16,16 @@ import {
   WalletTransactionType,
   WalletPaymentGateway,
 } from '@prisma/client';
+import { WalletReloadService } from '../../payment-partners/wallet-reload.service';
+import { CreateWalletReloadDto } from './dto/create-wallet-reload.dto';
 
 @ApiTags('Wallet')
 @Controller('wallet')
 export class WalletController {
-  constructor(private readonly walletService: WalletService) {}
+  constructor(
+    private readonly walletService: WalletService,
+    private readonly walletReloadService: WalletReloadService,
+  ) {}
 
   // ─── WALLET INFO ─────────────────────────────
   @Get()
@@ -54,6 +59,28 @@ export class WalletController {
   @ApiOperation({ summary: 'Verify wallet PIN' })
   verifyPin(@Req() req: any, @Body() body: { pin: string }) {
     return this.walletService.verifyPin(req.user.id, body.pin);
+  }
+
+  @Post('reload')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary:
+      'Create a PayCools merchant wallet reload (does not credit the wallet)',
+  })
+  reload(@Req() req: any, @Body() body: CreateWalletReloadDto) {
+    return this.walletReloadService.createPayCoolsReload(
+      req.user.id,
+      body.amount,
+    );
+  }
+
+  @Get('reloads/:paymentId')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get merchant wallet reload payment status' })
+  getReload(@Req() req: any, @Param('paymentId') paymentId: string) {
+    return this.walletReloadService.getReload(req.user.id, paymentId);
   }
 
   // ─── TOP-UP ──────────────────────────────────

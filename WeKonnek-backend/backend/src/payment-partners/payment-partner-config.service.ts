@@ -21,6 +21,30 @@ export class PaymentPartnerConfigService {
   private readiness(config: any, environment: Environment) { const credentials = this.credentials(environment); const configurationComplete = Object.values(credentials).every(Boolean); const confirmations = this.confirmations(config, environment); const connection = this.connection(config, environment, credentials); const ipWhitelistRequired = this.ipWhitelistRequired(environment); const missing = [...(!credentials.baseUrlConfigured ? ['BASE_URL'] : []), ...(!credentials.appIdConfigured ? ['APP_ID'] : []), ...(!credentials.privateKeyConfigured ? ['PRIVATE_KEY'] : []), ...(!credentials.callbackSecretConfigured ? ['CALLBACK_SECRET'] : []), ...(!confirmations.publicKeyRegistrationConfirmed ? ['PUBLIC_KEY_REGISTRATION'] : []), ...(!confirmations.callbackRegistrationConfirmed ? ['CALLBACK_REGISTRATION'] : []), ...(ipWhitelistRequired && !confirmations.ipWhitelistConfirmed ? ['IP_WHITELIST'] : []), ...(connection.status !== 'HEALTHY' ? ['CONNECTION_TEST'] : []), ...(!config.dynamicQrEnabled ? ['DYNAMIC_QR'] : [])]; const ready = missing.length === 0; return { credentials, configurationComplete, confirmations, connection, ipWhitelistRequired, missing, ready, uatStatus: !configurationComplete ? 'NOT_READY' : ready ? (config.enabled ? 'ACTIVE' : 'READY') : 'READY_FOR_TESTING', operationallyActive: Boolean(config.enabled && ready) }; }
   private checklist(config: any, readiness: any) { const types = new Set((config.events || []).filter((e: any) => e.success).map((e: any) => e.type)); const { credentials, confirmations, connection } = readiness; return [['UAT Base URL', credentials.baseUrlConfigured, true], ['App ID', credentials.appIdConfigured, true], ['Private Key Installed', credentials.privateKeyConfigured, true], ['Public Key Registered', confirmations.publicKeyRegistrationConfirmed, false], ['Callback Secret', credentials.callbackSecretConfigured, true], ['Callback URL Registered', confirmations.callbackRegistrationConfirmed, false], ['IP Whitelist Confirmed', !readiness.ipWhitelistRequired || confirmations.ipWhitelistConfirmed, false], ['Connection Test', connection.status === 'HEALTHY', true], ['Dynamic QR Enabled', Boolean(config.dynamicQrEnabled), true], ['Test QR Generated', types.has('UAT_QR_CREATED'), true], ['Test Payment Received', types.has('UAT_PAYMENT_COMPLETED'), true], ['Callback Verified', types.has('CALLBACK_VERIFIED'), true], ['Order Marked Paid', types.has('ORDER_MARKED_PAID'), true]].map(([label, complete, automatic]) => ({ label, complete, automatic })); }
 
+  paymentCallbackUrl() {
+    return this.callbackUrls().payment;
+  }
+
+  /** Runtime PayCools credentials. Never expose this object from admin GET. */
+  async getPayCoolsRuntime() {
+    const config = await this.ensureConfig();
+    const environment = (config.environment === 'production' ? 'production' : 'uat') as Environment;
+    const prefix = environment === 'production' ? 'PAYCOOLS_PROD' : 'PAYCOOLS_UAT';
+    return {
+      environment,
+      defaultQrExpirySeconds: config.defaultQrExpirySeconds,
+      baseUrl: (this.env.get<string>(`${prefix}_BASE_URL`) || '').replace(/\/$/, ''),
+      appId: this.env.get<string>(`${prefix}_APP_ID`) || '',
+      privateKeyBase64: this.env.get<string>(`${prefix}_PRIVATE_KEY_BASE64`) || '',
+      callbackPublicKeyBase64:
+        this.env.get<string>(`${prefix}_CALLBACK_PUBLIC_KEY_BASE64`) ||
+        this.env.get<string>(`${prefix}_CALLBACK_SECRET`) ||
+        '',
+      channelCode: this.env.get<string>(`${prefix}_CHANNEL_CODE`) || 'QRPH_DYNAMIC_QR',
+      notifyUrl: this.callbackUrls().payment,
+    };
+  }
+
   async get() { const config = await this.ensureConfig(); const events = await this.prisma.paymentPartnerEvent.findMany({ where: { configurationId: config.id }, orderBy: { createdAt: 'desc' }, take: 20 }); const expanded = { ...config, events }; const readiness = this.readiness(expanded, config.environment as Environment); return { ...config, credentials: readiness.credentials, configurationComplete: readiness.configurationComplete, confirmations: readiness.confirmations, connection: readiness.connection, readiness: { missing: readiness.missing, ready: readiness.ready, uatStatus: readiness.uatStatus, operationallyActive: readiness.operationallyActive, ipWhitelistRequired: readiness.ipWhitelistRequired }, callbackUrls: this.callbackUrls(), checklist: this.checklist(expanded, readiness), events }; }
   async getActiveProvider(sourceType: string) { const config = await this.ensureConfig(); const source = config.sources.find((entry) => entry.sourceType === sourceType); const readiness = this.readiness(config, config.environment as Environment); if (!readiness.operationallyActive || !config.dynamicQrEnabled || !source?.enabled) throw new BadRequestException('This payment method is currently unavailable'); return { providerCode: config.providerCode, environment: config.environment, defaultQrExpirySeconds: config.defaultQrExpirySeconds }; }
 

@@ -4,9 +4,10 @@ import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';
 import { PaymentGatewayService } from './payment-gateway.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PaymentPartnersModule } from '../../payment-partners/payment-partners.module';
 
 @Module({
-  imports: [ConfigModule, NotificationsModule],
+  imports: [ConfigModule, NotificationsModule, PaymentPartnersModule],
   controllers: [WalletController],
   providers: [WalletService, PaymentGatewayService],
   exports: [WalletService, PaymentGatewayService],

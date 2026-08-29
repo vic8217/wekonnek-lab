@@ -70,6 +70,18 @@ interface SubscriptionCoverage {
   account_active?: boolean;
 }
 
+interface ReloadPayment {
+  paymentId: string;
+  reference: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+  paymentUrl?: string | null;
+  qrData?: string | null;
+  expiresAt?: string | Date | null;
+}
+
 interface ActiveShop {
   id: number;
   name: string;
@@ -122,10 +134,10 @@ export default function MerchantDashboardPage() {
   const [coverage, setCoverage] = useState<SubscriptionCoverage | null>(null);
   const [showWalletReload, setShowWalletReload] = useState(false);
   const [reloadAmount, setReloadAmount] = useState('');
-  const [reloadGateway, setReloadGateway] = useState('paymongo');
-  const [reloadMethod, setReloadMethod] = useState('gcash');
   const [reloadError, setReloadError] = useState('');
   const [reloading, setReloading] = useState(false);
+  const [reloadPayment, setReloadPayment] = useState<ReloadPayment | null>(null);
+  const [reloadChecking, setReloadChecking] = useState(false);
   const [listingCount, setListingCount] = useState(0);
   const [monthlyOrderCount, setMonthlyOrderCount] = useState(0);
   const [totalOrderCount, setTotalOrderCount] = useState(0);
@@ -253,6 +265,60 @@ export default function MerchantDashboardPage() {
     };
   }, []);
 
+  const refreshCoverageFromBackend = async () => {
+    const token = getToken();
+    if (!token) return;
+    const response = await fetch(`${API}/api/merchants/me/subscription-coverage`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (response.ok) setCoverage(await response.json());
+  };
+
+  const closeWalletReload = () => {
+    setShowWalletReload(false);
+    setReloadError('');
+    setReloading(false);
+    setReloadChecking(false);
+    setReloadPayment(null);
+    setReloadAmount('');
+  };
+
+  useEffect(() => {
+    if (!reloadPayment?.paymentId) return;
+    if (reloadPayment.status === 'PAID' || reloadPayment.status === 'FAILED') return;
+    let cancelled = false;
+    const poll = async (fromBrowserReturn = false) => {
+      const token = getToken();
+      if (!token) return;
+      if (fromBrowserReturn) setReloadChecking(true);
+      try {
+        const res = await fetch(`${API}/api/wallet/reloads/${reloadPayment.paymentId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as ReloadPayment;
+        if (cancelled) return;
+        setReloadPayment(data);
+        if (data.status === 'PAID') {
+          await refreshCoverageFromBackend();
+        }
+      } finally {
+        if (!cancelled && fromBrowserReturn) setReloadChecking(false);
+      }
+    };
+    void poll(false);
+    const interval = window.setInterval(() => void poll(false), 3000);
+    const onFocus = () => void poll(true);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [reloadPayment?.paymentId, reloadPayment?.status]);
+
   useEffect(() => {
     if (activeTab !== 'billing' || billingLoaded) return;
     const fetchBilling = async () => {
@@ -350,7 +416,7 @@ export default function MerchantDashboardPage() {
     setReloadError('');
     try {
       const token = getToken();
-      const res = await fetch(`${API}/api/wallet/top-up`, {
+      const res = await fetch(`${API}/api/wallet/reload`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -358,17 +424,12 @@ export default function MerchantDashboardPage() {
         },
         body: JSON.stringify({
           amount,
-          gateway: reloadGateway,
-          paymentMethod: reloadMethod,
+          provider: 'paycools',
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Unable to start wallet reload.');
-      if (data.paymentUrl) {
-        window.location.assign(data.paymentUrl);
-        return;
-      }
-      setReloadError('The payment provider did not return a checkout link.');
+      setReloadPayment(data);
     } catch (error) {
       setReloadError(error instanceof Error ? error.message : 'Unable to start wallet reload.');
     } finally {
@@ -580,7 +641,12 @@ export default function MerchantDashboardPage() {
                     </Link>
                     <button
                       type="button"
-                      onClick={() => setShowWalletReload(true)}
+                      onClick={() => {
+                        setReloadError('');
+                        setReloadPayment(null);
+                        setReloadChecking(false);
+                        setShowWalletReload(true);
+                      }}
                       className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 font-semibold text-white transition-colors hover:bg-red-700"
                     >
                       <WalletCards className="h-5 w-5" />
@@ -847,13 +913,57 @@ export default function MerchantDashboardPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowWalletReload(false)}
+                onClick={closeWalletReload}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100"
                 aria-label="Close wallet reload"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {reloadPayment ? (
+              <div className="space-y-4">
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+                  {reloadPayment.status === 'PAID'
+                    ? 'Wallet credited'
+                    : reloadPayment.status === 'FAILED'
+                      ? 'Payment failed'
+                      : reloadChecking
+                        ? 'Checking payment status...'
+                        : 'Pending Payment'}
+                </p>
+                <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
+                  <p>
+                    Amount: ₱{Number(reloadPayment.amount).toLocaleString()} {reloadPayment.currency}
+                  </p>
+                  <p>Provider: PayCools</p>
+                  <p>Reference: {reloadPayment.reference}</p>
+                </div>
+                {reloadPayment.paymentUrl && reloadPayment.status === 'PENDING' && (
+                  <a
+                    href={reloadPayment.paymentUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => setReloadChecking(true)}
+                    className="block w-full rounded-lg bg-red-600 py-2.5 text-center font-semibold text-white hover:bg-red-700"
+                  >
+                    Open PayCools payment
+                  </a>
+                )}
+                {reloadPayment.qrData && reloadPayment.status === 'PENDING' && (
+                  <div>
+                    <p className="mb-1 text-sm font-medium text-gray-700">PayCools QR</p>
+                    <textarea
+                      readOnly
+                      value={reloadPayment.qrData}
+                      className="h-24 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-700"
+                    />
+                  </div>
+                )}
+                {reloadPayment.status === 'PENDING' && !reloadChecking && (
+                  <p className="text-sm text-gray-500">Waiting for PayCools to confirm payment. This page will not credit your wallet from the browser.</p>
+                )}
+              </div>
+            ) : (
             <div className="space-y-4">
               <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-gray-700">Amount (₱)</span>
@@ -868,31 +978,7 @@ export default function MerchantDashboardPage() {
                   className="w-full rounded-lg border border-gray-300 px-3 py-2.5 outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100"
                 />
               </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-gray-700">Payment provider</span>
-                <select
-                  value={reloadGateway}
-                  onChange={(event) => setReloadGateway(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-red-500"
-                >
-                  <option value="paymongo">PayMongo</option>
-                  <option value="maya">Maya</option>
-                  <option value="xendit">Xendit</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-gray-700">Payment method</span>
-                <select
-                  value={reloadMethod}
-                  onChange={(event) => setReloadMethod(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-red-500"
-                >
-                  <option value="gcash">GCash</option>
-                  <option value="maya_pay">Maya</option>
-                  <option value="card">Card</option>
-                  <option value="grab_pay">GrabPay</option>
-                </select>
-              </label>
+              <p className="text-sm text-gray-600">Payment provider: PayCools</p>
               {reloadError && (
                 <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{reloadError}</p>
               )}
@@ -902,9 +988,10 @@ export default function MerchantDashboardPage() {
                 disabled={reloading}
                 className="w-full rounded-lg bg-red-600 py-2.5 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {reloading ? 'Opening checkout...' : 'Continue to payment'}
+                {reloading ? 'Creating payment...' : 'Continue to PayCools'}
               </button>
             </div>
+            )}
           </div>
         </div>
       )}
