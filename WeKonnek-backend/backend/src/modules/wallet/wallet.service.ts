@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  NotImplementedException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -13,6 +14,7 @@ import {
 } from '@prisma/client';
 import { PaymentGatewayService } from './payment-gateway.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { WalletLedgerService } from './wallet-ledger.service';
 
 function addOnQuantity(quantities: unknown, id: string) {
   if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) return 1;
@@ -26,6 +28,7 @@ export class WalletService {
     private readonly prisma: PrismaService,
     private readonly gatewayService: PaymentGatewayService,
     private readonly notifications: NotificationsService,
+    private readonly ledger: WalletLedgerService,
   ) {}
 
   async getOrCreateWallet(userId: string) {
@@ -112,31 +115,18 @@ export class WalletService {
   async pay(userId: string, amount: number, orderId: string, pin: string, description?: string) {
     const pinValid = await this.verifyPin(userId, pin);
     if (!pinValid) throw new ForbiddenException('Invalid wallet PIN');
-
+    if (!orderId) throw new BadRequestException('Order ID is required');
     const wallet = await this.getWallet(userId);
-    if (wallet.balance < amount) throw new BadRequestException('Insufficient wallet balance');
-
-    const refNumber = this.generateRefNumber('PAY');
-
-    await this.prisma.wallet.update({
-      where: { id: wallet.id },
-      data: { balance: wallet.balance - amount },
+    const result = await this.ledger.debitWalletAtomic({
+      walletId: wallet.id,
+      amount,
+      reference: `PAY-${userId}-${orderId}`,
+      type: WalletTransactionType.payment,
+      orderId,
+      description: description || `Payment for Order ${orderId}`,
+      metadata: { purpose: 'wallet_pay', orderId },
     });
-
-    return this.prisma.walletTransaction.create({
-      data: {
-        referenceNumber: refNumber,
-        walletId: wallet.id,
-        type: WalletTransactionType.payment,
-        status: WalletTransactionStatus.completed,
-        gateway: WalletPaymentGateway.internal,
-        amount,
-        fee: 0,
-        netAmount: amount,
-        orderId,
-        description: description || `Payment for Order ${orderId}`,
-      },
-    });
+    return result.transaction;
   }
 
   async cashOut(
@@ -149,113 +139,67 @@ export class WalletService {
 
     const wallet = await this.getWallet(userId);
     const fee = this.calculateCashOutFee(amount);
-    if (wallet.balance < amount + fee) throw new BadRequestException('Insufficient balance (including fee)');
-
     const refNumber = this.generateRefNumber('CO');
-
-    await this.prisma.wallet.update({
-      where: { id: wallet.id },
-      data: { balance: wallet.balance - amount - fee },
-    });
-
-    const txn = await this.prisma.walletTransaction.create({
-      data: {
-        referenceNumber: refNumber,
-        walletId: wallet.id,
-        type: WalletTransactionType.cash_out,
-        status: WalletTransactionStatus.processing,
-        gateway,
-        amount,
-        fee,
-        netAmount: amount - fee,
-        description: `Cash-out to ${bankCode} ****${accountNumber.slice(-4)}`,
-        cashOutBank: bankCode,
-        cashOutAccountNumber: accountNumber,
-        cashOutAccountName: accountName,
+    const result = await this.ledger.debitWalletAtomic({
+      walletId: wallet.id,
+      amount,
+      fee,
+      reference: refNumber,
+      type: WalletTransactionType.cash_out,
+      status: WalletTransactionStatus.processing,
+      gateway,
+      description: `Cash-out request to ${bankCode} ****${accountNumber.slice(-4)} (external payout not disbursed)`,
+      cashOutBank: bankCode,
+      cashOutAccountNumber: accountNumber,
+      cashOutAccountName: accountName,
+      metadata: {
+        purpose: 'cash_out_hold',
+        externalPayout: false,
+        bankCode,
       },
     });
-
-    try {
-      const result = await this.gatewayService.createCashOut({
-        gateway,
-        amount,
-        bankCode,
-        accountNumber,
-        accountName,
-        description: `WeKonnek Pay Cash-out - ${refNumber}`,
-      });
-
-      return this.prisma.walletTransaction.update({
-        where: { id: txn.id },
-        data: { gatewayTransactionId: result.gatewayTransactionId },
-      });
-    } catch (error) {
-      await this.prisma.wallet.update({
-        where: { id: wallet.id },
-        data: { balance: wallet.balance },
-      });
-      await this.prisma.walletTransaction.update({
-        where: { id: txn.id },
-        data: { status: WalletTransactionStatus.failed },
-      });
-      throw error;
-    }
+    return {
+      transaction: result.transaction,
+      disbursed: false,
+      message:
+        'Cash-out is recorded internally and deducted from the wallet. External payout is not available in this release.',
+    };
   }
 
-  async transfer(senderId: string, recipientPhone: string, amount: number, pin: string) {
-    const pinValid = await this.verifyPin(senderId, pin);
-    if (!pinValid) throw new ForbiddenException('Invalid wallet PIN');
-    if (amount < 1) throw new BadRequestException('Minimum transfer is ₱1');
-
-    const senderWallet = await this.getWallet(senderId);
-    if (senderWallet.balance < amount) throw new BadRequestException('Insufficient balance');
-
-    const refNumber = this.generateRefNumber('TRF');
-
-    await this.prisma.wallet.update({
-      where: { id: senderWallet.id },
-      data: { balance: senderWallet.balance - amount },
-    });
-
-    return this.prisma.walletTransaction.create({
-      data: {
-        referenceNumber: refNumber,
-        walletId: senderWallet.id,
-        type: WalletTransactionType.transfer_out,
-        status: WalletTransactionStatus.completed,
-        gateway: WalletPaymentGateway.internal,
-        amount,
-        fee: 0,
-        netAmount: amount,
-        description: `Transfer to ${recipientPhone}`,
-      },
-    });
+  async transfer(_senderId: string, _recipientPhone: string, _amount: number, _pin: string) {
+    throw new NotImplementedException(
+      'Wallet transfer is not available until recipient credit can be completed in the same transaction.',
+    );
   }
 
   async creditEarning(userId: string, amount: number, orderId: string, description?: string) {
+    if (!orderId) throw new BadRequestException('Order ID is required');
     const wallet = await this.getOrCreateWallet(userId);
-
-    await this.prisma.wallet.update({
-      where: { id: wallet.id },
-      data: { balance: wallet.balance + amount },
+    const result = await this.ledger.creditWalletAtomic({
+      walletId: wallet.id,
+      amount,
+      reference: `ERN-${orderId}`,
+      type: WalletTransactionType.earning,
+      orderId,
+      description: description || `Earning from Order ${orderId}`,
+      metadata: { purpose: 'earning', orderId },
     });
+    return result.transaction;
+  }
 
-    const refNumber = this.generateRefNumber('ERN');
-
-    return this.prisma.walletTransaction.create({
-      data: {
-        referenceNumber: refNumber,
-        walletId: wallet.id,
-        type: WalletTransactionType.earning,
-        status: WalletTransactionStatus.completed,
-        gateway: WalletPaymentGateway.internal,
-        amount,
-        fee: 0,
-        netAmount: amount,
-        orderId,
-        description: description || `Earning from Order ${orderId}`,
-      },
+  async creditRefund(userId: string, amount: number, orderId: string, description?: string) {
+    if (!orderId) throw new BadRequestException('Order ID is required');
+    const wallet = await this.getOrCreateWallet(userId);
+    const result = await this.ledger.creditWalletAtomic({
+      walletId: wallet.id,
+      amount,
+      reference: `REFUND-${orderId}`,
+      type: WalletTransactionType.refund,
+      orderId,
+      description: description || `Refund for Order ${orderId}`,
+      metadata: { purpose: 'refund', orderId },
     });
+    return result.transaction;
   }
 
   async handleWebhook(gateway: WalletPaymentGateway, body: any, headers: Record<string, string>) {
@@ -268,25 +212,27 @@ export class WalletService {
     if (!txn) return { status: 'transaction_not_found' };
 
     if (result.status === 'completed') {
-      await this.prisma.walletTransaction.update({
-        where: { id: txn.id },
-        data: { status: WalletTransactionStatus.completed },
-      });
-
-      const wallet = await this.prisma.wallet.findUnique({ where: { id: txn.walletId } });
-      if (wallet) {
-        const updatedWallet = await this.prisma.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: wallet.balance + txn.netAmount },
-        });
-        await this.syncMerchantSubscriptionStatus(wallet.userId, updatedWallet.balance);
+      const credited = await this.ledger.completePendingCredit(txn.id);
+      if (!credited.duplicate && credited.wallet) {
+        await this.syncMerchantSubscriptionStatus(
+          credited.wallet.userId,
+          credited.wallet.balance,
+        );
       }
-    } else {
-      await this.prisma.walletTransaction.update({
-        where: { id: txn.id },
-        data: { status: WalletTransactionStatus.failed },
-      });
+      return {
+        status: credited.duplicate ? 'already_processed' : result.status,
+      };
     }
+
+    await this.prisma.walletTransaction.updateMany({
+      where: {
+        id: txn.id,
+        status: {
+          in: [WalletTransactionStatus.pending, WalletTransactionStatus.processing],
+        },
+      },
+      data: { status: WalletTransactionStatus.failed },
+    });
 
     return { status: result.status };
   }

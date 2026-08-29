@@ -169,7 +169,7 @@ function createStore(
   const coordinator = {
     creditFixedFeeCommission: jest.fn(async () => ({ id: 'coord-1' })),
   };
-  const coverage = new MerchantsService(prisma as never);
+  const coverage = new MerchantsService(prisma as never, {} as never);
   const billing = new MerchantSubscriptionBillingService(
     prisma as never,
     coordinator as never,

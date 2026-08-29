@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { randomBytes } from 'crypto';
 import { operationState } from './branch-operation';
-import { addOnQuantity, philippineBillingDay } from '../merchants/philippine-billing-day';
+import { addOnQuantity, dailySubscriptionReference } from '../merchants/philippine-billing-day';
 
 const PASSKEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -93,7 +93,7 @@ export class BranchesService {
         );
       const paidToday = wallet
         ? await this.prisma.walletTransaction.findUnique({
-            where: { referenceNumber: `SUB-${merchant.id}-${philippineBillingDay().key}` },
+            where: { referenceNumber: dailySubscriptionReference(merchant.id) },
             select: { id: true },
           })
         : null;

@@ -133,7 +133,10 @@ export class WalletController {
   @Post('cash-out')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Cash-out wallet balance to bank/e-wallet' })
+  @ApiOperation({
+    summary:
+      'Hold wallet funds for cash-out (external payout is not disbursed in this release)',
+  })
   cashOut(
     @Req() req: any,
     @Body()
@@ -161,7 +164,7 @@ export class WalletController {
   @Post('transfer')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Transfer funds to another user' })
+  @ApiOperation({ summary: 'Transfer is not available (recipient credit is not implemented)' })
   transfer(
     @Req() req: any,
     @Body()

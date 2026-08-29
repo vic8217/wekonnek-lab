@@ -1,15 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CommerceDomain } from '@prisma/client';
+import { CommerceDomain, Prisma } from '@prisma/client';
 import { CreateMerchantDto } from './dto/create-merchant.dto';
 import { UpdateMerchantDto } from './dto/update-merchant.dto';
 import { SearchMerchantsDto } from './dto/search-merchants.dto';
-import {
-  Prisma,
-  WalletPaymentGateway,
-  WalletTransactionStatus,
-  WalletTransactionType,
-} from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { operationState } from '../branches/branch-operation';
 import {
@@ -18,6 +12,7 @@ import {
   dailySubscriptionReference,
   philippineBillingDay,
 } from './philippine-billing-day';
+import { WalletLedgerService } from '../modules/wallet/wallet-ledger.service';
 
 /**
  * The merchant/admin portals read snake_case fields while the customer
@@ -103,7 +98,10 @@ function normalizeMerchantInput(input: Record<string, any>): Record<string, any>
 
 @Injectable()
 export class MerchantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly walletLedger: WalletLedgerService,
+  ) {}
 
   async create(createMerchantDto: CreateMerchantDto) {
     const merchant = await this.prisma.merchant.create({
@@ -362,40 +360,25 @@ export class MerchantsService {
     if (!merchant) throw new NotFoundException('Merchant not found');
     if (!merchant.userId) throw new NotFoundException('Merchant owner account not found');
 
-    const referenceNumber = `DEMO-${merchant.id}-${Date.now()}-${randomBytes(4).toString('hex').toUpperCase()}`;
-    const result = await this.prisma.$transaction(async tx => {
-      const wallet = await tx.wallet.upsert({
-        where: { userId: merchant.userId! },
-        update: { balance: { increment: amount } },
-        create: { userId: merchant.userId!, balance: amount, isActive: true },
-      });
-      await tx.walletTransaction.create({
-        data: {
-          referenceNumber,
-          walletId: wallet.id,
-          type: WalletTransactionType.top_up,
-          status: WalletTransactionStatus.completed,
-          gateway: WalletPaymentGateway.internal,
-          amount,
-          fee: 0,
-          netAmount: amount,
-          description: 'Demo wallet credit added by administrator',
-          metadata: {
-            purpose: 'demo_credit',
-            merchantId: merchant.id,
-            merchantName: merchant.name,
-            adminUserId,
-          },
-        },
-      });
-      return wallet;
+    const wallet = await this.prisma.wallet.upsert({
+      where: { userId: merchant.userId },
+      update: {},
+      create: { userId: merchant.userId, balance: 0, isActive: true },
     });
-
+    const referenceNumber = `DEMO-${merchant.id}-${Date.now()}-${randomBytes(4).toString('hex').toUpperCase()}`;
+    const result = await this.walletLedger.adjustWallet({
+      walletId: wallet.id,
+      amount,
+      direction: 'credit',
+      reason: 'Demo wallet credit (UAT)',
+      actorUserId: adminUserId,
+      reference: referenceNumber,
+    });
     return {
       merchant_id: merchant.id,
       amount,
-      wallet_balance: Number(result.balance),
-      reference_number: referenceNumber,
+      wallet_balance: result.wallet_balance,
+      reference_number: result.reference,
     };
   }
 
