@@ -5,6 +5,9 @@ export interface CreateProviderPaymentInput {
   notifyUrl: string;
   description?: string;
   expiresInSeconds?: number;
+  customerName?: string;
+  email?: string;
+  remark?: string;
 }
 
 export interface CreateProviderPaymentResult {

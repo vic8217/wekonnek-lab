@@ -13,6 +13,7 @@ import {
   onCartChange,
   type CartItem,
 } from '@/lib/cart';
+import PayWithQrph, { type PayCoolsPaymentDto } from '@/components/PayWithQrph';
 
 // Authentication always uses the same-origin proxy so it shares the exact
 // customer session scope used by the main login page and navigation.
@@ -318,14 +319,28 @@ export default function CheckoutPage() {
   const [barangayOptions, setBarangayOptions] = useState<BarangayOption[]>([]);
   const [tableNumber, setTableNumber] = useState(tableParam ?? '');
   const [notes, setNotes] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'gcash' | 'maya' | 'card'>('cod');
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'gcash' | 'maya' | 'card' | 'qrph'>('cod');
+  const [qrphAvailable, setQrphAvailable] = useState(false);
+  const [qrphPayment, setQrphPayment] = useState<PayCoolsPaymentDto | null>(null);
+  const [qrphStatus, setQrphStatus] = useState<'CREATING' | PayCoolsPaymentDto['status'] | null>(null);
+  const [qrphOrderId, setQrphOrderId] = useState<number | null>(null);
 
   // Map a chosen payment method to the backend gateway that fulfils it.
   const gatewayFor = (method: string): string | undefined => {
     if (method === 'maya') return 'maya';
     if (method === 'gcash' || method === 'card') return 'xendit';
-    return undefined; // COD
+    return undefined; // COD / QRPH
   };
+
+  const checkoutPaymentMethods = [
+    { value: 'cod', label: 'Cash on Delivery / Counter', icon: '💵' },
+    { value: 'gcash', label: 'GCash', icon: '📱' },
+    { value: 'maya', label: 'Maya', icon: '🟢' },
+    { value: 'card', label: 'Credit / Debit Card', icon: '💳' },
+    ...(qrphAvailable
+      ? [{ value: 'qrph', label: 'Pay with QRPH', icon: '▣', hint: 'Scan the QR code using your supported banking or e-wallet app.' }]
+      : []),
+  ];
 
   // Zone-based delivery fee
   const [deliveryFeeResult, setDeliveryFeeResult] = useState<DeliveryFeeResult>({
@@ -417,6 +432,85 @@ export default function CheckoutPage() {
   useEffect(() => {
     recalculateFee();
   }, [recalculateFee]);
+
+  useEffect(() => {
+    if (!merchantId || orderType === 'dine_in') {
+      setQrphAvailable(false);
+      if (paymentMethod === 'qrph') setPaymentMethod('cod');
+      return;
+    }
+    let cancelled = false;
+    const loadAvailability = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const res = await fetch(
+          `/api/backend/payments/paycools/availability?merchantId=${encodeURIComponent(merchantId)}&orderType=${encodeURIComponent(orderType)}`,
+          { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+        );
+        const body = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        const available = Boolean(res.ok && body.available);
+        setQrphAvailable(available);
+        if (!available && paymentMethod === 'qrph') setPaymentMethod('cod');
+      } catch {
+        if (!cancelled) {
+          setQrphAvailable(false);
+          if (paymentMethod === 'qrph') setPaymentMethod('cod');
+        }
+      }
+    };
+    void loadAvailability();
+    return () => {
+      cancelled = true;
+    };
+  }, [merchantId, orderType, paymentMethod]);
+
+  useEffect(() => {
+    if (!qrphOrderId || !qrphPayment?.paymentId) return;
+    if (qrphStatus === 'PAID' || qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED') return;
+    let cancelled = false;
+    const poll = async () => {
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch(`/api/backend/orders/${qrphOrderId}/paycools-payment`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as PayCoolsPaymentDto;
+      if (cancelled) return;
+      setQrphPayment(data);
+      setQrphStatus(data.status);
+      if (data.status === 'PAID') {
+        router.replace(`/customer/orders/${qrphOrderId}?placed=1`);
+      }
+    };
+    const interval = window.setInterval(() => { void poll(); }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [qrphOrderId, qrphPayment?.paymentId, qrphStatus, router]);
+
+  const retryQrph = async () => {
+    if (!qrphOrderId) return;
+    setQrphStatus('CREATING');
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/backend/orders/${qrphOrderId}/paycools-payment`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payment = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payment.message || 'Unable to create a new QR code');
+      setQrphPayment(payment);
+      setQrphStatus(payment.status || 'PENDING');
+    } catch (error) {
+      setQrphStatus('FAILED');
+      toast.error(error instanceof Error ? error.message : 'Unable to create a new QR code');
+    }
+  };
 
   const deliveryFee = orderType === 'delivery' ? deliveryFeeResult.fee : 0;
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -530,6 +624,24 @@ export default function CheckoutPage() {
       const order = await res.json();
 
       if (merchantId) clearCart(merchantId);
+
+      if (orderType !== 'dine_in' && paymentMethod === 'qrph') {
+        setQrphOrderId(order.id);
+        setQrphStatus('CREATING');
+        const payRes = await fetch(`/api/backend/orders/${order.id}/paycools-payment`, {
+          method: 'POST',
+          headers,
+        });
+        const payment = await payRes.json().catch(() => ({}));
+        if (!payRes.ok) {
+          toast.error(payment.message || 'Order placed, but QRPH could not start. Open the order to retry.');
+          router.replace(`/customer/orders/${order.id}?placed=1`);
+          return;
+        }
+        setQrphPayment(payment);
+        setQrphStatus(payment.status || 'PENDING');
+        return;
+      }
 
       // Online payment → send the customer to the gateway checkout page.
       if (order.payment_url) {
@@ -790,12 +902,7 @@ export default function CheckoutPage() {
           {orderType !== 'dine_in' ? <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="text-sm font-bold text-gray-900 mb-3">Payment</h2>
             <div className="space-y-2">
-              {[
-                { value: 'cod', label: 'Cash on Delivery / Counter', icon: '💵' },
-                { value: 'gcash', label: 'GCash', icon: '📱' },
-                { value: 'maya', label: 'Maya', icon: '🟢' },
-                { value: 'card', label: 'Credit / Debit Card', icon: '💳' },
-              ].map((method: any) => (
+              {checkoutPaymentMethods.map((method: any) => (
                 <button
                   key={method.value}
                   onClick={() => !method.badge && setPaymentMethod(method.value as any)}
@@ -809,7 +916,10 @@ export default function CheckoutPage() {
                   }`}
                 >
                   <span className="text-lg">{method.icon}</span>
-                  <span className="text-sm font-medium text-gray-700 flex-1">{method.label}</span>
+                  <span className="text-sm font-medium text-gray-700 flex-1">
+                    {method.label}
+                    {method.hint && <span className="block text-[11px] font-normal text-gray-500">{method.hint}</span>}
+                  </span>
                   {method.badge && (
                     <span className="px-2 py-0.5 bg-gray-200 text-gray-500 text-[10px] rounded-full font-semibold">{method.badge}</span>
                   )}
@@ -1050,12 +1160,7 @@ export default function CheckoutPage() {
             {orderType !== 'dine_in' ? <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
               <h2 className="font-bold text-gray-900 mb-4">Payment Method</h2>
               <div className="space-y-3">
-                {[
-                { value: 'cod', label: 'Cash on Delivery / Pay at Counter', icon: '💵' },
-                { value: 'gcash', label: 'GCash', icon: '📱' },
-                { value: 'maya', label: 'Maya', icon: '🟢' },
-                { value: 'card', label: 'Credit / Debit Card', icon: '💳' },
-              ].map((method: any) => (
+                {checkoutPaymentMethods.map((method: any) => (
                   <button
                     key={method.value}
                     onClick={() => !method.badge && setPaymentMethod(method.value as any)}
@@ -1069,7 +1174,10 @@ export default function CheckoutPage() {
                     }`}
                   >
                     <span className="text-xl">{method.icon}</span>
-                    <span className="font-medium text-gray-900 flex-1">{method.label}</span>
+                    <span className="font-medium text-gray-900 flex-1">
+                      {method.label}
+                      {method.hint && <span className="block text-xs font-normal text-gray-500">{method.hint}</span>}
+                    </span>
                     {method.badge && (
                       <span className="px-2 py-1 bg-gray-200 text-gray-600 text-xs rounded-full">{method.badge}</span>
                     )}
@@ -1129,6 +1237,17 @@ export default function CheckoutPage() {
           </div>
         </div>
       </div>
+      {qrphStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-md">
+            <PayWithQrph
+              payment={qrphPayment}
+              status={qrphStatus}
+              onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? retryQrph : undefined}
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }

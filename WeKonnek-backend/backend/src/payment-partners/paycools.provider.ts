@@ -49,14 +49,18 @@ export class PayCoolsProvider implements PaymentProvider {
         message: 'PayCools create-payment credentials are incomplete.',
       });
     }
-    const request = {
-      appId: runtime.appId,
-      appName: runtime.appName,
+    const request: Record<string, string | number> = {
+      appId: String(runtime.appId),
+      appName: String(runtime.appName),
       amount: input.amountMinor,
-      callbackUrl: input.notifyUrl || runtime.notifyUrl,
-      channelCode: runtime.channelCode,
+      callbackUrl: String(input.notifyUrl || runtime.notifyUrl),
+      channelCode: String(runtime.channelCode),
       mchOrderId: input.reference,
     };
+    if (input.customerName?.trim())
+      request.customerName = input.customerName.trim();
+    if (input.email?.trim()) request.email = input.email.trim();
+    if (input.remark?.trim()) request.remark = input.remark.trim();
     const body = JSON.stringify({
       ...request,
       sign: signPhilippinePayCoolsPayload(request, runtime.privateKeyBase64),

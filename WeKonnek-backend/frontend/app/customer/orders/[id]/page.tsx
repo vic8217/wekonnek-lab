@@ -6,6 +6,7 @@ import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { getToken } from '@/hooks/use-auth';
 import OrderFlowStepper from '@/components/OrderFlowStepper';
+import PayWithQrph, { type PayCoolsPaymentDto } from '@/components/PayWithQrph';
 import { RefreshCw } from 'lucide-react';
 
 interface OrderItem {
@@ -151,6 +152,9 @@ export default function CustomerOrderDetailPage() {
   const [requestDetails, setRequestDetails] = useState('');
   const [sendingRequest, setSendingRequest] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [qrphAvailable, setQrphAvailable] = useState(false);
+  const [qrphPayment, setQrphPayment] = useState<PayCoolsPaymentDto | null>(null);
+  const [qrphStatus, setQrphStatus] = useState<'CREATING' | PayCoolsPaymentDto['status'] | null>(null);
 
   const loadOrder = useCallback(async (initial = false) => {
     if (!orderId) return false;
@@ -191,6 +195,62 @@ export default function CustomerOrderDetailPage() {
       document.removeEventListener('visibilitychange', refreshOnReturn);
     };
   }, [loadOrder]);
+
+  useEffect(() => {
+    if (!order || order.payment_status === 'paid') return;
+    let cancelled = false;
+    const loadQrph = async () => {
+      const token = getToken();
+      if (!token) return;
+      if (order.order_type === 'dine_in' && order.status === 'payment_pending') {
+        const availableRes = await fetch(`/api/backend/orders/${order.id}/paycools-availability`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        const availableBody = await availableRes.json().catch(() => ({}));
+        if (!cancelled) setQrphAvailable(Boolean(availableRes.ok && availableBody.available));
+      }
+      if (order.payment_method !== 'qrph') return;
+      const res = await fetch(`/api/backend/orders/${order.id}/paycools-payment`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as PayCoolsPaymentDto;
+      if (cancelled) return;
+      setQrphPayment(data);
+      setQrphStatus(data.status);
+    };
+    void loadQrph();
+    return () => {
+      cancelled = true;
+    };
+  }, [order]);
+
+  useEffect(() => {
+    if (!order || !qrphPayment?.paymentId) return;
+    if (qrphStatus !== 'PENDING') return;
+    let cancelled = false;
+    const poll = async () => {
+      const token = getToken();
+      if (!token) return;
+      const res = await fetch(`/api/backend/orders/${order.id}/paycools-payment`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as PayCoolsPaymentDto;
+      if (cancelled) return;
+      setQrphPayment(data);
+      setQrphStatus(data.status);
+      if (data.status === 'PAID') void loadOrder();
+    };
+    const interval = window.setInterval(() => { void poll(); }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [order, qrphPayment?.paymentId, qrphStatus, loadOrder]);
 
   const manualRefresh = async () => {
     setRefreshing(true);
@@ -320,6 +380,26 @@ export default function CustomerOrderDetailPage() {
       if (method === 'manual') toast.success('Manual payment requested. Please wait for the crew to process your payment.');
     } catch (paymentError) {
       toast.error(paymentError instanceof Error ? paymentError.message : 'Unable to start payment');
+    } finally {
+      setStartingPayment(null);
+    }
+  };
+
+  const startQrphPayment = async () => {
+    setStartingPayment('qrph');
+    setQrphStatus('CREATING');
+    try {
+      const response = await fetch(`/api/backend/orders/${order.id}/paycools-payment`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || 'Unable to start QRPH payment');
+      setQrphPayment(body);
+      setQrphStatus(body.status || 'PENDING');
+    } catch (paymentError) {
+      setQrphStatus('FAILED');
+      toast.error(paymentError instanceof Error ? paymentError.message : 'Unable to start QRPH payment');
     } finally {
       setStartingPayment(null);
     }
@@ -571,9 +651,27 @@ export default function CustomerOrderDetailPage() {
             <button disabled={startingPayment !== null} onClick={() => void chooseBillOutPayment('gcash')} className="min-h-11 rounded-xl bg-blue-600 text-xs font-bold text-white">GCash</button>
             <button disabled={startingPayment !== null} onClick={() => void chooseBillOutPayment('maya')} className="min-h-11 rounded-xl bg-green-600 text-xs font-bold text-white">Maya</button>
             <button disabled={startingPayment !== null} onClick={() => void chooseBillOutPayment('card')} className="min-h-11 rounded-xl bg-slate-900 text-xs font-bold text-white">Credit / Debit Card</button>
+            {qrphAvailable && <button disabled={startingPayment !== null} onClick={() => void startQrphPayment()} className="min-h-11 rounded-xl bg-[#DB0002] text-xs font-bold text-white">Pay with QRPH</button>}
           </div>}
+          {qrphStatus && (
+            <div className="mt-4">
+              <PayWithQrph
+                payment={qrphPayment}
+                status={qrphStatus}
+                onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? startQrphPayment : undefined}
+              />
+            </div>
+          )}
           {order.payment_method === 'cash' && <div className="mt-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-900"><span className="size-3 animate-pulse rounded-full bg-blue-600"/><p className="text-xs font-bold">Waiting for crew to complete the transaction…</p></div>}
         </section>
+      )}
+
+      {order.order_type !== 'dine_in' && order.payment_method === 'qrph' && order.payment_status !== 'paid' && qrphStatus && (
+        <PayWithQrph
+          payment={qrphPayment}
+          status={qrphStatus}
+          onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? startQrphPayment : undefined}
+        />
       )}
 
       {order.order_type === 'dine_in' && order.status === 'completed' && <section className="rounded-2xl border border-green-200 bg-green-50 p-5 text-center shadow-sm"><div className="mx-auto grid size-12 place-items-center rounded-full bg-green-500 text-2xl text-white">✓</div><h2 className="mt-3 font-black text-green-950">Transaction complete</h2><p className="mt-1 text-xs text-green-700">Your payment has been processed. Your e-receipt was saved to your profile.</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Link href={`/customer/e-receipts?order=${order.id}`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-green-600 px-4 text-sm font-black text-white">Close and view e-receipt</Link><Link href={`/customer/orders/${order.id}/review`} className="inline-flex min-h-11 items-center justify-center rounded-xl border-2 border-green-600 bg-white px-4 text-sm font-black text-green-700">Submit a review</Link></div></section>}

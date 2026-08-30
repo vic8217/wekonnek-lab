@@ -97,6 +97,49 @@ describe('PayCoolsProvider Philippine QRPH', () => {
     expect(created.providerQrCodeId).toBe('qr-1');
   });
 
+  it('includes optional customer fields only when they are present', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          code: 1000,
+          data: { qrcodeId: 'qr-2', qrcodeContent: '000201QRPH' },
+        }),
+    } as Response);
+
+    await provider.createPayment({
+      reference: 'WK260829TESTREF0002',
+      amountMinor: 15000,
+      currency: 'PHP',
+      notifyUrl: runtime.notifyUrl,
+      customerName: 'Ana Cruz',
+      email: 'ana@example.test',
+      remark: 'WeKonnek order WK-1',
+    });
+    const withOptional = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(withOptional).toMatchObject({
+      customerName: 'Ana Cruz',
+      email: 'ana@example.test',
+      remark: 'WeKonnek order WK-1',
+    });
+
+    await provider.createPayment({
+      reference: 'WK260829TESTREF0003',
+      amountMinor: 15000,
+      currency: 'PHP',
+      notifyUrl: runtime.notifyUrl,
+    });
+    const withoutOptional = JSON.parse(
+      (fetchMock.mock.calls[1][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(withoutOptional.customerName).toBeUndefined();
+    expect(withoutOptional.email).toBeUndefined();
+    expect(withoutOptional.remark).toBeUndefined();
+  });
+
   it('accepts a valid Philippine callback signature', async () => {
     const callback = {
       eventName: 'qrcode.payment.success',

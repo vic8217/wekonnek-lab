@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-base-to-string, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-base-to-string, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unused-vars */
 import {
   BadRequestException,
   Injectable,
@@ -260,18 +260,27 @@ export class PaymentPartnerConfigService {
     const prefix = environment === 'production' ? 'prod' : 'uat';
     const successful = config[`${prefix}LastConnectionTestSuccessful`];
     const testAt = config[`${prefix}LastConnectionTestAt`];
+    // Official PayCools PH docs do not expose a generic unauthenticated
+    // health-check. Only an explicitly configured URL may gate readiness.
+    const healthcheckConfigured = Boolean(
+      String(r.healthcheckUrl || '').trim(),
+    );
     const connection = {
-      status: !Object.values(credentials).every(Boolean)
-        ? 'NOT_CONFIGURED'
-        : successful === true
-          ? 'HEALTHY'
-          : testAt && successful === false
-            ? 'ERROR'
-            : 'READY_TO_TEST',
+      status: !healthcheckConfigured
+        ? 'NOT_APPLICABLE'
+        : !Object.values(credentials).every(Boolean)
+          ? 'NOT_CONFIGURED'
+          : successful === true
+            ? 'HEALTHY'
+            : testAt && successful === false
+              ? 'ERROR'
+              : 'READY_TO_TEST',
       lastConnectionTestAt: testAt,
       lastConnectionTestSuccessful: successful,
       lastConnectionTestErrorCode:
         config[`${prefix}LastConnectionTestErrorCode`],
+      healthcheckConfigured,
+      detail: healthcheckConfigured ? undefined : 'No healthcheck configured',
     };
     const missing = [
       ...(!credentials.baseUrlConfigured ? ['BASE_URL'] : []),
@@ -284,7 +293,9 @@ export class PaymentPartnerConfigService {
       ...(r.ipWhitelistRequired && !row?.ipWhitelistConfirmed
         ? ['IP_WHITELIST']
         : []),
-      ...(connection.status !== 'HEALTHY' ? ['CONNECTION_TEST'] : []),
+      ...(healthcheckConfigured && connection.status !== 'HEALTHY'
+        ? ['CONNECTION_TEST']
+        : []),
       ...(!config.dynamicQrEnabled ? ['DYNAMIC_QR'] : []),
     ];
     return {
@@ -439,6 +450,15 @@ export class PaymentPartnerConfigService {
     });
     return this.safeEnvironment(row, env);
   }
+  async isSourceOperational(sourceType: string) {
+    try {
+      await this.getActiveProvider(sourceType);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async getActiveProvider(sourceType: string) {
     const config = await this.ensureConfig();
     const environment = this.normalizeEnvironment(config.environment);

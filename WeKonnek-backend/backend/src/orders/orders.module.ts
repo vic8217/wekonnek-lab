@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { PaymentsWebhookController } from './payments-webhook.controller';
@@ -9,9 +9,18 @@ import { InvoicesModule } from '../modules/invoices/invoices.module';
 import { DineInCrewModule } from '../dine-in-crew/dine-in-crew.module';
 import { CoordinatorApplicationsModule } from '../coordinator-applications/coordinator-applications.module';
 import { TrustTradeModule } from '../trust-trade/trust-trade.module';
+import { PaymentPartnersModule } from '../payment-partners/payment-partners.module';
 
 @Module({
-  imports: [NotificationsModule, VouchersModule, InvoicesModule, DineInCrewModule, CoordinatorApplicationsModule, TrustTradeModule],
+  imports: [
+    NotificationsModule,
+    VouchersModule,
+    InvoicesModule,
+    DineInCrewModule,
+    CoordinatorApplicationsModule,
+    TrustTradeModule,
+    forwardRef(() => PaymentPartnersModule),
+  ],
   controllers: [OrdersController, PaymentsWebhookController],
   providers: [OrdersService, PaymentGatewayService],
   exports: [OrdersService],

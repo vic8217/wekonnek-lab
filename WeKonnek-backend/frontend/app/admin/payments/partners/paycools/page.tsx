@@ -33,6 +33,7 @@ const sourceLabels: Record<string, string> = {
 const display = (value?: string) =>
   ({
     NOT_CONFIGURED: "Not Configured",
+    NOT_APPLICABLE: "Not Applicable",
     READY_TO_TEST: "Ready to Test",
     HEALTHY: "Healthy",
     ERROR: "Error",
@@ -104,7 +105,9 @@ function Status({ value }: { value: string }) {
           ? "text-emerald-600"
           : value === "ERROR"
             ? "text-red-600"
-            : "text-amber-600"
+            : value === "NOT_APPLICABLE"
+              ? "text-slate-600"
+              : "text-amber-600"
       }
     >
       {display(value)}
@@ -581,7 +584,7 @@ export default function PayCoolsPage() {
           <Row label="Provider status">
             <b>{config.enabled ? "Enabled" : "Disabled"}</b>
           </Row>
-          <Row label="Connection">
+          <Row label="Connection Test">
             <Status value={connection.status} />
           </Row>
           <Row label="Readiness">

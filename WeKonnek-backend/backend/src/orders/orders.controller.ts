@@ -14,13 +14,17 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { OrderPayCoolsService } from '../payment-partners/order-paycools.service';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly orderPayCools: OrderPayCoolsService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Place a new order' })
@@ -166,5 +170,28 @@ export class OrdersController {
   @ApiOperation({ summary: 'Select an online payment method for a non-dine-in order awaiting payment selection' })
   selectPaymentMethod(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: { method: 'gcash' | 'maya' | 'card' }) {
     return this.ordersService.selectPaymentMethod(id, req.user.id, body.method);
+  }
+
+  @Get(':id/paycools-availability')
+  @ApiOperation({ summary: 'Whether QRPH is operational for this order' })
+  paycoolsAvailability(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.orderPayCools.getAvailability({
+      orderId: id,
+      userId: req.user.id,
+    });
+  }
+
+  @Post(':id/paycools-payment')
+  @ApiOperation({ summary: 'Start a PayCools QRPH payment for an unpaid order' })
+  createPayCoolsPayment(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.orderPayCools.createForOrder(id, req.user.id);
+  }
+
+  @Get(':id/paycools-payment')
+  @ApiOperation({
+    summary: 'Poll WeKonnek PayCools QRPH payment status (does not settle)',
+  })
+  getPayCoolsPayment(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.orderPayCools.getForOrder(id, req.user.id);
   }
 }
