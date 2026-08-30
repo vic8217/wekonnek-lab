@@ -43,8 +43,6 @@ const display = (value?: string) =>
   })[value || ""] ||
   value ||
   "—";
-const masked = (value?: string) =>
-  value ? "••••••••••••••••••••••••••••••••" : "Not Configured";
 function Toggle({
   value,
   disabled,
@@ -188,7 +186,11 @@ function EnvironmentPanel({
           <label className="text-sm font-medium">
             App ID
             <input
-              value={textValue(values.appId)}
+              value={
+                editing
+                  ? textValue(values.appId)
+                  : textValue(entry.appIdPreview)
+              }
               disabled={disabled}
               onChange={(event) => onChange("appId", event.target.value)}
               className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-gray-50"
@@ -229,10 +231,14 @@ function EnvironmentPanel({
           ) : (
             <div className="mt-1 flex items-center justify-between rounded-lg border bg-gray-50 px-3 py-2">
               <span className="font-mono text-xs">
-                {masked(entry.merchantPublicKey)}
+                {entry.merchantPublicKeyConfigured
+                  ? `SHA-256: ••••••••${textValue(entry.merchantPublicKeyFingerprint).slice(-4)}`
+                  : "Not Configured"}
               </span>
               <b className="text-xs text-gray-500">
-                {entry.merchantPublicKey ? "Configured" : "Not Configured"}
+                {entry.merchantPublicKeyConfigured
+                  ? "Configured"
+                  : "Not Configured"}
               </b>
             </div>
           )}
@@ -258,7 +264,9 @@ function EnvironmentPanel({
           <p className="mt-1 break-all font-mono">{callbackUrl}</p>
         </div>
         <div className="border-t pt-4">
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">UAT Setup Checklist</h3>
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">
+            UAT Setup Checklist
+          </h3>
           <Row label="Public Key Registered">
             <Toggle
               value={Boolean(values.publicKeyRegistered)}
@@ -397,6 +405,7 @@ export default function PayCoolsPage() {
     null,
   );
   const [draft, setDraft] = useState<Config | null>(null);
+  const [baselineDraft, setBaselineDraft] = useState<Config | null>(null);
   const [pendingSecrets, setPendingSecrets] = useState<
     Partial<Record<SecretField, string>>
   >({});
@@ -440,24 +449,48 @@ export default function PayCoolsPage() {
       setSaving(false);
     }
   };
-  const beginEdit = (entry: Config) => {
+  const beginEdit = async (entry: Config) => {
     setNotice("");
     setError("");
-    setEditingEnvironment(entry.environment);
-    setDraft(draftFrom(entry));
-    setPendingSecrets({});
+    setSaving(true);
+    try {
+      const editableEnvironment = await request(
+        `/environments/${entry.environment}`,
+      );
+      setEditingEnvironment(entry.environment);
+      const nextDraft = draftFrom(editableEnvironment);
+      setDraft(nextDraft);
+      setBaselineDraft(nextDraft);
+      setPendingSecrets({});
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to load editable configuration",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const updateDraft = (field: string, value: unknown) =>
     setDraft((current) => ({ ...(current || {}), [field]: value }));
   const queueSecret = (field: SecretField, value: string) =>
     setPendingSecrets((current) => ({ ...current, [field]: value }));
   const closeEdit = () => {
-    const current = config?.paycoolsEnvironments?.find((entry: Config) => entry.environment === editingEnvironment);
-    const dirty = Boolean(current && draft && (JSON.stringify(draft) !== JSON.stringify(draftFrom(current)) || Object.values(pendingSecrets).some(Boolean)));
-    if (dirty && !window.confirm("Discard unsaved PayCools configuration changes?"))
+    const dirty = Boolean(
+      draft &&
+      baselineDraft &&
+      (JSON.stringify(draft) !== JSON.stringify(baselineDraft) ||
+        Object.values(pendingSecrets).some(Boolean)),
+    );
+    if (
+      dirty &&
+      !window.confirm("Discard unsaved PayCools configuration changes?")
+    )
       return;
     setEditingEnvironment(null);
     setDraft(null);
+    setBaselineDraft(null);
     setPendingSecrets({});
   };
   const saveEnvironment = async () => {
@@ -490,6 +523,7 @@ export default function PayCoolsPage() {
       await load();
       setEditingEnvironment(null);
       setDraft(null);
+      setBaselineDraft(null);
       setPendingSecrets({});
       setNotice(
         `${editingEnvironment === "uat" ? "UAT" : "Production"} configuration saved.`,
@@ -514,8 +548,12 @@ export default function PayCoolsPage() {
   const environments = config.paycoolsEnvironments || [];
   const isDirty = (entry: Config) =>
     editingEnvironment === entry.environment &&
-    (JSON.stringify(draft || {}) !== JSON.stringify(draftFrom(entry)) ||
-      Object.values(pendingSecrets).some(Boolean));
+    Boolean(
+      draft &&
+      baselineDraft &&
+      (JSON.stringify(draft) !== JSON.stringify(baselineDraft) ||
+        Object.values(pendingSecrets).some(Boolean)),
+    );
   return (
     <div className="w-full space-y-5">
       <header className="rounded-2xl bg-slate-950 p-6 text-white">
@@ -577,30 +615,105 @@ export default function PayCoolsPage() {
           </div>
         </Card>
         <Card title="Security & Credentials">
-          {[
-            ["Base URL", config.credentials?.baseUrlConfigured],
-            ["App ID", config.credentials?.appIdConfigured],
-            ["Merchant Public Key", Boolean(active.merchantPublicKey)],
-            ["Private Key", active.privateKeyConfigured],
-            ["Callback Secret", active.callbackSecretConfigured],
-            ["Public Key Registration", active.publicKeyRegistered],
-            [
-              "IP Whitelist",
-              active.ipWhitelistRequired
-                ? active.ipWhitelistConfirmed
-                : "NOT_REQUIRED",
-            ],
-          ].map(([label, configured]) => (
-            <Row key={String(label)} label={String(label)}>
-              <b className={configured ? "text-emerald-600" : "text-gray-400"}>
-                {configured === "NOT_REQUIRED"
-                  ? "Not Required"
-                  : configured
-                    ? "Configured ✓"
-                    : "Not Configured"}
+          <Row label="Base URL">
+            <b
+              className={
+                config.credentials?.baseUrlConfigured
+                  ? "text-emerald-600"
+                  : "text-gray-400"
+              }
+            >
+              {config.credentials?.baseUrlConfigured
+                ? "Configured ✓"
+                : "Not Configured"}
+            </b>
+          </Row>
+          <Row label="App ID">
+            <span className="flex items-center gap-3">
+              <code className="text-xs">{active.appIdPreview || "—"}</code>
+              <b
+                className={
+                  config.credentials?.appIdConfigured
+                    ? "text-emerald-600"
+                    : "text-gray-400"
+                }
+              >
+                {config.credentials?.appIdConfigured
+                  ? "Configured ✓"
+                  : "Not Configured"}
               </b>
-            </Row>
-          ))}
+            </span>
+          </Row>
+          <Row label="Merchant Public Key">
+            <span className="flex items-center gap-3">
+              <code className="text-xs">
+                {active.merchantPublicKeyFingerprint
+                  ? `SHA-256: ••••••••${String(active.merchantPublicKeyFingerprint).slice(-4)}`
+                  : "—"}
+              </code>
+              <b
+                className={
+                  active.merchantPublicKeyConfigured
+                    ? "text-emerald-600"
+                    : "text-gray-400"
+                }
+              >
+                {active.merchantPublicKeyConfigured
+                  ? "Configured ✓"
+                  : "Not Configured"}
+              </b>
+            </span>
+          </Row>
+          <Row label="Private Key">
+            <b
+              className={
+                active.privateKeyConfigured
+                  ? "text-emerald-600"
+                  : "text-gray-400"
+              }
+            >
+              {active.privateKeyConfigured ? "Configured ✓" : "Not Configured"}
+            </b>
+          </Row>
+          <Row label="Callback Secret">
+            <b
+              className={
+                active.callbackSecretConfigured
+                  ? "text-emerald-600"
+                  : "text-gray-400"
+              }
+            >
+              {active.callbackSecretConfigured
+                ? "Configured ✓"
+                : "Not Configured"}
+            </b>
+          </Row>
+          <Row label="Public Key Registration">
+            <b
+              className={
+                active.publicKeyRegistered
+                  ? "text-emerald-600"
+                  : "text-gray-400"
+              }
+            >
+              {active.publicKeyRegistered ? "Confirmed ✓" : "Not Confirmed"}
+            </b>
+          </Row>
+          <Row label="IP Whitelist">
+            <b
+              className={
+                !active.ipWhitelistRequired || active.ipWhitelistConfirmed
+                  ? "text-emerald-600"
+                  : "text-gray-400"
+              }
+            >
+              {!active.ipWhitelistRequired
+                ? "Not Required"
+                : active.ipWhitelistConfirmed
+                  ? "Confirmed ✓"
+                  : "Not Confirmed"}
+            </b>
+          </Row>
         </Card>
       </div>
       <Card title="PayCools Environment Credentials">
@@ -616,10 +729,14 @@ export default function PayCoolsPage() {
               }
               editing={editingEnvironment === entry.environment}
               dirty={isDirty(entry)}
-              canEdit={editable && (!editingEnvironment || editingEnvironment === entry.environment)}
+              canEdit={
+                editable &&
+                (!editingEnvironment ||
+                  editingEnvironment === entry.environment)
+              }
               saving={saving}
               callbackUrl={config.callbackUrls?.payment || ""}
-              onEdit={() => beginEdit(entry)}
+              onEdit={() => void beginEdit(entry)}
               onChange={updateDraft}
               onSave={() => void saveEnvironment()}
               onClose={closeEdit}

@@ -189,16 +189,38 @@ export class PaymentPartnerConfigService {
         !row?.encryptedCallbackSecret,
     };
   }
-  private safeEnvironment(row: any, environment: Environment) {
+  private appIdPreview(value: string) {
+    if (!value) return '';
+    return value.length <= 4 ? '••••' : `••••••••${value.slice(-4)}`;
+  }
+  private publicKeyFingerprint(value: string) {
+    if (!value) return '';
+    return createHash('sha256')
+      .update(value, 'utf8')
+      .digest('base64url')
+      .slice(-12);
+  }
+  private safeEnvironment(
+    row: any,
+    environment: Environment,
+    includeEditable = false,
+  ) {
     const f = this.fallback(environment);
     return {
       environment,
-      baseUrl: row?.baseUrl || '',
-      appId: row?.appId || '',
-      appName: row?.appName || '',
-      merchantPublicKey: row?.merchantPublicKey || '',
-      channelCode: row?.channelCode || 'QRPH_DYNAMIC_QR',
-      healthcheckUrl: row?.healthcheckUrl || '',
+      baseUrl: includeEditable ? row?.baseUrl || '' : undefined,
+      appId: includeEditable ? row?.appId || '' : undefined,
+      appIdPreview: this.appIdPreview(row?.appId || ''),
+      appName: includeEditable ? row?.appName || '' : undefined,
+      merchantPublicKey: includeEditable
+        ? row?.merchantPublicKey || ''
+        : undefined,
+      merchantPublicKeyConfigured: Boolean(row?.merchantPublicKey),
+      merchantPublicKeyFingerprint: this.publicKeyFingerprint(
+        row?.merchantPublicKey || '',
+      ),
+      channelCode: includeEditable ? row?.channelCode || '' : undefined,
+      healthcheckUrl: includeEditable ? row?.healthcheckUrl || '' : undefined,
       ipWhitelistRequired: row?.ipWhitelistRequired ?? false,
       publicKeyRegistered: row?.publicKeyRegistered ?? false,
       callbackRegistered: row?.callbackRegistered ?? false,
@@ -340,6 +362,7 @@ export class PaymentPartnerConfigService {
     return this.safeEnvironment(
       await this.ensureEnvironment(config.id, env),
       env,
+      true,
     );
   }
   async updateEnvironment(
