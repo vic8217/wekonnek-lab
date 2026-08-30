@@ -482,6 +482,8 @@ enum PlatformPaymentStatus {
   PAID
   FAILED
   REFUNDED
+  CANCELLED
+  EXPIRED
 }
 
 model PlatformPaymentTransaction {
@@ -506,6 +508,7 @@ model PlatformPaymentTransaction {
   createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   paidAt                DateTime?                  @map("paid_at") @db.Timestamptz
+  lifecycleEvents       PlatformPaymentLifecycleEvent[]
   merchant              Merchant?                  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   payerUser             User?                      @relation("PlatformPaymentPayer", fields: [payerUserId], references: [id], onDelete: Restrict)
   rider                 User?                      @relation("PlatformPaymentRider", fields: [riderId], references: [id], onDelete: Restrict)
@@ -518,6 +521,30 @@ model PlatformPaymentTransaction {
   @@index([status, createdAt])
   @@index([sourceType, sourceId])
   @@map("platform_payment_transactions")
+}
+
+model PlatformPaymentLifecycleEvent {
+  id                           String                    @id @default(uuid()) @db.Uuid
+  platformPaymentTransactionId String                    @map("platform_payment_transaction_id") @db.Uuid
+  wkOrderId                    Int?                      @map("wk_order_id")
+  merchantId                   Int?                      @map("merchant_id")
+  customerId                   String?                   @map("customer_id") @db.Uuid
+  provider                     String                    @db.VarChar(30)
+  environment                  String?                   @db.VarChar(30)
+  eventType                    String                    @map("event_type") @db.VarChar(100)
+  actorType                    String                    @map("actor_type") @db.VarChar(30)
+  actorId                      String?                   @map("actor_id") @db.Uuid
+  previousStatus               PlatformPaymentStatus?    @map("previous_status")
+  resultingStatus              PlatformPaymentStatus?    @map("resulting_status")
+  safeMessage                  String?                   @map("safe_message") @db.VarChar(500)
+  createdAt                    DateTime                  @default(now()) @map("created_at") @db.Timestamptz
+  payment                      PlatformPaymentTransaction @relation(fields: [platformPaymentTransactionId], references: [id], onDelete: Cascade)
+
+  @@index([platformPaymentTransactionId, createdAt])
+  @@index([wkOrderId, createdAt])
+  @@index([merchantId, createdAt])
+  @@index([customerId, createdAt])
+  @@map("platform_payment_lifecycle_events")
 }
 
 model SubscriptionPlanDefinition {

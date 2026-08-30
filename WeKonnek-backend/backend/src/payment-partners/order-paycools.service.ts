@@ -20,6 +20,10 @@ import { PaymentPartnerConfigService } from './payment-partner-config.service';
 import { PayCoolsProvider } from './paycools.provider';
 import { PlatformPaymentService } from './platform-payment.service';
 import {
+  PaymentLifecycleEvent,
+  PaymentLifecycleService,
+} from './payment-lifecycle.service';
+import {
   CUSTOMER_ORDER_PAYMENT_PURPOSE,
   isCustomerOrderPayCoolsMetadata,
   resolvePayCoolsOrderSourceType,
@@ -54,6 +58,7 @@ export class OrderPayCoolsService {
     private readonly orders: OrdersService,
     private readonly dineInSync: DineInSyncService,
     private readonly platformPayments: PlatformPaymentService,
+    private readonly lifecycle: PaymentLifecycleService,
     private readonly paymentPartners: PaymentPartnerConfigService,
     private readonly paycools: PayCoolsProvider,
   ) {}
@@ -111,6 +116,13 @@ export class OrderPayCoolsService {
         sourceType,
       },
     });
+    await this.lifecycle.event(this.prisma, pending, {
+      eventType: PaymentLifecycleEvent.INITIATED,
+      actorType: 'CUSTOMER',
+      actorId: userId,
+      resultingStatus: PlatformPaymentStatus.PENDING,
+      safeMessage: 'QRPH payment initiated',
+    });
 
     const customerName = [order.user?.firstName, order.user?.lastName]
       .filter(Boolean)
@@ -148,6 +160,12 @@ export class OrderPayCoolsService {
             expiresAt,
           },
         },
+      });
+      await this.lifecycle.event(this.prisma, pending, {
+        eventType: PaymentLifecycleEvent.QR_GENERATED,
+        actorType: 'SYSTEM',
+        resultingStatus: PlatformPaymentStatus.PENDING,
+        safeMessage: 'QR code generated',
       });
       await this.prisma.wkOrder.update({
         where: { id: order.id },
@@ -187,6 +205,74 @@ export class OrderPayCoolsService {
     }
     const payment = await this.findLatestOrderPayment(orderId);
     if (!payment) throw new NotFoundException('Order payment not found');
+    if (
+      payment.status === PlatformPaymentStatus.PENDING &&
+      this.isExpired(payment.metadata)
+    ) {
+      const expired = await this.lifecycle.transition(
+        payment.id,
+        PlatformPaymentStatus.EXPIRED,
+        {
+          eventType: PaymentLifecycleEvent.EXPIRED,
+          actorType: 'SYSTEM',
+          safeMessage: 'QR payment expired',
+        },
+      );
+      if (expired.transitioned)
+        await this.orders.cancelUnpaidQrphOrder(orderId);
+    }
+    return this.toDto(payment.id);
+  }
+
+  async cancelForOrder(orderId: number, userId: string) {
+    const order = await this.prisma.wkOrder.findUnique({
+      where: { id: orderId },
+    });
+    if (!order || order.userId !== userId)
+      throw new NotFoundException('Order payment not found');
+    const payment = await this.findLatestOrderPayment(orderId);
+    if (
+      !payment ||
+      payment.provider !== 'PAYCOOLS' ||
+      !isCustomerOrderPayCoolsMetadata(payment.metadata)
+    )
+      throw new NotFoundException('Order payment not found');
+    await this.lifecycle.event(this.prisma, payment, {
+      eventType: PaymentLifecycleEvent.CANCELLATION_REQUESTED,
+      actorType: 'CUSTOMER',
+      actorId: userId,
+      previousStatus: payment.status,
+      safeMessage: 'Customer requested cancellation',
+    });
+    if (payment.status === PlatformPaymentStatus.PAID) {
+      await this.lifecycle.event(this.prisma, payment, {
+        eventType: PaymentLifecycleEvent.CANCELLATION_REJECTED_PAID,
+        actorType: 'SYSTEM',
+        previousStatus: payment.status,
+        resultingStatus: payment.status,
+        safeMessage: 'Payment has already been confirmed',
+      });
+      throw new ConflictException(
+        'Payment has already been confirmed and can no longer be cancelled.',
+      );
+    }
+    if (payment.status === PlatformPaymentStatus.CANCELLED)
+      return this.toDto(payment.id);
+    if (payment.status === PlatformPaymentStatus.EXPIRED)
+      throw new ConflictException(
+        'Payment has expired and can no longer be cancelled.',
+      );
+    const result = await this.lifecycle.transition(
+      payment.id,
+      PlatformPaymentStatus.CANCELLED,
+      {
+        eventType: PaymentLifecycleEvent.CANCELLED,
+        actorType: 'CUSTOMER',
+        actorId: userId,
+        safeMessage: 'Customer cancelled unpaid QRPH payment',
+      },
+    );
+    if (result.transitioned) await this.orders.cancelUnpaidQrphOrder(orderId);
     return this.toDto(payment.id);
   }
 
@@ -200,6 +286,12 @@ export class OrderPayCoolsService {
       );
       throw new NotFoundException('Unknown PayCools payment reference');
     }
+    await this.lifecycle.event(this.prisma, payment, {
+      eventType: PaymentLifecycleEvent.CALLBACK_RECEIVED,
+      actorType: 'PAYMENT_PROVIDER',
+      previousStatus: payment.status,
+      safeMessage: 'PayCools callback received',
+    });
     if (payment.provider !== 'PAYCOOLS') {
       throw new BadRequestException('Provider mismatch');
     }
@@ -233,6 +325,13 @@ export class OrderPayCoolsService {
     }
 
     if (verified.status === 'PENDING') {
+      await this.lifecycle.event(this.prisma, payment, {
+        eventType: PaymentLifecycleEvent.CALLBACK_VERIFIED,
+        actorType: 'PAYMENT_PROVIDER',
+        previousStatus: payment.status,
+        resultingStatus: payment.status,
+        safeMessage: 'Verified pending callback',
+      });
       return { accepted: true, duplicate: false, settled: false };
     }
 
@@ -261,36 +360,58 @@ export class OrderPayCoolsService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.platformPaymentTransaction.updateMany({
-        where: {
-          id: payment.id,
-          status: PlatformPaymentStatus.PENDING,
-          provider: 'PAYCOOLS',
-        },
-        data: {
-          status: PlatformPaymentStatus.PAID,
-          paidAt: new Date(),
-          providerTransactionId: verified.providerTransactionId,
-        },
-      });
-      if (claimed.count !== 1) {
-        const current = await tx.platformPaymentTransaction.findUnique({
-          where: { id: payment.id },
-        });
-        if (current?.status === PlatformPaymentStatus.PAID) {
-          return { duplicate: true, settle: false };
-        }
-        throw new BadRequestException('Payment is not eligible for settlement');
-      }
-      return { duplicate: false, settle: true };
+    await this.lifecycle.event(this.prisma, payment, {
+      eventType: PaymentLifecycleEvent.CALLBACK_VERIFIED,
+      actorType: 'PAYMENT_PROVIDER',
+      previousStatus: payment.status,
+      safeMessage: 'PayCools callback verified',
     });
+    const claimed = await this.lifecycle.transition(
+      payment.id,
+      PlatformPaymentStatus.PAID,
+      {
+        eventType: PaymentLifecycleEvent.SETTLED,
+        actorType: 'PAYMENT_PROVIDER',
+        safeMessage: 'Verified PayCools payment settled',
+        providerTransactionId: verified.providerTransactionId,
+      },
+    );
+    const result = claimed.transitioned
+      ? { duplicate: false, settle: true }
+      : {
+          duplicate: claimed.payment.status === PlatformPaymentStatus.PAID,
+          settle: false,
+          status: claimed.payment.status,
+        };
 
     if (result.duplicate) {
+      await this.lifecycle.event(this.prisma, payment, {
+        eventType: PaymentLifecycleEvent.DUPLICATE,
+        actorType: 'PAYMENT_PROVIDER',
+        previousStatus: PlatformPaymentStatus.PAID,
+        resultingStatus: PlatformPaymentStatus.PAID,
+        safeMessage: 'Duplicate callback ignored',
+      });
       this.logger.log(
         `paycools_order_callback_duplicate reference=${payment.reference}`,
       );
       return { accepted: true, duplicate: true, settled: false };
+    }
+    if (!result.settle) {
+      await this.lifecycle.event(this.prisma, payment, {
+        eventType: PaymentLifecycleEvent.LATE_SUCCESS,
+        actorType: 'PAYMENT_PROVIDER',
+        previousStatus: result.status,
+        resultingStatus: result.status,
+        safeMessage:
+          'Verified provider success received after local terminal state; reconciliation required',
+      });
+      return {
+        accepted: true,
+        duplicate: false,
+        settled: false,
+        reconciliationRequired: true,
+      };
     }
 
     await this.orders.markPaidByGateway(String(order.id), 'completed');
@@ -298,6 +419,7 @@ export class OrderPayCoolsService {
       where: { id: order.id },
       data: { paymentMethod: 'qrph', paymentRef: payment.reference },
     });
+    await this.orders.notifyMerchantPaidQrphOrder(order.id);
     this.logger.log(
       `order_paycools_settled reference=${payment.reference} orderId=${order.id}`,
     );
@@ -444,6 +566,10 @@ export class OrderPayCoolsService {
       payment.status === PlatformPaymentStatus.REFUNDED
     ) {
       status = 'FAILED';
+    } else if (payment.status === PlatformPaymentStatus.CANCELLED) {
+      status = 'FAILED';
+    } else if (payment.status === PlatformPaymentStatus.EXPIRED) {
+      status = 'EXPIRED';
     } else if (this.isExpired(metadata)) {
       status = 'EXPIRED';
     }

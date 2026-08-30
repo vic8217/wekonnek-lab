@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -376,15 +377,22 @@ export class OrdersService {
   }
 
   /** Shared post-commit effects for every newly persisted WkOrder. */
-  async runOrderCreatedPostCommitEffects(order: { id: number; orderCode: string; orderType: string; totalAmount: { toString(): string }; shopId: number | null; merchant?: { userId?: string | null }; orderItems?: Array<{ quantity: number }> }) {
+  async runOrderCreatedPostCommitEffects(order: { id: number; orderCode: string; orderType: string; paymentMethod?: string; totalAmount: { toString(): string }; shopId: number | null; merchant?: { userId?: string | null }; orderItems?: Array<{ quantity: number }> }) {
     try {
-      if (order.merchant?.userId) {
+      if (order.merchant?.userId && order.paymentMethod !== 'qrph') {
         const itemCount = (order.orderItems || []).reduce((count, item) => count + item.quantity, 0);
         await this.notifications.notify({ userId: order.merchant.userId, title: 'New order received', body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`, type: NotificationType.order_update, data: { kind: 'new_order', orderId: String(order.id), orderCode: order.orderCode, shopId: String(order.shopId), orderType: order.orderType, url: merchantOrderNotificationUrl({ orderId: order.id, shopId: order.shopId || 0, orderType: order.orderType }) }, orderId: String(order.id) }).catch(() => undefined);
       }
     } catch { /* merchant alerts are non-critical */ }
     await this.dineInSync.recordOrder(order.id, 'ORDER_CREATED');
     await this.trustTrade.ensureForWkOrder(order.id).catch((error: unknown) => this.logger.warn(`trust_trade_create_failed wkOrderId=${order.id} reason=${error instanceof Error ? error.message : 'unknown'}`));
+  }
+
+  async notifyMerchantPaidQrphOrder(orderId: number) {
+    const order = await this.prisma.wkOrder.findUnique({ where: { id: orderId }, include: { merchant: { select: { userId: true } }, orderItems: { select: { quantity: true } } } });
+    if (!order?.merchant.userId) return;
+    const itemCount = order.orderItems.reduce((count, item) => count + item.quantity, 0);
+    await this.notifications.notify({ userId: order.merchant.userId, title: 'Paid order received', body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`, type: NotificationType.order_update, data: { kind: 'paid_order', orderId: String(order.id), orderCode: order.orderCode, shopId: String(order.shopId), orderType: order.orderType, url: merchantOrderNotificationUrl({ orderId: order.id, shopId: order.shopId || 0, orderType: order.orderType }) }, orderId: String(order.id) }).catch(() => undefined);
   }
 
   private resolveGateway(
@@ -469,13 +477,19 @@ export class OrdersService {
     return serializeOrder(order).order_items;
   }
 
-  async updateStatus(id: number, status: string) {
+  async updateStatus(id: number, status: string, actor?: { id: string; role?: string }) {
     if (!status) throw new BadRequestException('status is required');
     const existing = await this.prisma.wkOrder.findUnique({
       where: { id: Number(id) },
       include: { orderItems: true },
     });
     if (!existing) throw new NotFoundException('Order not found');
+    if (actor) {
+      const merchantAccess = ['admin', 'staff'].includes(String(actor.role)) || await this.prisma.merchant.findFirst({ where: { id: existing.merchantId, OR: [{ userId: actor.id }, { merchantStaff: { some: { userId: actor.id, isActive: true } } }] }, select: { id: true } });
+      if (!merchantAccess) throw new ForbiddenException('You are not allowed to update this merchant order');
+      const isProcessingAction = !['cancelled', existing.status].includes(status);
+      if (isProcessingAction && existing.paymentMethod === 'qrph' && existing.paymentStatus !== 'paid') throw new ConflictException('Payment has not been confirmed for this order.');
+    }
 
     const wasFinalized = ['completed', 'delivered'].includes(existing.status);
     const willFinalize = ['completed', 'delivered'].includes(status);
@@ -541,6 +555,14 @@ export class OrdersService {
       if (message) await this.notifications.notify({ userId: existing.userId, ...message, type: NotificationType.order_update, orderId: String(existing.id), isRead: ['completed', 'delivered'].includes(status), replaceExistingOrder: true, data: { kind: `order_${status}`, orderId: String(existing.id), url: `/customer/orders/${existing.id}` } }).catch(() => undefined);
     }
     return serializeOrder(order);
+  }
+
+  /** Releases a pending order's reservation exactly once after a terminal prepaid-payment outcome. */
+  async cancelUnpaidQrphOrder(id: number) {
+    const existing = await this.prisma.wkOrder.findUnique({ where: { id }, include: { orderItems: true } });
+    if (!existing || existing.status === 'cancelled') return existing;
+    await this.updateStatus(id, 'cancelled');
+    return this.prisma.wkOrder.findUnique({ where: { id } });
   }
 
   async updatePayment(id: number, paymentStatus: string, paymentRef?: string) {

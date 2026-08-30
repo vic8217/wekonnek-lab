@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { OrderPayCoolsService } from './order-paycools.service';
 import { CUSTOMER_ORDER_PAYMENT_PURPOSE } from './paycools-order-source';
+import { PaymentLifecycleService } from './payment-lifecycle.service';
 import type { VerifiedWebhookPayment } from './payment-provider';
 
 jest.mock('qrcode', () => ({
@@ -110,6 +111,7 @@ function createStore(
     return next;
   };
 
+  const lifecycleEvents: Array<Record<string, unknown>> = [];
   const tx = {
     platformPaymentTransaction: {
       updateMany: jest.fn(async ({ where, data }: any) =>
@@ -128,6 +130,13 @@ function createStore(
         if (where.reference && where.reference !== payment.reference)
           return null;
         return { ...payment };
+      }),
+      findUniqueOrThrow: jest.fn(async () => ({ ...payment })),
+    },
+    platformPaymentLifecycleEvent: {
+      create: jest.fn(async ({ data }: any) => {
+        lifecycleEvents.push(data);
+        return data;
       }),
     },
   };
@@ -162,6 +171,13 @@ function createStore(
       findMany: jest.fn(async () => payments.map((row) => ({ ...row }))),
       update: jest.fn(async ({ data }: any) => Object.assign(payment, data)),
       updateMany: tx.platformPaymentTransaction.updateMany,
+    },
+    platformPaymentLifecycleEvent: {
+      create: jest.fn(async ({ data }: any) => {
+        lifecycleEvents.push(data);
+        return data;
+      }),
+      findMany: jest.fn(async () => lifecycleEvents),
     },
     $transaction: jest.fn(async (arg: any) => {
       if (Array.isArray(arg)) return Promise.all(arg);
@@ -211,14 +227,18 @@ function createStore(
   };
   const orders = {
     markPaidByGateway: jest.fn(async () => undefined),
+    cancelUnpaidQrphOrder: jest.fn(async () => undefined),
+    notifyMerchantPaidQrphOrder: jest.fn(async () => undefined),
   };
   const dineInSync = { recordOrder: jest.fn(async () => undefined) };
+  const lifecycle = new PaymentLifecycleService(prisma as never);
 
   const service = new OrderPayCoolsService(
     prisma as never,
     orders as never,
     dineInSync as never,
     platformPayments as never,
+    lifecycle,
     paymentPartners as never,
     paycools as never,
   );
@@ -231,6 +251,8 @@ function createStore(
     paycools,
     orders,
     dineInSync,
+    lifecycle,
+    lifecycleEvents,
     order,
     payment,
     payments,
@@ -436,14 +458,100 @@ describe('OrderPayCoolsService', () => {
   });
 
   it('returns EXPIRED from polling without settling', async () => {
-    const { service, orders } = createStore({
+    const { service, orders, payment, lifecycleEvents } = createStore({
       existingActive: true,
       expiresAt: new Date(Date.now() - 1000).toISOString(),
     });
     await expect(service.getForOrder(88, USER_ID)).resolves.toMatchObject({
       status: 'EXPIRED',
     });
+    expect(payment.status).toBe(PlatformPaymentStatus.EXPIRED);
+    expect(orders.cancelUnpaidQrphOrder).toHaveBeenCalledWith(88);
     expect(orders.markPaidByGateway).not.toHaveBeenCalled();
+    expect(lifecycleEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: 'PAYMENT_EXPIRED' }),
+      ]),
+    );
+  });
+
+  it('cancels an unpaid QRPH payment and releases the order', async () => {
+    const { service, orders, payment, lifecycleEvents } = createStore({
+      existingActive: true,
+    });
+    await expect(service.cancelForOrder(88, USER_ID)).resolves.toMatchObject({
+      paymentId: PAYMENT_ID,
+    });
+    expect(payment.status).toBe(PlatformPaymentStatus.CANCELLED);
+    expect(orders.cancelUnpaidQrphOrder).toHaveBeenCalledWith(88);
+    expect(lifecycleEvents.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining(['CANCELLATION_REQUESTED', 'PAYMENT_CANCELLED']),
+    );
+  });
+
+  it('rejects customer cancellation after the payment is paid or expired', async () => {
+    const paid = createStore({
+      existingActive: true,
+      paymentTxnStatus: PlatformPaymentStatus.PAID,
+    });
+    await expect(
+      paid.service.cancelForOrder(88, USER_ID),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(paid.orders.cancelUnpaidQrphOrder).not.toHaveBeenCalled();
+    expect(paid.lifecycleEvents.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        'CANCELLATION_REQUESTED',
+        'CANCELLATION_REJECTED_ALREADY_PAID',
+      ]),
+    );
+
+    const expired = createStore({
+      existingActive: true,
+      paymentTxnStatus: PlatformPaymentStatus.EXPIRED,
+    });
+    await expect(
+      expired.service.cancelForOrder(88, USER_ID),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(expired.orders.cancelUnpaidQrphOrder).not.toHaveBeenCalled();
+  });
+
+  it('does not settle a late verified success after cancel or expire', async () => {
+    const cancelled = createStore({
+      existingActive: true,
+      paymentTxnStatus: PlatformPaymentStatus.CANCELLED,
+    });
+    await expect(
+      cancelled.service.settleVerified(paidCallback()),
+    ).resolves.toEqual({
+      accepted: true,
+      duplicate: false,
+      settled: false,
+      reconciliationRequired: true,
+    });
+    expect(cancelled.orders.markPaidByGateway).not.toHaveBeenCalled();
+    expect(cancelled.payment.status).toBe(PlatformPaymentStatus.CANCELLED);
+
+    const expired = createStore({
+      existingActive: true,
+      paymentTxnStatus: PlatformPaymentStatus.EXPIRED,
+    });
+    await expect(
+      expired.service.settleVerified(paidCallback()),
+    ).resolves.toEqual({
+      accepted: true,
+      duplicate: false,
+      settled: false,
+      reconciliationRequired: true,
+    });
+    expect(expired.orders.markPaidByGateway).not.toHaveBeenCalled();
+    expect(expired.payment.status).toBe(PlatformPaymentStatus.EXPIRED);
+  });
+
+  it('notifies the merchant only after a verified QRPH settlement', async () => {
+    const { service, orders } = createStore();
+    await service.settleVerified(paidCallback());
+    expect(orders.markPaidByGateway).toHaveBeenCalledWith('88', 'completed');
+    expect(orders.notifyMerchantPaidQrphOrder).toHaveBeenCalledWith(88);
   });
 });
 

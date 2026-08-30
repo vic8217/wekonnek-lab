@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -12,14 +13,29 @@ import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
 import { PaymentPartnerConfigService } from './payment-partner-config.service';
+import { PaymentLifecycleService } from './payment-lifecycle.service';
 
 @Controller('admin/payments/partners/paycools')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentPartnersController {
-  constructor(private service: PaymentPartnerConfigService) {}
+  constructor(
+    private service: PaymentPartnerConfigService,
+    private lifecycle: PaymentLifecycleService,
+  ) {}
 
   @Get() @Roles(UserRole.admin, UserRole.staff) get() {
     return this.service.get();
+  }
+  @Get('lifecycle')
+  @Roles(UserRole.admin)
+  lifecycleHistory(
+    @Query('orderId') orderId?: string,
+    @Query('paymentId') paymentId?: string,
+  ) {
+    return this.lifecycle.adminHistory({
+      orderId: orderId ? Number(orderId) : undefined,
+      paymentId,
+    });
   }
   @Get('environments/:environment')
   @Roles(UserRole.admin, UserRole.staff)

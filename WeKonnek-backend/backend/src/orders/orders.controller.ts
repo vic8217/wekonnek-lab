@@ -84,19 +84,21 @@ export class OrdersController {
   @Put(':id/status')
   @ApiOperation({ summary: 'Update order status (PUT)' })
   updateStatusPut(
+    @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { status: string },
   ) {
-    return this.ordersService.updateStatus(id, body.status);
+    return this.ordersService.updateStatus(id, body.status, req.user);
   }
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update order status (PATCH)' })
   updateStatusPatch(
+    @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { status: string },
   ) {
-    return this.ordersService.updateStatus(id, body.status);
+    return this.ordersService.updateStatus(id, body.status, req.user);
   }
 
   @Patch(':id/payment')
@@ -193,5 +195,11 @@ export class OrdersController {
   })
   getPayCoolsPayment(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
     return this.orderPayCools.getForOrder(id, req.user.id);
+  }
+
+  @Post(':id/paycools-payment/cancel')
+  @ApiOperation({ summary: 'Cancel an unpaid PayCools QRPH payment owned by the customer' })
+  cancelPayCoolsPayment(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.orderPayCools.cancelForOrder(id, req.user.id);
   }
 }

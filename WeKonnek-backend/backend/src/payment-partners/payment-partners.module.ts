@@ -8,6 +8,7 @@ import { OrderPayCoolsService } from './order-paycools.service';
 import { PaymentPartnerConfigService } from './payment-partner-config.service';
 import { PayCoolsProvider } from './paycools.provider';
 import { PlatformPaymentService } from './platform-payment.service';
+import { PaymentLifecycleService } from './payment-lifecycle.service';
 import { WalletReloadService } from './wallet-reload.service';
 
 @Module({
@@ -20,6 +21,7 @@ import { WalletReloadService } from './wallet-reload.service';
   providers: [
     PaymentPartnerConfigService,
     PlatformPaymentService,
+    PaymentLifecycleService,
     PayCoolsProvider,
     WalletReloadService,
     OrderPayCoolsService,
@@ -27,6 +29,7 @@ import { WalletReloadService } from './wallet-reload.service';
   exports: [
     PaymentPartnerConfigService,
     PlatformPaymentService,
+    PaymentLifecycleService,
     PayCoolsProvider,
     WalletReloadService,
     OrderPayCoolsService,
