@@ -153,15 +153,12 @@ function EnvironmentPanel({
   onChange: (field: string, value: unknown) => void;
   onSave: () => void;
   onClose: () => void;
-  onSecret: (field: SecretField, value: string) => void;
+  onSecret: (field: SecretField, value: string) => Promise<void>;
 }) {
   const [privateKey, setPrivateKey] = useState("");
   const [callbackSecret, setCallbackSecret] = useState("");
   const values = draft || entry;
   const disabled = !editing || saving;
-  const submitSecret = (field: SecretField, value: string) => {
-    if (value.trim()) onSecret(field, value);
-  };
   return (
     <details className="rounded-xl border border-gray-200 p-4">
       <summary className="cursor-pointer font-bold text-slate-800">
@@ -267,13 +264,17 @@ function EnvironmentPanel({
           <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">
             UAT Setup Checklist
           </h3>
-          <Row label="Public Key Registered">
-            <Toggle
-              value={Boolean(values.publicKeyRegistered)}
+          <label className="flex items-center gap-3 border-b border-gray-100 py-3 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={Boolean(values.publicKeyRegistered)}
               disabled={disabled}
-              onChange={(value) => onChange("publicKeyRegistered", value)}
+              onChange={(event) =>
+                onChange("publicKeyRegistered", event.target.checked)
+              }
             />
-          </Row>
+            I confirm this Merchant Public Key is registered in PayCools
+          </label>
           <Row label="Callback URL Registered">
             <Toggle
               value={Boolean(values.callbackRegistered)}
@@ -315,10 +316,11 @@ function EnvironmentPanel({
               <button
                 type="button"
                 disabled={saving || !privateKey.trim()}
-                onClick={() => {
-                  submitSecret("merchantPrivateKey", privateKey);
-                  setPrivateKey("");
-                }}
+                onClick={() =>
+                  void onSecret("merchantPrivateKey", privateKey).then(() =>
+                    setPrivateKey(""),
+                  )
+                }
                 className="mt-2 rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50"
               >
                 {entry.privateKeyConfigured
@@ -347,10 +349,11 @@ function EnvironmentPanel({
               <button
                 type="button"
                 disabled={saving || !callbackSecret.trim()}
-                onClick={() => {
-                  submitSecret("callbackSecret", callbackSecret);
-                  setCallbackSecret("");
-                }}
+                onClick={() =>
+                  void onSecret("callbackSecret", callbackSecret).then(() =>
+                    setCallbackSecret(""),
+                  )
+                }
                 className="mt-2 rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50"
               >
                 {entry.callbackSecretConfigured
@@ -406,9 +409,6 @@ export default function PayCoolsPage() {
   );
   const [draft, setDraft] = useState<Config | null>(null);
   const [baselineDraft, setBaselineDraft] = useState<Config | null>(null);
-  const [pendingSecrets, setPendingSecrets] = useState<
-    Partial<Record<SecretField, string>>
-  >({});
   const editable = getUser()?.userType === "admin";
   const request = useCallback(async (path = "", options?: RequestInit) => {
     const response = await fetch(
@@ -461,7 +461,6 @@ export default function PayCoolsPage() {
       const nextDraft = draftFrom(editableEnvironment);
       setDraft(nextDraft);
       setBaselineDraft(nextDraft);
-      setPendingSecrets({});
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -474,14 +473,36 @@ export default function PayCoolsPage() {
   };
   const updateDraft = (field: string, value: unknown) =>
     setDraft((current) => ({ ...(current || {}), [field]: value }));
-  const queueSecret = (field: SecretField, value: string) =>
-    setPendingSecrets((current) => ({ ...current, [field]: value }));
+  const saveSecret = async (
+    environment: string,
+    field: SecretField,
+    value: string,
+  ) => {
+    setSaving(true);
+    setError("");
+    try {
+      await request(
+        `/environments/${environment}/${field === "merchantPrivateKey" ? "merchant-private-key" : "callback-secret"}`,
+        { method: "POST", body: JSON.stringify({ [field]: value }) },
+      );
+      await load();
+      setNotice(
+        field === "merchantPrivateKey"
+          ? "Merchant private key saved."
+          : "Callback secret saved.",
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Secret save failed");
+      throw reason;
+    } finally {
+      setSaving(false);
+    }
+  };
   const closeEdit = () => {
     const dirty = Boolean(
       draft &&
       baselineDraft &&
-      (JSON.stringify(draft) !== JSON.stringify(baselineDraft) ||
-        Object.values(pendingSecrets).some(Boolean)),
+      JSON.stringify(draft) !== JSON.stringify(baselineDraft),
     );
     if (
       dirty &&
@@ -491,7 +512,6 @@ export default function PayCoolsPage() {
     setEditingEnvironment(null);
     setDraft(null);
     setBaselineDraft(null);
-    setPendingSecrets({});
   };
   const saveEnvironment = async () => {
     if (!config || !editingEnvironment || !draft) return;
@@ -503,28 +523,10 @@ export default function PayCoolsPage() {
         method: "PATCH",
         body: JSON.stringify(draft),
       });
-      if (pendingSecrets.merchantPrivateKey)
-        await request(
-          `/environments/${editingEnvironment}/merchant-private-key`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              merchantPrivateKey: pendingSecrets.merchantPrivateKey,
-            }),
-          },
-        );
-      if (pendingSecrets.callbackSecret)
-        await request(`/environments/${editingEnvironment}/callback-secret`, {
-          method: "POST",
-          body: JSON.stringify({
-            callbackSecret: pendingSecrets.callbackSecret,
-          }),
-        });
       await load();
       setEditingEnvironment(null);
       setDraft(null);
       setBaselineDraft(null);
-      setPendingSecrets({});
       setNotice(
         `${editingEnvironment === "uat" ? "UAT" : "Production"} configuration saved.`,
       );
@@ -551,8 +553,7 @@ export default function PayCoolsPage() {
     Boolean(
       draft &&
       baselineDraft &&
-      (JSON.stringify(draft) !== JSON.stringify(baselineDraft) ||
-        Object.values(pendingSecrets).some(Boolean)),
+      JSON.stringify(draft) !== JSON.stringify(baselineDraft),
     );
   return (
     <div className="w-full space-y-5">
@@ -740,7 +741,9 @@ export default function PayCoolsPage() {
               onChange={updateDraft}
               onSave={() => void saveEnvironment()}
               onClose={closeEdit}
-              onSecret={queueSecret}
+              onSecret={(field, value) =>
+                saveSecret(entry.environment, field, value)
+              }
             />
           ))}
         </div>
