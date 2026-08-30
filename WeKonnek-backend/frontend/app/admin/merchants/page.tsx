@@ -5,6 +5,12 @@ import { getToken } from '@/hooks/use-auth';
 import toast from 'react-hot-toast';
 import { Calculator, Check, ChevronLeft, ChevronRight, Copy, Eye, FileText, Mail, Pause, Phone, Play, Search, Store, UserPlus, WalletCards, X } from 'lucide-react';
 import { publicAssetUrl } from '@/lib/public-asset-url';
+import {
+  merchantDeactivationPayload,
+  merchantDisplayStatus,
+  merchantIsActive,
+  merchantReactivationPayload,
+} from '@/lib/merchant-activation';
 
 const API = '/api/backend';
 
@@ -15,6 +21,7 @@ interface Merchant {
   phone: string;
   subscription_tier: string;
   status: string;
+  is_active?: boolean;
   created_at: string;
   suspension_reason?: string;
   merchant_code?: string;
@@ -250,25 +257,13 @@ export default function MerchantManagementPage() {
     finally { setCommerceDomainSaving(false); }
   };
 
-  const confirmSuspend = async (merchantId: number, actionType: string, duration: number, reason: string) => {
+  const confirmSuspend = async (merchantId: number, actionType = 'suspend') => {
     try {
       const token = getToken();
-      const updates: any = {
-        status: actionType === 'deactivate' ? 'deactivated' : 'suspended',
-        suspension_reason: reason,
-      };
-
-      if (actionType === 'suspend' && duration) {
-        const suspendedUntil = new Date();
-        suspendedUntil.setDate(suspendedUntil.getDate() + duration);
-        updates.suspended_until = suspendedUntil.toISOString();
-        updates.suspension_duration = duration;
-      }
-
       const res = await fetch(`${API}/merchants/${merchantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(updates),
+        body: JSON.stringify(merchantDeactivationPayload()),
       });
       if (!res.ok) throw new Error('Failed to suspend merchant');
 
@@ -287,12 +282,7 @@ export default function MerchantManagementPage() {
       const res = await fetch(`${API}/merchants/${merchantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          status: 'active',
-          suspension_reason: null,
-          suspended_until: null,
-          suspension_duration: null,
-        }),
+        body: JSON.stringify(merchantReactivationPayload()),
       });
       if (!res.ok) throw new Error('Failed to reinstate merchant');
 
@@ -346,7 +336,7 @@ export default function MerchantManagementPage() {
   const summary = merchants.reduce((result, merchant) => {
     result.wallet += Number(merchant.wallet_balance || 0);
     result.fees += Number(merchant.total_subscription_fee ?? merchant.total_fee ?? 0);
-    if (merchant.status === 'active') result.active += 1;
+    if (merchantIsActive(merchant)) result.active += 1;
     else if (merchant.status === 'suspended') result.suspended += 1;
     else result.pending += 1;
     return result;
@@ -432,12 +422,12 @@ export default function MerchantManagementPage() {
                   <td className="px-4 py-5"><div className="flex min-w-[145px] items-center gap-2 font-mono text-sm text-slate-800">{merchant.merchant_code || 'N/A'}{merchant.merchant_code && <button type="button" onClick={() => copyStoreId(merchant.merchant_code!)} title="Copy Store ID" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">{copiedCode === merchant.merchant_code ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}</button>}</div>{copiedCode === merchant.merchant_code && <span className="text-xs font-medium text-emerald-600">Copied</span>}</td>
                   <td className="px-4 py-5 font-semibold text-slate-800">₱{Number(merchant.total_subscription_fee ?? merchant.total_fee ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-5"><p className="font-black text-[#e60012]">₱{Number(merchant.wallet_balance || 0).toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">Available balance</p></td>
-                  <td className="px-4 py-5"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold capitalize ${getStatusColor(merchant.status)}`}>{merchant.status}</span></td>
+                  <td className="px-4 py-5"><span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold capitalize ${getStatusColor(merchantDisplayStatus(merchant))}`}>{merchantDisplayStatus(merchant)}</span></td>
                   <td className="px-4 py-5"><div className="flex flex-nowrap gap-2">
                     <ActionButton label="View Merchant" className="border-blue-200 text-blue-600 hover:bg-blue-50" onClick={() => openDetails(merchant)} disabled={dialogLoading}><Eye size={19} /></ActionButton>
                     <ActionButton label="View Ledger" className="border-slate-200 text-slate-600 hover:bg-slate-100" onClick={() => openLedger(merchant)} disabled={dialogLoading}><Calculator size={19} /></ActionButton>
                     <ActionButton label="Manage Wallet" className="border-emerald-200 text-emerald-600 hover:bg-emerald-50" onClick={() => setCreditMerchant(merchant)}><WalletCards size={19} /></ActionButton>
-                    {merchant.status === 'active' ? <ActionButton label="Suspend Merchant" className="border-red-200 text-red-600 hover:bg-red-50" onClick={() => handleSuspend(merchant)}><Pause size={19} /></ActionButton> : <ActionButton label="Reactivate Merchant" className="border-amber-200 text-amber-600 hover:bg-amber-50" onClick={() => handleReinstate(merchant)}><Play size={19} /></ActionButton>}
+                    {merchantIsActive(merchant) ? <ActionButton label="Suspend Merchant" className="border-red-200 text-red-600 hover:bg-red-50" onClick={() => handleSuspend(merchant)}><Pause size={19} /></ActionButton> : <ActionButton label="Reactivate Merchant" className="border-amber-200 text-amber-600 hover:bg-amber-50" onClick={() => handleReinstate(merchant)}><Play size={19} /></ActionButton>}
                   </div></td>
                 </tr>
               ))}
