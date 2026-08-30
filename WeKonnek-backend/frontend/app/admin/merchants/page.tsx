@@ -54,6 +54,7 @@ interface MerchantDetails extends Merchant {
   subCategory?: { name?: string } | null;
   subscription_plan?: string;
   subscription_status?: string;
+  branches?: Array<{ id: number; name: string; isDefault: boolean; operatingHours?: Record<string, unknown> | null }>;
   fee_breakdown: {
     plan: { name: string; amount: number; billing_unit: string };
     add_ons: Array<{ id: string; name: string; amount: number; quantity?: number; subtotal?: number; billing_unit: string; amount_basis?: string | null }>;
@@ -536,6 +537,7 @@ function MerchantDetailsModal({ details, generatingRecoveryKey, commerceDomainSa
           {coordinatesAvailable && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Map location</p><a href={`https://www.openstreetmap.org/?mlat=${details.latitude}&mlon=${details.longitude}#map=17/${details.latitude}/${details.longitude}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-bold text-blue-700 underline">Open merchant location</a></div>}
           <ProfileField label="About the business" value={details.description} wide />
         </div></section>
+        <StoreOperatingHours branches={details.branches} />
         <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Commerce domain</h4><div className="max-w-md rounded-xl border border-slate-200 bg-slate-50 p-4"><label className="block text-sm font-bold text-slate-800" htmlFor="commerce-domain">Commerce Domain</label><select id="commerce-domain" value={selectedCommerceDomain ?? ''} disabled={commerceDomainSaving} onChange={event => setSelectedCommerceDomain((event.target.value || null) as Merchant['commerceDomain'])} className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"><option value="">Unclassified</option><option value="FOOD">Food</option><option value="NON_FOOD">Non-Food</option><option value="MIXED">Mixed</option></select><div className="mt-3 flex items-center gap-3"><button type="button" disabled={commerceDomainSaving || selectedCommerceDomain === (details.commerceDomain ?? null)} onClick={() => void onSaveCommerceDomain(selectedCommerceDomain)} className="rounded-lg bg-[#e60012] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{commerceDomainSaving ? 'Saving...' : selectedCommerceDomain === (details.commerceDomain ?? null) ? 'Saved' : 'Save'}</button>{selectedCommerceDomain !== (details.commerceDomain ?? null) && <span className="text-xs font-medium text-amber-700">Unsaved changes</span>}</div></div></section>
         <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Account access</h4><div className="grid gap-3 sm:grid-cols-2"><ProfileField label="Store ID / Merchant code" value={details.merchant_code} mono /><ProfileField label="Temporary password" value={details.temporary_password} mono /></div>
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold uppercase text-amber-700">Recovery key</p><p className="mt-1 break-all font-mono text-sm font-bold text-amber-900">{details.recovery_key || 'Generate only when the merchant needs password recovery.'}</p></div><div className="flex gap-2">{details.recovery_key && <button type="button" onClick={copyRecoveryKey} className="rounded-lg border border-amber-600 bg-white px-4 py-2 text-sm font-bold text-amber-700">Copy key</button>}<button onClick={onGenerateRecoveryKey} disabled={generatingRecoveryKey} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{generatingRecoveryKey ? 'Generating...' : details.recovery_key ? 'Rotate key' : 'Generate key'}</button></div></div></div>
@@ -544,6 +546,21 @@ function MerchantDetailsModal({ details, generatingRecoveryKey, commerceDomainSa
       </div>
     </div>
   </div>;
+}
+
+const WEEK_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+function formatOperatingHour(value: unknown) {
+  if (!value || typeof value !== 'object') return 'Not configured';
+  const hours = value as { open?: unknown; close?: unknown; isOpen?: unknown; closed?: unknown };
+  if (hours.isOpen === false || hours.closed === true) return 'Closed';
+  if (typeof hours.open === 'string' && typeof hours.close === 'string') return `${hours.open} – ${hours.close}`;
+  return 'Not configured';
+}
+
+function StoreOperatingHours({ branches }: { branches?: MerchantDetails['branches'] }) {
+  if (!branches?.length) return <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Store operating hours</h4><p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">No active store location or operating hours configured.</p></section>;
+  return <section><h4 className="mb-4 text-sm font-black uppercase text-blue-700">Store operating hours</h4><div className="space-y-4">{branches.map(branch => <div key={branch.id} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex items-center gap-2"><p className="font-bold text-slate-900">{branch.name}</p>{branch.isDefault && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">Default store</span>}</div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{WEEK_DAYS.map(day => <div key={day} className="rounded-lg bg-slate-50 px-3 py-2"><p className="text-xs font-bold capitalize text-slate-500">{day}</p><p className="mt-0.5 text-sm font-semibold text-slate-900">{formatOperatingHour(branch.operatingHours?.[day])}</p></div>)}</div></div>)}</div></section>;
 }
 
 function ProfileField({ label, value, wide, mono }: { label: string; value?: React.ReactNode; wide?: boolean; mono?: boolean }) {

@@ -6,8 +6,10 @@ import toast from 'react-hot-toast';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, loadZoneCityAreas, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
+import { publicAssetUrl } from '@/lib/public-asset-url';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 import dynamic from 'next/dynamic';
 import { useMap, useMapEvents } from 'react-leaflet';
 
@@ -358,6 +360,10 @@ export default function MerchantProfilePage() {
   };
 
   const handleFileUpload = async (file: File, type: 'banner' | 'logo') => {
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
+      return null;
+    }
     setUploadingBranding(true);
     try {
       const formData = new FormData();
@@ -370,7 +376,10 @@ export default function MerchantProfilePage() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error('Upload failed');
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message || (response.status === 413 ? 'Images must be 10 MB or smaller.' : 'Upload failed'));
+      }
 
       const data = await response.json();
       
@@ -655,6 +664,11 @@ export default function MerchantProfilePage() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+                        toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
+                        e.target.value = '';
+                        return;
+                      }
                       const reader = new FileReader();
                       reader.onloadend = () => {
                         setBannerPreview(reader.result as string);
@@ -667,7 +681,7 @@ export default function MerchantProfilePage() {
                 {bannerPreview ? (
                   <div className="relative flex aspect-[3/1] w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100">
                     <img
-                      src={bannerPreview}
+                      src={publicAssetUrl(bannerPreview) || bannerPreview}
                       alt="Banner preview"
                       className="h-full w-full object-contain"
                     />
@@ -713,6 +727,11 @@ export default function MerchantProfilePage() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+                        toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
+                        e.target.value = '';
+                        return;
+                      }
                       const reader = new FileReader();
                       reader.onloadend = () => {
                         setLogoPreview(reader.result as string);
@@ -725,7 +744,7 @@ export default function MerchantProfilePage() {
                 {logoPreview ? (
                   <div className="relative">
                     <img
-                      src={logoPreview}
+                      src={publicAssetUrl(logoPreview) || logoPreview}
                       alt="Logo preview"
                       className="w-32 h-32 object-cover rounded-lg mx-auto"
                     />

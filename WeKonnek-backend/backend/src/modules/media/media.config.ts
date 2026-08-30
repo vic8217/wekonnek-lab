@@ -24,12 +24,12 @@ export function createMediaConfig(config: ConfigService): MediaConfig {
     throw new Error('DigitalOcean Spaces media configuration is incomplete');
   }
   const cdn = config.get<string>('DO_SPACES_CDN_URL')?.trim().replace(/\/$/, '');
-  const maxMb = Number(config.get<string>('MEDIA_MAX_UPLOAD_MB') || 15);
+  const maxMb = Number(config.get<string>('MEDIA_MAX_UPLOAD_MB') || 10);
   return {
     region, bucket, endpoint, accessKey, secretKey,
     publicBaseUrl: cdn || `https://${bucket}.${region}.digitaloceanspaces.com`,
     environment: (config.get<string>('MEDIA_ENVIRONMENT') || 'lab').replace(/[^a-z0-9_-]/gi, '-').toLowerCase(),
-    maxUploadBytes: Math.max(1, Math.min(25, Number.isFinite(maxMb) ? maxMb : 15)) * 1024 * 1024,
+    maxUploadBytes: Math.max(1, Math.min(10, Number.isFinite(maxMb) ? maxMb : 10)) * 1024 * 1024,
     cleanupGraceDays: Number(config.get<string>('MEDIA_CLEANUP_GRACE_DAYS') || ((config.get<string>('MEDIA_ENVIRONMENT') || 'lab') === 'production' ? 30 : 7)),
   };
 }

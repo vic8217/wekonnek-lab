@@ -8,7 +8,8 @@ import type { MediaAssetResult } from './media.types';
 
 const uploadOptions = {
   storage: memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  // Keep Multer's early rejection aligned with the media policies and proxy.
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req: unknown, file: Express.Multer.File, callback: (error: Error | null, acceptFile: boolean) => void) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
     callback(allowed.includes(file.mimetype) ? null : new BadRequestException('Unsupported upload type'), allowed.includes(file.mimetype));

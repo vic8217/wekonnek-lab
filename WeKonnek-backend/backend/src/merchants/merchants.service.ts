@@ -20,8 +20,26 @@ import { moneyNumber } from '../modules/wallet/wallet-money';
  * storefront uses the typed camelCase client. We return both so every
  * consumer works without touching the frontend.
  */
+function legacyUploadReference(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  try {
+    const url = new URL(value);
+    // Old rows were written with the local development origin. Return the
+    // portable path instead; browser clients resolve it through their
+    // configured backend proxy and native clients can prepend their API URL.
+    if (!['localhost', '127.0.0.1', '::1'].includes(url.hostname)) return value;
+    return /^\/(?:api\/)?uploads\/.+/.test(url.pathname)
+      ? `${url.pathname}${url.search}`
+      : value;
+  } catch {
+    return value;
+  }
+}
+
 function serializeMerchant<T extends Record<string, any> | null>(merchant: T): T {
   if (!merchant) return merchant;
+  const logoUrl = legacyUploadReference(merchant.logoUrl);
+  const coverImageUrl = legacyUploadReference(merchant.coverImageUrl);
   return {
     ...merchant,
     merchant_code: merchant.merchantCode,
@@ -31,8 +49,10 @@ function serializeMerchant<T extends Record<string, any> | null>(merchant: T): T
     is_verified: merchant.isVerified,
     category_id: merchant.categoryId,
     sub_category_id: merchant.subCategoryId,
-    logo_url: merchant.logoUrl,
-    cover_image_url: merchant.coverImageUrl,
+    logoUrl,
+    coverImageUrl,
+    logo_url: logoUrl,
+    cover_image_url: coverImageUrl,
     zip_code: merchant.zipCode,
     council_district: merchant.councilDistrict,
     geographic_area: merchant.geographicArea,
@@ -258,7 +278,16 @@ export class MerchantsService {
   }
 
   async getAdminDetails(id: number) {
-    const merchant = await this.prisma.merchant.findUnique({ where: { id } });
+    const merchant = await this.prisma.merchant.findUnique({
+      where: { id },
+      include: {
+        branches: {
+          where: { isActive: true },
+          orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+          select: { id: true, name: true, isDefault: true, operatingHours: true },
+        },
+      },
+    });
     if (!merchant) throw new NotFoundException('Merchant not found');
     const application = merchant.merchantCode
       ? await this.prisma.merchantApplication.findUnique({ where: { merchantCode: merchant.merchantCode } })
