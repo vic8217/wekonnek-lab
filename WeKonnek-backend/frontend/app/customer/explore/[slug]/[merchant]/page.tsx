@@ -225,6 +225,10 @@ export default function MerchantMarketplacePage() {
   }, [activeTab, tabInteracted]);
   const productPrice = (product: Product) =>
     Number(product.discountPrice ?? product.sellingPrice ?? product.price ?? 0);
+  const hasSelectableVariants = (product: Product) =>
+    (product.variants || []).some(
+      (variant) => variant.isActive && variant.availabilityStatus !== "Out of Stock",
+    );
   const productImage = (product: Product, index = 0) =>
     publicAssetUrl(product.imageUrl) ||
     productPhotoSet[index % productPhotoSet.length];
@@ -513,7 +517,11 @@ export default function MerchantMarketplacePage() {
                     {product.name}
                   </h3>
                   <div className="mt-2 flex justify-between text-xs">
-                    <b>₱{productPrice(product).toFixed(2)}</b>
+                    {hasSelectableVariants(product) ? (
+                      <b className="text-red-600">Choose an option</b>
+                    ) : (
+                      <b>₱{productPrice(product).toFixed(2)}</b>
+                    )}
                     <span className="text-slate-500">
                       {product.availabilityStatus || "Available"}
                     </span>
@@ -526,7 +534,9 @@ export default function MerchantMarketplacePage() {
                     {!shopOpen
                       ? "Shop Closed"
                       : product.isAvailable
-                        ? "＋ Add to cart"
+                        ? hasSelectableVariants(product)
+                          ? "Choose option"
+                          : "＋ Add to cart"
                         : "Unavailable"}
                   </button>
                   {!!product.variants?.length && (

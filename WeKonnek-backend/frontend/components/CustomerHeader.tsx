@@ -58,6 +58,9 @@ export default function CustomerHeader({
 
   const fullName = authUser ? `${authUser.firstName || ''} ${authUser.lastName || ''}`.trim() || 'User' : 'User';
   const userType = authUser?.role || 'Customer';
+  // Merchant pages may always offer a cart shortcut, while every customer
+  // page must surface a pending cart as soon as it contains an item.
+  const shouldShowCart = showCart || hasCartItems;
 
   return (
     <>
@@ -83,7 +86,7 @@ export default function CustomerHeader({
             <div className="flex items-center">
               {authUser && <NotificationInboxBell />}
               {authUser && <Link href="/customer/profile" aria-label="Open customer profile" className="ml-1 flex size-9 items-center justify-center rounded-full bg-purple-500 text-sm font-bold text-white">{fullName.charAt(0).toUpperCase()}</Link>}
-              {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
+              {shouldShowCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View pending cart' : 'Browse shops'}>
                 <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
                 </svg>
@@ -155,6 +158,10 @@ export default function CustomerHeader({
             {authUser ? (
               <>
                 <NotificationInboxBell />
+                {shouldShowCart && <button onClick={goToCart} className="relative rounded-full p-2 hover:bg-gray-100" title={hasCartItems ? 'View pending cart' : 'Browse shops'} aria-label={hasCartItems ? `View pending cart, ${cartCount} item${cartCount === 1 ? '' : 's'}` : 'Browse shops'}>
+                  <svg className="size-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg>
+                  {cartCount > 0 && <span className="absolute right-0 top-0 flex size-[18px] items-center justify-center rounded-full border-2 border-white bg-[#DB0002] px-1 text-[10px] font-black text-white">{cartCount > 99 ? '99+' : cartCount}</span>}
+                </button>}
                 <div className="relative settings-button">
                   <button
                     onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
@@ -197,7 +204,7 @@ export default function CustomerHeader({
               </>
             ) : (
               <div className="flex items-center space-x-3">
-                {showCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View cart' : 'Browse shops'}>
+                {shouldShowCart && <button onClick={goToCart} className="relative p-2" title={hasCartItems ? 'View pending cart' : 'Browse shops'}>
                   <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
                   </svg>

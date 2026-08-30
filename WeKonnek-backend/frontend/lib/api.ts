@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getToken } from "@/hooks/use-auth";
+import { optimizeMerchantImage } from './merchant-image-optimizer';
 
 const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
@@ -702,41 +703,6 @@ export const staffPostsApi = {
 };
 
 // File Upload API
-const LARGE_BROWSER_IMAGE_BYTES = 4 * 1024 * 1024;
-
-async function normalizeLargeBrowserImage(file: File): Promise<File> {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size <= LARGE_BROWSER_IMAGE_BYTES) {
-    return file;
-  }
-
-  // Phone cameras commonly append motion-photo data to an otherwise valid JPEG.
-  // Re-encoding in the browser strips that payload and keeps large uploads below
-  // reverse-proxy limits without weakening the server's content validation.
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  try {
-    const longestSide = Math.max(bitmap.width, bitmap.height);
-    const scale = Math.min(1, 2400 / longestSide);
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('This browser cannot prepare the selected image.');
-    context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        value => value ? resolve(value) : reject(new Error('This browser could not prepare the selected image.')),
-        'image/jpeg',
-        0.86,
-      );
-    });
-    const baseName = file.name.replace(/\.[^.]+$/, '') || 'image';
-    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified });
-  } finally {
-    bitmap.close();
-  }
-}
 
 type UploadType = "establishment" | "authorized-person" | "document" | "review" | "product" | "menu" | "logo" | "banner" | "bazaar" | "property" | "profile" | "category";
 type UploadedMediaAsset = { url: string; mediaId: string };
@@ -744,7 +710,9 @@ type UploadedMediaAsset = { url: string; mediaId: string };
 async function uploadMediaAsset(file: File, type: UploadType, resourceId?: string): Promise<UploadedMediaAsset> {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
-    const uploadFile = type === 'document' ? file : await normalizeLargeBrowserImage(file);
+    const uploadFile = ['product', 'logo', 'banner'].includes(type)
+      ? await optimizeMerchantImage(file)
+      : file;
     const formData = new FormData();
     formData.append("file", uploadFile);
     formData.append("type", type);
@@ -752,7 +720,7 @@ async function uploadMediaAsset(file: File, type: UploadType, resourceId?: strin
     const response = await fetch('/api/backend/upload', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const proxyMessage = response.status === 413 ? 'The image is too large to upload. Please choose a smaller image.' : undefined;
+      const proxyMessage = response.status === 413 ? 'This image exceeds the 10 MB upload limit.' : undefined;
       throw new Error(body.message || proxyMessage || 'Unable to upload file');
     }
     return { url: body.url, mediaId: body.mediaId };

@@ -472,7 +472,9 @@ export class MerchantsService {
     ]);
 
     return {
-      data: merchants,
+      // Keep search results consistent with merchant profiles: historical
+      // localhost upload URLs must never reach public browser clients.
+      data: merchants.map(serializeMerchant),
       pagination: {
         page,
         limit,
@@ -561,7 +563,9 @@ export class MerchantsService {
     const total = countResult[0]?.total ?? 0;
 
     return {
-      data: merchants,
+      // Raw location-query results bypass Prisma's normal serialization.
+      // Normalize them before returning the public listing response.
+      data: merchants.map(serializeMerchant),
       pagination: {
         page,
         limit,

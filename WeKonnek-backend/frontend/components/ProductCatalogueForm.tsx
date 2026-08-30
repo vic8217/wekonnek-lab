@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { categoriesApi, CreateProductData, Merchant, merchantsApi, Product, productsApi, subCategoriesApi, uploadApi } from '@/lib/api';
 import { syncProductCategories } from '@/lib/product-categories';
+import { optimizeMerchantImage } from '@/lib/merchant-image-optimizer';
 
 const UNITS = ['Piece', 'Pack', 'Bottle', 'Can', 'Cup', 'Glass', 'Plate', 'Serving', 'Bowl', 'Kilogram', 'Gram', 'Liter', 'Milliliter', 'Box', 'Pair', 'Roll', 'Meter', 'Set'];
 const VARIANT_EXAMPLES = [
@@ -28,6 +29,8 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   const [categories, setCategories] = useState<Array<{ id: number; name: string }>>([]);
   const [subcategories, setSubcategories] = useState<Array<{ id: number; name: string }>>([]);
   const [preview, setPreview] = useState<string | null>(null);
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [optimizingProductImage, setOptimizingProductImage] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categoryDialog, setCategoryDialog] = useState<'category' | 'subcategory' | null>(null);
   const [categoryName, setCategoryName] = useState('');
@@ -83,6 +86,24 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
   const needsBasePrice = !allVariantsPriced;
   const update = (name: string, value: string | boolean) => setForm(current => ({ ...current, [name]: value }));
   const openCategoryDialog = (type: 'category' | 'subcategory') => { setCategoryName(''); setCategoryDialog(type); };
+  const selectProductImage = async (file?: File) => {
+    if (!file) return;
+    const immediatePreview = URL.createObjectURL(file);
+    setPreview(immediatePreview);
+    setOptimizingProductImage(true);
+    try {
+      const optimized = await optimizeMerchantImage(file);
+      setProductImageFile(optimized);
+      if (optimized !== file) setPreview(URL.createObjectURL(optimized));
+    } catch (error) {
+      setProductImageFile(null);
+      setPreview(null);
+      toast.error(error instanceof Error ? error.message : "We couldn't process this image. Please try another JPEG, PNG, or WebP file.");
+    } finally {
+      setOptimizingProductImage(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
   const createCategoryOption = async (event: React.FormEvent) => {
     event.preventDefault();
     const name = categoryName.trim();
@@ -116,8 +137,8 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
     let draftPreview = preview;
     try {
       let imageUrl = preview || undefined;
-      if (fileRef.current?.files?.[0]) {
-        imageUrl = await uploadApi.uploadFile(fileRef.current.files[0], 'product');
+      if (productImageFile) {
+        imageUrl = await uploadApi.uploadFile(productImageFile, 'product');
         draftPreview = imageUrl;
         setPreview(imageUrl);
       }
@@ -200,8 +221,8 @@ export default function ProductCatalogueForm({ productId }: { productId?: number
         <button type="button" onClick={() => setOptions(rows => [...rows, { name: '', values: '' }])} className="rounded-lg border border-red-600 px-4 py-2 text-sm font-semibold text-red-600">Add Option</button>
         <div className="border-t border-gray-200 pt-4"><h3 className="mb-3 font-bold text-gray-900">Variants</h3>{variants.map((variant, index) => <div key={index} className="mb-3 space-y-3 rounded-lg border border-gray-200 p-4"><div className="grid gap-3 md:grid-cols-5"><input required placeholder="Variant SKU" value={variant.sku} onChange={e => setVariants(rows => rows.map((row, i) => i === index ? { ...row, sku: e.target.value } : row))} className="input" /><input placeholder="Barcode" value={variant.barcode} onChange={e => setVariants(rows => rows.map((row, i) => i === index ? { ...row, barcode: e.target.value } : row))} className="input" /><input type="number" min="0" step="0.01" placeholder="Price override" value={variant.price} onChange={e => setVariants(rows => rows.map((row, i) => i === index ? { ...row, price: e.target.value } : row))} className="input" /><input type="url" placeholder="Image URL (optional)" value={variant.imageUrl} onChange={e => setVariants(rows => rows.map((row, i) => i === index ? { ...row, imageUrl: e.target.value } : row))} className="input" /><button type="button" onClick={() => setVariants(rows => rows.filter((_, i) => i !== index))} className="font-semibold text-red-600">Remove</button></div><div className="grid gap-3 md:grid-cols-3">{options.filter(option => option.name).map(option => <select key={option.name} value={variant.optionValues[option.name] || ''} onChange={e => setVariants(rows => rows.map((row, i) => i === index ? { ...row, optionValues: { ...row.optionValues, [option.name]: e.target.value } } : row))} className="input"><option value="">{option.name}</option>{optionValues(option).map(value => <option key={value}>{value}</option>)}</select>)}</div><Toggle label="Active" checked={variant.isActive} set={value => setVariants(rows => rows.map((row, i) => i === index ? { ...row, isActive: value } : row))} /></div>)}<button type="button" onClick={() => setVariants(rows => [...rows, { sku: '', barcode: '', price: '', imageUrl: '', isActive: true, optionValues: {} }])} className="rounded-lg border border-red-600 px-4 py-2 text-sm font-semibold text-red-600">Add Variant</button></div>
       </div></Section>}
-      <Section title="Product Image"><div onClick={() => fileRef.current?.click()} className="cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 text-center"><input ref={fileRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) setPreview(URL.createObjectURL(file)); }} />{preview ? <div className="relative mx-auto h-48 max-w-md"><Image src={preview} alt="Product preview" fill unoptimized className="object-contain" /></div> : <p className="text-gray-500">Click to upload JPG or PNG</p>}</div>{basePath === "/merchant" && <div className="mt-3 flex justify-end"><button type="button" onClick={() => router.push(`${basePath}/ai-product-studio${productId ? `?productId=${productId}` : ""}`)} className="rounded-lg border border-purple-600 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50">Enhance with AI</button></div>}</Section>
-      <div className="flex justify-end gap-3"><button type="button" onClick={() => router.back()} className="rounded-lg border border-gray-300 px-5 py-3 font-semibold text-gray-700">Cancel</button><button disabled={saving} className="rounded-lg bg-red-600 px-6 py-3 font-semibold text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save Product'}</button></div>
+      <Section title="Product Image"><div onClick={() => !optimizingProductImage && fileRef.current?.click()} className="cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 text-center"><input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => void selectProductImage(event.target.files?.[0])} />{preview ? <div className="relative mx-auto h-48 max-w-md"><Image src={preview} alt="Product preview" fill unoptimized className="object-contain" /></div> : <p className="text-gray-500">Click to upload JPEG, PNG, or WebP</p>}{optimizingProductImage && <p role="status" className="mt-3 text-sm font-medium text-gray-600">Optimizing image...</p>}</div>{basePath === "/merchant" && <div className="mt-3 flex justify-end"><button type="button" onClick={() => router.push(`${basePath}/ai-product-studio${productId ? `?productId=${productId}` : ""}`)} className="rounded-lg border border-purple-600 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50">Enhance with AI</button></div>}</Section>
+      <div className="flex justify-end gap-3"><button type="button" onClick={() => router.back()} className="rounded-lg border border-gray-300 px-5 py-3 font-semibold text-gray-700">Cancel</button><button disabled={saving || optimizingProductImage} className="rounded-lg bg-red-600 px-6 py-3 font-semibold text-white disabled:opacity-50">{saving ? 'Saving...' : optimizingProductImage ? 'Optimizing image...' : 'Save Product'}</button></div>
     </form>
     {categoryDialog && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="category-dialog-title"><form onSubmit={createCategoryOption} className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"><h2 id="category-dialog-title" className="text-xl font-bold text-gray-900">Create {categoryDialog === 'category' ? 'Category' : 'Subcategory'}</h2><p className="mt-1 text-sm text-gray-500">This option belongs to your merchant and will be selected after creation.</p><label className="mt-5 block"><span className="mb-2 block text-sm font-medium text-gray-700">Name <span className="text-red-600">*</span></span><input autoFocus required maxLength={255} value={categoryName} onChange={e => setCategoryName(e.target.value)} className="input" placeholder={categoryDialog === 'category' ? 'e.g. Specialty Drinks' : 'e.g. Fruit Teas'} /></label><div className="mt-6 flex justify-end gap-3"><button type="button" disabled={savingCategory} onClick={() => setCategoryDialog(null)} className="rounded-lg border border-gray-300 px-4 py-2 font-semibold text-gray-700">Cancel</button><button disabled={savingCategory || !categoryName.trim()} className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{savingCategory ? 'Creating...' : 'Create and select'}</button></div></form></div>}
     <style jsx global>{`.input{width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.7rem .85rem;outline:none}.input:focus{border-color:#dc2626;box-shadow:0 0 0 2px #fee2e2}.input:disabled{background:#f3f4f6}`}</style></div>;

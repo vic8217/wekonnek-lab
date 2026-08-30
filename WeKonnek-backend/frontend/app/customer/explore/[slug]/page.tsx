@@ -36,6 +36,7 @@ import {
   type MerchantCategory,
 } from "@/lib/api";
 import BazaarSellerPromo from "@/components/BazaarSellerPromo";
+import { publicAssetUrl } from "@/lib/public-asset-url";
 
 const configs: Record<
   string,
@@ -394,8 +395,8 @@ export default function CategoryMarketplacePage() {
       distance: merchant.city || merchant.address || "Local",
       offer: `${10 + (index % 4) * 5}% OFF`,
       image:
-        merchant.coverImageUrl ||
-        merchant.logoUrl ||
+        publicAssetUrl(merchant.coverImageUrl) ||
+        publicAssetUrl(merchant.logoUrl) ||
         photos[index % photos.length],
     }));
   }, [merchants, sort, specialty]);

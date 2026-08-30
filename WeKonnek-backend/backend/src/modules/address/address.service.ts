@@ -18,13 +18,17 @@ export class AddressService {
   }
 
   async create(data: Prisma.AddressUncheckedCreateInput): Promise<Address> {
-    if (data.isDefault) {
+    const hasDefault = await this.prisma.address.count({
+      where: { userId: data.userId, isDefault: true },
+    });
+    const isDefault = Boolean(data.isDefault) || hasDefault === 0;
+    if (isDefault) {
       await this.prisma.address.updateMany({
         where: { userId: data.userId },
         data: { isDefault: false },
       });
     }
-    return this.prisma.address.create({ data });
+    return this.prisma.address.create({ data: { ...data, isDefault } });
   }
 
   async update(

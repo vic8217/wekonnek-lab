@@ -16,6 +16,8 @@ interface Order {
   total_amount: number;
   items: string[];
   created_at: string;
+  payment_method?: string;
+  payment_status?: string;
 }
 
 type OrderFilter = 'open' | 'pending' | 'completed';
@@ -64,6 +66,8 @@ export default function CustomerOrdersPage() {
         total_amount: order.total_amount || order.totalAmount || 0,
         items: (order.order_items || order.orderItems || []).map((item: any) => `${item.quantity}x ${item.product_name || item.productName}`),
         created_at: order.created_at || order.createdAt,
+        payment_method: order.payment_method || order.paymentMethod,
+        payment_status: order.payment_status || order.paymentStatus,
       }));
 
       setAllOrders(transformed);
@@ -255,7 +259,7 @@ export default function CustomerOrdersPage() {
 
                   {/* Footer */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50/50">
-                    <span className="text-[11px] text-gray-400 font-mono">{order.order_code}</span>
+                    <div><span className="text-[11px] text-gray-400 font-mono">{order.order_code}</span>{order.payment_method === 'qrph' && order.payment_status !== 'paid' && order.status !== 'cancelled' && <p className="mt-1 text-[10px] font-bold text-amber-700">Payment: Awaiting Payment</p>}</div>
                     {order.total_amount > 0 && (
                       <span className="text-sm font-bold text-gray-900">₱{Number(order.total_amount).toFixed(2)}</span>
                     )}
@@ -409,6 +413,7 @@ export default function CustomerOrdersPage() {
                         </>
                       )}
                     </div>
+                    {order.payment_method === 'qrph' && order.payment_status !== 'paid' && order.status !== 'cancelled' && <p className="mb-3 text-xs font-bold text-amber-700">Payment Status: Awaiting Payment</p>}
                     <p className="text-sm text-gray-600">{order.items.join(' • ')}</p>
                   </Link>
                 ))

@@ -64,7 +64,7 @@ export default function PayWithQrph({
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-lg font-black text-slate-950">Pay with QRPH</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Scan the QR code using your supported banking or e-wallet app.
+        Complete payment using your supported banking or e-wallet app.
       </p>
       <p className="mt-4 text-sm font-bold text-slate-800">{heading}</p>
       {status === 'CREATING' && (
@@ -74,8 +74,14 @@ export default function PayWithQrph({
         <img
           src={payment.qrImageDataUrl}
           alt="QRPH payment QR code"
-          className="mx-auto mt-4 size-56 rounded-xl border bg-white p-2"
+          className="mx-auto mt-4 size-56 max-w-full rounded-xl border bg-white p-2"
         />
+      )}
+      {payment?.qrImageDataUrl && status === 'PENDING' && (
+        <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-center text-sm text-slate-700">
+          <p className="font-bold text-slate-900">Another device</p>
+          <p className="mt-0.5">Using another phone? Scan the QR code above.</p>
+        </div>
       )}
       {payment && (
         <div className="mt-4 space-y-1 text-sm text-slate-700">
@@ -93,14 +99,21 @@ export default function PayWithQrph({
         </div>
       )}
       {payment?.qrLink && status === 'PENDING' && (
-        <a
-          href={payment.qrLink}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-4 block w-full rounded-xl border border-slate-300 py-2.5 text-center text-sm font-bold text-slate-800"
-        >
-          Open payment page
-        </a>
+        <div className="mt-4 rounded-xl border border-slate-200 p-3">
+          <p className="text-sm font-bold text-slate-900">Same device</p>
+          <a
+            href={payment.qrLink}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Pay on this phone using PayCools"
+            className="mt-2 block w-full rounded-xl bg-[#DB0002] py-2.5 text-center text-sm font-black text-white transition hover:bg-[#B80002] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DB0002]"
+          >
+            Pay on this phone
+          </a>
+          <p className="mt-2 text-xs text-slate-600">
+            Use this if your banking or e-wallet app is on this device.
+          </p>
+        </div>
       )}
       {status === 'PENDING' && (
         <p className="mt-3 text-xs text-slate-500">

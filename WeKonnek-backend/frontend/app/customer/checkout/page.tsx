@@ -38,6 +38,15 @@ interface BarangayOption {
   city: string;
 }
 
+interface SavedAddress {
+  id: string;
+  label: string;
+  address: string;
+  details?: string | null;
+  isDefault?: boolean;
+  is_default?: boolean;
+}
+
 function CheckoutAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) {
   const { refreshAuth } = useAuth();
   const [mode, setMode] = useState<'signin' | 'phone'>('signin');
@@ -313,6 +322,8 @@ export default function CheckoutPage() {
     tableParam ? 'dine_in' : 'delivery',
   );
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState('');
   const [customerBarangay, setCustomerBarangay] = useState('');
   const [barangaySearch, setBarangaySearch] = useState('');
   const [showBarangayList, setShowBarangayList] = useState(false);
@@ -370,6 +381,20 @@ export default function CheckoutPage() {
     setBarangayOptions(data);
   };
 
+  const applySavedAddress = (address: SavedAddress) => {
+    let details: Record<string, string> = {};
+    try { details = JSON.parse(address.details || '{}'); } catch { /* Legacy addresses have only the full address text. */ }
+    setSelectedAddressId(address.id);
+    setDeliveryAddress(details.addressLine || address.address || '');
+    setCustomerBarangay(details.barangay || '');
+    setBarangaySearch(details.barangay || '');
+  };
+
+  const addDeliveryAddress = () => {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    router.push(`/customer/address-picker?returnTo=${encodeURIComponent(returnTo)}`);
+  };
+
   const loadCheckoutData = async () => {
     try {
       if (merchantId) {
@@ -389,11 +414,19 @@ export default function CheckoutPage() {
       const token = await getToken();
       if (token) {
         try {
-          const res = await fetch(`/api/backend/users/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const profile = await res.json();
+          const headers = { Authorization: `Bearer ${token}` };
+          const [addressResponse, profileResponse] = await Promise.all([
+            fetch(`/api/backend/addresses`, { headers }),
+            fetch(`/api/backend/users/me`, { headers }),
+          ]);
+          const addresses = addressResponse.ok ? await addressResponse.json() : [];
+          const rows = Array.isArray(addresses) ? addresses : addresses.data || [];
+          setSavedAddresses(rows);
+          const preferred = rows.find((address: SavedAddress) => address.isDefault || address.is_default) || rows[0];
+          if (preferred) {
+            applySavedAddress(preferred);
+          } else if (profileResponse.ok) {
+            const profile = await profileResponse.json();
             if (profile?.address) setDeliveryAddress(profile.address);
           }
         } catch { /* non-critical */ }
@@ -759,7 +792,12 @@ export default function CheckoutPage() {
           {/* Delivery Address + Barangay */}
           {orderType === 'delivery' && (
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
-              <h2 className="text-sm font-bold text-gray-900">Delivery Address</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold text-gray-900">Delivery Address</h2>
+                <button type="button" onClick={addDeliveryAddress} className="text-xs font-bold text-[#DB0002] hover:underline">+ Add address</button>
+              </div>
+              {savedAddresses.length > 0 && <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">Saved address<select value={selectedAddressId} onChange={event => { const address = savedAddresses.find(item => item.id === event.target.value); if (address) applySavedAddress(address); }} className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case text-gray-900"><option value="">Select a saved address</option>{savedAddresses.map(address => <option key={address.id} value={address.id}>{address.label || 'Address'}{address.isDefault || address.is_default ? ' (Default)' : ''}</option>)}</select></label>}
+              {savedAddresses.length === 0 && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">No saved delivery address yet. Add one to reuse it for future orders.</p>}
 
               {/* Barangay Selector */}
               <div className="relative">
@@ -1029,7 +1067,12 @@ export default function CheckoutPage() {
 
             {orderType === 'delivery' && (
               <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 space-y-4">
-                <h2 className="font-bold text-gray-900">Delivery Address</h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="font-bold text-gray-900">Delivery Address</h2>
+                  <button type="button" onClick={addDeliveryAddress} className="text-sm font-bold text-[#DB0002] hover:underline">+ Add address</button>
+                </div>
+                {savedAddresses.length > 0 && <label className="block text-sm font-medium text-gray-700">Saved address<select value={selectedAddressId} onChange={event => { const address = savedAddresses.find(item => item.id === event.target.value); if (address) applySavedAddress(address); }} className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-900"><option value="">Select a saved address</option>{savedAddresses.map(address => <option key={address.id} value={address.id}>{address.label || 'Address'}{address.isDefault || address.is_default ? ' (Default)' : ''}</option>)}</select></label>}
+                {savedAddresses.length === 0 && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">No saved delivery address yet. Add one to reuse it for future orders.</p>}
 
                 {/* Barangay Selector */}
                 <div className="relative">

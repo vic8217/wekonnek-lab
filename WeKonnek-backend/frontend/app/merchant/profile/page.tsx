@@ -7,9 +7,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, loadZoneCityAreas, zoneRegions, type ZoneCityOption } from '@/lib/zone-address';
 import { publicAssetUrl } from '@/lib/public-asset-url';
+import { MAX_MERCHANT_IMAGE_BYTES, optimizeMerchantImage } from '@/lib/merchant-image-optimizer';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 import dynamic from 'next/dynamic';
 import { useMap, useMapEvents } from 'react-leaflet';
 
@@ -177,6 +177,7 @@ export default function MerchantProfilePage() {
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [uploadingBranding, setUploadingBranding] = useState(false);
+  const [optimizingBranding, setOptimizingBranding] = useState<'banner' | 'logo' | null>(null);
 
   useEffect(() => {
     fetchMerchantProfile();
@@ -360,14 +361,13 @@ export default function MerchantProfilePage() {
   };
 
   const handleFileUpload = async (file: File, type: 'banner' | 'logo') => {
-    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-      toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
-      return null;
-    }
-    setUploadingBranding(true);
     try {
+      setOptimizingBranding(type);
+      const optimizedFile = await optimizeMerchantImage(file);
+      setOptimizingBranding(null);
+      setUploadingBranding(true);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', optimizedFile);
       formData.append('type', type);
 
       const response = await fetch('/api/backend/upload', {
@@ -394,9 +394,10 @@ export default function MerchantProfilePage() {
       console.error('Error uploading file:', error);
       if (type === 'banner') setBannerPreview(null);
       else setLogoPreview(null);
-      toast.error('Failed to upload file. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to upload file. Please try again.');
       return null;
     } finally {
+      setOptimizingBranding(null);
       setUploadingBranding(false);
     }
   };
@@ -659,13 +660,13 @@ export default function MerchantProfilePage() {
                 <input
                   ref={bannerInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-                        toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
+                      if (file.size > MAX_MERCHANT_IMAGE_BYTES) {
+                        toast.error('This image exceeds the 10 MB upload limit.');
                         e.target.value = '';
                         return;
                       }
@@ -678,6 +679,7 @@ export default function MerchantProfilePage() {
                     }
                   }}
                 />
+                {optimizingBranding === 'banner' && <p role="status" className="mb-3 text-sm font-medium text-gray-600">Optimizing image...</p>}
                 {bannerPreview ? (
                   <div className="relative flex aspect-[3/1] w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100">
                     <img
@@ -722,13 +724,13 @@ export default function MerchantProfilePage() {
                 <input
                   ref={logoInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-                        toast.error('Images must be 10 MB or smaller. Please choose a smaller image.');
+                      if (file.size > MAX_MERCHANT_IMAGE_BYTES) {
+                        toast.error('This image exceeds the 10 MB upload limit.');
                         e.target.value = '';
                         return;
                       }
@@ -741,6 +743,7 @@ export default function MerchantProfilePage() {
                     }
                   }}
                 />
+                {optimizingBranding === 'logo' && <p role="status" className="mb-3 text-sm font-medium text-gray-600">Optimizing image...</p>}
                 {logoPreview ? (
                   <div className="relative">
                     <img

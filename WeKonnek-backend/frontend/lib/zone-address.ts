@@ -12,24 +12,34 @@ const canonicalRegionName = (value?: string | null) => {
   return normalized;
 };
 
+// Coverage imports created before region names were added may contain only a
+// region code. Keep those addresses editable instead of leaving a required
+// region select with no matching option.
+export const zoneRegionName = (city: ZoneCityOption) =>
+  city.regionName ||
+  (String(city.regionCode || '').toUpperCase() === 'NCR'
+    ? 'National Capital Region (NCR)'
+    : city.regionCode || '');
+
 export const zoneRegions = (cities: ZoneCityOption[]) => {
   const regions = new Map<string, string>();
   cities.forEach(city => {
-    if (!city.regionName) return;
-    const identity = city.regionCode || canonicalRegionName(city.regionName);
+    const regionName = zoneRegionName(city);
+    if (!regionName) return;
+    const identity = city.regionCode || canonicalRegionName(regionName);
     if (!identity || regions.has(identity)) return;
     regions.set(
       identity,
-      canonicalRegionName(city.regionName) === 'national capital region'
+      canonicalRegionName(regionName) === 'national capital region'
         ? 'National Capital Region (NCR)'
-        : city.regionName,
+        : regionName,
     );
   });
   return [...regions.values()];
 };
 
 export const citiesInZoneRegion = (cities: ZoneCityOption[], region?: string | null) =>
-  region ? cities.filter(city => canonicalRegionName(city.regionName) === canonicalRegionName(region)) : [];
+  region ? cities.filter(city => canonicalRegionName(zoneRegionName(city)) === canonicalRegionName(region)) : [];
 
 export const zoneProvinces = (cities: ZoneCityOption[], region?: string | null) =>
   Array.from(new Set(citiesInZoneRegion(cities, region).map(city => city.provinceName || 'NCR (no province)'))).sort();

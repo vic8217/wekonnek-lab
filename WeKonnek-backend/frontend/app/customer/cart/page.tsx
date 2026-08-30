@@ -12,6 +12,7 @@ import {
   type CartItem,
 } from '@/lib/cart';
 import { merchantsApi } from '@/lib/api';
+import { getToken } from '@/hooks/use-auth';
 import { publicAssetUrl } from '@/lib/public-asset-url';
 
 interface MerchantCart {
@@ -23,10 +24,33 @@ interface MerchantCart {
   subtotal: number;
 }
 
+type PendingQrphPayment = {
+  orderId: number;
+  orderCode: string;
+  merchantName: string;
+  amount: number;
+  status: 'PENDING' | 'FAILED' | 'EXPIRED';
+};
+
+type OrderForRecovery = {
+  id: number;
+  order_code?: string;
+  orderCode?: string;
+  payment_method?: string;
+  paymentMethod?: string;
+  payment_status?: string;
+  paymentStatus?: string;
+  status?: string;
+  merchants?: { name?: string };
+  merchant?: { name?: string };
+};
+
 export default function CartPage() {
   const router = useRouter();
   const [carts, setCarts] = useState<MerchantCart[]>([]);
+  const [pendingPayments, setPendingPayments] = useState<PendingQrphPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
 
   const loadCarts = useCallback(async () => {
     const ids = getActiveCartMerchantIds();
@@ -58,10 +82,66 @@ export default function CartPage() {
     setLoading(false);
   }, []);
 
+  const loadPendingPayments = useCallback(async () => {
+    const token = getToken();
+    if (!token) return setPendingPayments([]);
+    try {
+      const ordersResponse = await fetch('/api/backend/orders/my-orders', {
+        headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+      });
+      if (!ordersResponse.ok) throw new Error('Unable to load order recovery');
+      const rows = await ordersResponse.json() as OrderForRecovery[];
+      const candidates = (Array.isArray(rows) ? rows : []).filter(order => {
+        const method = order.payment_method || order.paymentMethod;
+        const paymentStatus = (order.payment_status || order.paymentStatus || '').toLowerCase();
+        return method === 'qrph' && paymentStatus !== 'paid' && order.status !== 'cancelled';
+      });
+      const recovered = await Promise.all(candidates.map(async order => {
+        const response = await fetch(`/api/backend/orders/${order.id}/paycools-payment`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+        });
+        if (!response.ok) return null;
+        const payment = await response.json() as { amount: number; status: PendingQrphPayment['status'] };
+        if (!['PENDING', 'FAILED', 'EXPIRED'].includes(payment.status)) return null;
+        return {
+          orderId: order.id,
+          orderCode: order.order_code || order.orderCode || `#${order.id}`,
+          merchantName: order.merchants?.name || order.merchant?.name || 'Merchant',
+          amount: Number(payment.amount),
+          status: payment.status,
+        };
+      }));
+      setPendingPayments(recovered.filter((payment): payment is PendingQrphPayment => payment !== null));
+    } catch {
+      // Recovery is additive; retain the normal cart experience if it cannot load.
+      setPendingPayments([]);
+    }
+  }, []);
+
   useEffect(() => {
     loadCarts();
+    void loadPendingPayments();
     return onCartChange(() => loadCarts());
-  }, [loadCarts]);
+  }, [loadCarts, loadPendingPayments]);
+
+  const cancelPendingPayment = async (orderId: number) => {
+    if (!window.confirm('Cancel this QRPH transaction? Your order will remain in My Orders.')) return;
+    const token = getToken();
+    if (!token) return router.push('/auth/login');
+    setCancellingOrderId(orderId);
+    try {
+      const response = await fetch(`/api/backend/orders/${orderId}/paycools-payment/cancel`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || 'Unable to cancel this payment');
+      await loadPendingPayments();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to cancel this payment');
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
 
   const changeQty = (
     merchantId: string,
@@ -110,6 +190,19 @@ export default function CartPage() {
       </div>
 
       {carts.length === 0 ? (
+        <div className="space-y-5">
+          {pendingPayments.map(payment => (
+            <section key={payment.orderId} className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+              <p className="text-sm font-black text-amber-900">{payment.status === 'PENDING' ? 'Payment pending' : payment.status === 'EXPIRED' ? 'Payment expired' : 'Payment needs attention'}</p>
+              <h2 className="mt-1 text-lg font-black text-slate-950">{payment.merchantName}</h2>
+              <div className="mt-3 space-y-1 text-sm text-slate-700"><p>Order: <b>{payment.orderCode}</b></p><p>Amount: <b>₱{payment.amount.toFixed(2)}</b></p><p>Payment method: <b>QRPH</b></p><p>Status: <b>{payment.status === 'PENDING' ? 'Awaiting Payment' : payment.status === 'EXPIRED' ? 'Expired' : 'Retry available on order details'}</b></p></div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <Link href={`/customer/orders/${payment.orderId}`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#DB0002] px-4 text-sm font-bold text-white">{payment.status === 'PENDING' ? 'Resume Payment' : 'View Payment'}</Link>
+                <Link href={`/customer/orders/${payment.orderId}`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800">View Order</Link>
+                {payment.status === 'PENDING' && <button type="button" disabled={cancellingOrderId === payment.orderId} onClick={() => void cancelPendingPayment(payment.orderId)} className="min-h-11 rounded-xl border border-red-300 bg-white px-4 text-sm font-bold text-red-700 disabled:opacity-60">{cancellingOrderId === payment.orderId ? 'Cancelling...' : 'Cancel Transaction'}</button>}
+              </div>
+            </section>
+          ))}
         <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
           <div className="text-5xl mb-3">🛒</div>
           <h2 className="text-lg font-bold text-gray-900 mb-1">Your cart is empty</h2>
@@ -120,7 +213,7 @@ export default function CartPage() {
           >
             Browse Shops
           </Link>
-        </div>
+        </div></div>
       ) : (
         <div className="space-y-5">
           {carts.length > 1 && (

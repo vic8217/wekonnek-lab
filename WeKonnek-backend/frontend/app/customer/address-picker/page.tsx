@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { DragEndEvent } from "leaflet";
 import { getToken } from "@/hooks/use-auth";
 import toast from "react-hot-toast";
-import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
+import { citiesInZoneRegion, findZoneArea, findZoneCity, findZoneDistrict, loadAdminZoneAddresses, zoneRegionName, zoneRegions, type ZoneCityOption } from "@/lib/zone-address";
 
 const LocationMap = dynamic(() => import("@/components/LocationMap"), {
   ssr: false,
@@ -28,6 +28,7 @@ export default function AddressPickerPage() {
   const [form, setForm] = useState(EMPTY);
   const [location, setLocation] = useState<[number, number] | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState('/customer/addresses');
   const [saving, setSaving] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -63,13 +64,15 @@ export default function AddressPickerPage() {
     const district = findZoneDistrict(city, form.district);
     const area = findZoneArea(district, form.barangay);
     setForm(current => {
-      const next = { ...current, region: city.regionName || current.region, city: city.name, province: city.provinceName || current.province || 'Metro Manila', district: district?.name || current.district, barangay: area?.name || current.barangay };
+      const next = { ...current, region: zoneRegionName(city) || current.region, city: city.name, province: city.provinceName || current.province || 'Metro Manila', district: district?.name || current.district, barangay: area?.name || current.barangay };
       return JSON.stringify(next) === JSON.stringify(current) ? current : next;
     });
   }, [form.barangay, form.city, form.district, zoneCities]);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("edit");
+    const requestedReturnTo = new URLSearchParams(window.location.search).get("returnTo");
+    if (requestedReturnTo?.startsWith('/customer/')) setReturnTo(requestedReturnTo);
     setEditId(id);
     if (!id) {
       setLoading(false);
@@ -187,7 +190,7 @@ export default function AddressPickerPage() {
         throw new Error(body.message || "Unable to save address");
       }
       toast.success(editId ? "Address updated" : "Address saved");
-      router.push("/customer/addresses");
+      router.push(returnTo);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to save address",
