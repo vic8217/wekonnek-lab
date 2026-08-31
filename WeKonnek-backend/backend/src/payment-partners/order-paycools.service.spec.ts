@@ -48,6 +48,7 @@ function createStore(
     paymentMethod?: string;
     userId?: string;
     totalAmount?: number;
+    emptyOrder?: boolean;
     paymentTxnStatus?: PlatformPaymentStatus;
     operational?: boolean;
     existingActive?: boolean;
@@ -68,6 +69,7 @@ function createStore(
       id: 9,
       commerceDomain: initial.commerceDomain ?? CommerceDomain.FOOD,
     },
+    orderItems: initial.emptyOrder ? [] : [{ id: 1 }],
   };
   const payment = {
     id: PAYMENT_ID,
@@ -385,6 +387,27 @@ describe('OrderPayCoolsService', () => {
         USER_ID,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects zero-total and empty orders before calling PayCools', async () => {
+    const zero = createStore({ totalAmount: 0 });
+    await expect(zero.service.createForOrder(88, USER_ID)).rejects.toBeInstanceOf(BadRequestException);
+    expect(zero.paycools.createPayment).not.toHaveBeenCalled();
+
+    const empty = createStore({ emptyOrder: true });
+    await expect(empty.service.createForOrder(88, USER_ID)).rejects.toBeInstanceOf(BadRequestException);
+    expect(empty.paycools.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('records QR generation failure against the same canonical payment', async () => {
+    const { service, paycools, payment, lifecycleEvents, platformPayments } = createStore();
+    paycools.createPayment.mockRejectedValue(new Error('provider unavailable'));
+    await expect(service.createForOrder(88, USER_ID)).rejects.toThrow('provider unavailable');
+    expect(payment.status).toBe(PlatformPaymentStatus.FAILED);
+    expect(platformPayments.createPending).toHaveBeenCalledTimes(1);
+    expect(lifecycleEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: 'QR_GENERATION_FAILED', resultingStatus: PlatformPaymentStatus.FAILED }),
+    ]));
   });
 
   it('rejects a second active PayCools initiation for the same order', async () => {

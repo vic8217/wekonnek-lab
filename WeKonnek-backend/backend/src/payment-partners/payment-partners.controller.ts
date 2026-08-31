@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../modules/auth/guards/roles.guard';
 import { PaymentPartnerConfigService } from './payment-partner-config.service';
 import { PaymentLifecycleService } from './payment-lifecycle.service';
+import { PlatformPaymentService } from './platform-payment.service';
 
 @Controller('admin/payments/partners/paycools')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -21,6 +22,7 @@ export class PaymentPartnersController {
   constructor(
     private service: PaymentPartnerConfigService,
     private lifecycle: PaymentLifecycleService,
+    private payments: PlatformPaymentService,
   ) {}
 
   @Get() @Roles(UserRole.admin, UserRole.staff) get() {
@@ -36,6 +38,16 @@ export class PaymentPartnersController {
       orderId: orderId ? Number(orderId) : undefined,
       paymentId,
     });
+  }
+  @Get('transactions')
+  @Roles(UserRole.admin)
+  transactions(@Query() query: Record<string, string | undefined>) {
+    return this.payments.adminTransactions(query);
+  }
+  @Get('transactions/:id')
+  @Roles(UserRole.admin)
+  transaction(@Param('id') id: string) {
+    return this.payments.adminTransaction(id);
   }
   @Get('environments/:environment')
   @Roles(UserRole.admin, UserRole.staff)

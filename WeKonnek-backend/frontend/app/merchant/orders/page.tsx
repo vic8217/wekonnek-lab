@@ -37,6 +37,7 @@ interface Order {
   delivery_zone_name?: string;
   customer_barangay?: string;
   delivery_fee?: number;
+  pickup_ready_minutes?: number | null;
   created_at: string;
   time_ago: string;
   items: OrderItem[];
@@ -1075,7 +1076,13 @@ function OrderStatusActions({
   ) => void;
 }) {
   if (!onStatusChange) return null;
-  const next = ORDER_NEXT_STATUS[order.status] || [];
+  const next = (ORDER_NEXT_STATUS[order.status] || []).flatMap((action) => {
+    if (order.order_type === 'pickup' && action.value === 'out_for_delivery') return [];
+    if (order.order_type === 'pickup' && action.value === 'completed') {
+      return [{ ...action, label: 'Order Collected' }];
+    }
+    return [action];
+  });
   if (next.length === 0) return null;
   return (
     <>

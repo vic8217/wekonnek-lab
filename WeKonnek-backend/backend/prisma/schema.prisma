@@ -935,6 +935,7 @@ model WkOrder {
   deliveryFee      Decimal  @default(0.00) @map("delivery_fee") @db.Decimal(10, 2)
   deliveryZoneName String?  @map("delivery_zone_name") @db.VarChar(255)
   customerBarangay String?  @map("customer_barangay") @db.VarChar(100)
+  pickupReadyMinutes Int?  @map("pickup_ready_minutes")
   notes            String?  @db.Text
   tableNumber      String?  @map("table_number") @db.VarChar(20)
   paymentMethod    String   @default("cod") @map("payment_method") @db.VarChar(50)

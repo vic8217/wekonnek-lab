@@ -7,9 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  PaymentGatewayService,
-} from '../modules/wallet/payment-gateway.service';
+import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
 import { NotificationsService } from '../modules/notifications/notifications.service';
 import { VouchersService } from '../modules/vouchers/vouchers.service';
 import { InvoicesService } from '../modules/invoices/invoices.service';
@@ -44,6 +42,8 @@ interface CreateOrderInput {
   delivery_fee?: number;
   delivery_zone_name?: string;
   customer_barangay?: string;
+  pickup_ready_minutes?: number;
+  pickupReadyMinutes?: number;
   table_number?: string;
   notes?: string;
   payment_method?: string;
@@ -65,7 +65,14 @@ export interface AcceptedQuotationOrderInput {
   discount: number;
   tax: number;
   otherCharges: number;
-  items: Array<{ productId: number; variantId?: number | null; productName: string; quantity: number; unitPrice: number; lineTotal: number }>;
+  items: Array<{
+    productId: number;
+    variantId?: number | null;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+  }>;
 }
 
 /** Online payment methods that require a gateway checkout. */
@@ -81,8 +88,16 @@ function serializeOrder(order: any) {
     productId: it.productId,
     variant_id: it.variantId,
     variantId: it.variantId,
-    variant_name: it.variant?.optionValues?.map((link: any) => link.optionValue?.value).filter(Boolean).join(' / ') || null,
-    variantName: it.variant?.optionValues?.map((link: any) => link.optionValue?.value).filter(Boolean).join(' / ') || null,
+    variant_name:
+      it.variant?.optionValues
+        ?.map((link: any) => link.optionValue?.value)
+        .filter(Boolean)
+        .join(' / ') || null,
+    variantName:
+      it.variant?.optionValues
+        ?.map((link: any) => link.optionValue?.value)
+        .filter(Boolean)
+        .join(' / ') || null,
     image_url: it.variant?.imageUrl || it.product?.imageUrl || null,
     imageUrl: it.variant?.imageUrl || it.product?.imageUrl || null,
     product_name: it.productName,
@@ -101,10 +116,16 @@ function serializeOrder(order: any) {
       }
     : undefined;
   const serviceRequests = (order.serviceRequests || []).map((request: any) => ({
-    id: request.id, order_id: request.orderId, type: request.type, details: request.details,
-    status: request.status, assigned_staff_id: request.assignedStaffId,
+    id: request.id,
+    order_id: request.orderId,
+    type: request.type,
+    details: request.details,
+    status: request.status,
+    assigned_staff_id: request.assignedStaffId,
     assigned_staff_name: request.assignedStaff?.displayName || null,
-    assigned_at: request.assignedAt, completed_at: request.completedAt, created_at: request.createdAt,
+    assigned_at: request.assignedAt,
+    completed_at: request.completedAt,
+    created_at: request.createdAt,
   }));
   return {
     id: order.id,
@@ -125,6 +146,8 @@ function serializeOrder(order: any) {
     delivery_fee: order.deliveryFee,
     delivery_zone_name: order.deliveryZoneName,
     customer_barangay: order.customerBarangay,
+    pickup_ready_minutes: order.pickupReadyMinutes,
+    pickupReadyMinutes: order.pickupReadyMinutes,
     table_number: order.tableNumber,
     notes: order.notes,
     payment_method: order.paymentMethod,
@@ -184,15 +207,68 @@ export class OrdersService {
     return this.createOrder(userId, input);
   }
 
-  async createFromAcceptedQuotation(tx: Prisma.TransactionClient, accepted: AcceptedQuotationOrderInput) {
-    const subtotal = accepted.items.reduce((sum, item) => sum + item.lineTotal, 0);
-    if (!accepted.items.length || accepted.items.some(item => !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0 || !Number.isFinite(item.lineTotal) || Math.abs(item.unitPrice * item.quantity - item.lineTotal) > 0.005) || !Number.isFinite(accepted.total) || Math.abs(subtotal - accepted.discount + accepted.tax + accepted.deliveryCharge + accepted.otherCharges - accepted.total) > 0.005) {
+  async createFromAcceptedQuotation(
+    tx: Prisma.TransactionClient,
+    accepted: AcceptedQuotationOrderInput,
+  ) {
+    const subtotal = accepted.items.reduce(
+      (sum, item) => sum + item.lineTotal,
+      0,
+    );
+    if (
+      !accepted.items.length ||
+      accepted.items.some(
+        (item) =>
+          !Number.isInteger(item.quantity) ||
+          item.quantity < 1 ||
+          !Number.isFinite(item.unitPrice) ||
+          item.unitPrice < 0 ||
+          !Number.isFinite(item.lineTotal) ||
+          Math.abs(item.unitPrice * item.quantity - item.lineTotal) > 0.005,
+      ) ||
+      !Number.isFinite(accepted.total) ||
+      Math.abs(
+        subtotal -
+          accepted.discount +
+          accepted.tax +
+          accepted.deliveryCharge +
+          accepted.otherCharges -
+          accepted.total,
+      ) > 0.005
+    ) {
       throw new BadRequestException('Accepted quotation totals are invalid');
     }
-    return this.createOrder(accepted.buyerId, { merchantId: accepted.merchantId, shopId: accepted.shopId, orderType: 'delivery', totalAmount: accepted.total, delivery_address: accepted.deliveryAddress ?? undefined, delivery_fee: accepted.deliveryCharge, notes: accepted.notes ?? undefined, payment_method: 'pending_selection', items: accepted.items.map(item => ({ productId: item.productId, variantId: item.variantId ?? undefined, productName: item.productName, quantity: item.quantity, price: item.unitPrice, subtotal: item.lineTotal })) }, accepted, tx);
+    return this.createOrder(
+      accepted.buyerId,
+      {
+        merchantId: accepted.merchantId,
+        shopId: accepted.shopId,
+        orderType: 'delivery',
+        totalAmount: accepted.total,
+        delivery_address: accepted.deliveryAddress ?? undefined,
+        delivery_fee: accepted.deliveryCharge,
+        notes: accepted.notes ?? undefined,
+        payment_method: 'pending_selection',
+        items: accepted.items.map((item) => ({
+          productId: item.productId,
+          variantId: item.variantId ?? undefined,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: item.unitPrice,
+          subtotal: item.lineTotal,
+        })),
+      },
+      accepted,
+      tx,
+    );
   }
 
-  private async createOrder(userId: string, input: CreateOrderInput, acceptedQuotation?: AcceptedQuotationOrderInput, existingTx?: Prisma.TransactionClient) {
+  private async createOrder(
+    userId: string,
+    input: CreateOrderInput,
+    acceptedQuotation?: AcceptedQuotationOrderInput,
+    existingTx?: Prisma.TransactionClient,
+  ) {
     const merchantId = input.merchant_id ?? input.merchantId;
     if (!merchantId) {
       throw new BadRequestException('merchant_id is required');
@@ -209,41 +285,80 @@ export class OrdersService {
       throw new NotFoundException('Merchant not found');
     }
     const requestedShopId = input.shop_id ?? input.shopId;
-    if (!requestedShopId) throw new BadRequestException('shop_id is required so availability and inventory are scoped to a shop');
-    const shop = await db.branch.findFirst({ where: { id: Number(requestedShopId), merchantId: Number(merchantId), isActive: true } });
-    if (!shop) throw new BadRequestException('The selected shop is unavailable');
-
-    const items = await Promise.all(input.items.map(async (it) => {
-      const quantity = Number(it.quantity) || 1;
-      const productId = it.product_id ?? it.productId ?? null;
-      const variantId = it.variant_id ?? it.variantId ?? null;
-      const product = productId ? await db.product.findFirst({
-        where: { id: Number(productId), merchantId: Number(merchantId) },
-        include: { variants: { where: { id: variantId ? Number(variantId) : -1, isActive: true } } },
-      }) : null;
-      if (productId && !product) throw new BadRequestException('A selected product is unavailable');
-      if (product?.hasVariants && !variantId) throw new BadRequestException(`Select a variant for ${product.name}`);
-      const variant = variantId ? product?.variants?.[0] : undefined;
-      if (variantId && !variant) throw new BadRequestException(`The selected variant for ${product?.name || 'this product'} is unavailable`);
-      const acceptedItem = acceptedQuotation?.items.find(
-        item => item.productId === productId && (item.variantId ?? null) === variantId,
+    if (!requestedShopId)
+      throw new BadRequestException(
+        'shop_id is required so availability and inventory are scoped to a shop',
       );
-      if (acceptedQuotation && !acceptedItem) throw new BadRequestException('Accepted quotation product reference is invalid');
-      const price = acceptedItem
-        ? acceptedItem.unitPrice
-        : product
-        ? Number(variant?.price ?? product.discountPrice ?? product.sellingPrice ?? product.price)
-        : Number(it.price) || 0;
-      const subtotal = acceptedItem ? acceptedItem.lineTotal : price * quantity;
-      return {
-        productId,
-        productName: product?.name ?? it.product_name ?? it.productName ?? 'Item',
-        variantId,
-        quantity,
-        price,
-        subtotal,
-      };
-    }));
+    const shop = await db.branch.findFirst({
+      where: {
+        id: Number(requestedShopId),
+        merchantId: Number(merchantId),
+        isActive: true,
+      },
+    });
+    if (!shop)
+      throw new BadRequestException('The selected shop is unavailable');
+
+    const items = await Promise.all(
+      input.items.map(async (it) => {
+        const quantity = Number(it.quantity) || 1;
+        const productId = it.product_id ?? it.productId ?? null;
+        const variantId = it.variant_id ?? it.variantId ?? null;
+        const product = productId
+          ? await db.product.findFirst({
+              where: { id: Number(productId), merchantId: Number(merchantId) },
+              include: {
+                variants: {
+                  where: {
+                    id: variantId ? Number(variantId) : -1,
+                    isActive: true,
+                  },
+                },
+              },
+            })
+          : null;
+        if (productId && !product)
+          throw new BadRequestException('A selected product is unavailable');
+        if (product?.hasVariants && !variantId)
+          throw new BadRequestException(`Select a variant for ${product.name}`);
+        const variant = variantId ? product?.variants?.[0] : undefined;
+        if (variantId && !variant)
+          throw new BadRequestException(
+            `The selected variant for ${product?.name || 'this product'} is unavailable`,
+          );
+        const acceptedItem = acceptedQuotation?.items.find(
+          (item) =>
+            item.productId === productId &&
+            (item.variantId ?? null) === variantId,
+        );
+        if (acceptedQuotation && !acceptedItem)
+          throw new BadRequestException(
+            'Accepted quotation product reference is invalid',
+          );
+        const price = acceptedItem
+          ? acceptedItem.unitPrice
+          : product
+            ? Number(
+                variant?.price ??
+                  product.discountPrice ??
+                  product.sellingPrice ??
+                  product.price,
+              )
+            : Number(it.price) || 0;
+        const subtotal = acceptedItem
+          ? acceptedItem.lineTotal
+          : price * quantity;
+        return {
+          productId,
+          productName:
+            product?.name ?? it.product_name ?? it.productName ?? 'Item',
+          variantId,
+          quantity,
+          price,
+          subtotal,
+        };
+      }),
+    );
 
     const itemsSubtotal = items.reduce((s, it) => s + it.subtotal, 0);
     const deliveryFee = Number(input.delivery_fee) || 0;
@@ -251,79 +366,155 @@ export class OrdersService {
       (input.total_amount ?? input.totalAmount) != null
         ? Number(input.total_amount ?? input.totalAmount)
         : itemsSubtotal + deliveryFee;
-    if (acceptedQuotation && Math.abs(totalAmount - acceptedQuotation.total) > 0.005) throw new BadRequestException('Accepted quotation total is inconsistent');
+    if (
+      acceptedQuotation &&
+      Math.abs(totalAmount - acceptedQuotation.total) > 0.005
+    )
+      throw new BadRequestException('Accepted quotation total is inconsistent');
 
     const paymentMethod = (input.payment_method || 'cod').toLowerCase();
     const isOnline = ONLINE_METHODS.has(paymentMethod);
     const orderType = input.order_type ?? input.orderType ?? 'delivery';
+    const requestedPickupReadyMinutes =
+      input.pickup_ready_minutes ?? input.pickupReadyMinutes;
+    const pickupReadyMinutes =
+      orderType === 'pickup' ? Number(requestedPickupReadyMinutes ?? 15) : null;
+    if (
+      pickupReadyMinutes !== null &&
+      (!Number.isInteger(pickupReadyMinutes) ||
+        pickupReadyMinutes < 15 ||
+        pickupReadyMinutes > 240)
+    ) {
+      throw new BadRequestException(
+        'Pickup ready time must be between 15 and 240 minutes.',
+      );
+    }
 
     const createOrderCore = async (tx: Prisma.TransactionClient) => {
-    const created = await tx.wkOrder.create({
-      data: {
-        orderCode: this.generateOrderCode(),
-        userId,
-        merchantId: Number(merchantId),
-        shopId: shop.id,
-        status: 'pending',
-        orderType,
-        totalAmount,
-        deliveryAddress: input.delivery_address ?? null,
-        deliveryFee,
-        deliveryZoneName: input.delivery_zone_name ?? null,
-        customerBarangay: input.customer_barangay ?? null,
-        tableNumber: input.table_number ?? null,
-        notes: input.notes ?? null,
-        paymentMethod,
-        paymentStatus: 'pending',
-        discountAmount: acceptedQuotation?.discount ?? 0,
-        orderItems: {
-          create: items.map((it) => ({
-            productId: it.productId,
-            productName: it.productName,
-            variantId: it.variantId,
-            quantity: it.quantity,
-            price: it.price,
-            subtotal: it.subtotal,
-            status: ['dine_in', 'in_store'].includes(orderType) ? 'preparing' : null,
-          })),
+      const created = await tx.wkOrder.create({
+        data: {
+          orderCode: this.generateOrderCode(),
+          userId,
+          merchantId: Number(merchantId),
+          shopId: shop.id,
+          status: 'pending',
+          orderType,
+          totalAmount,
+          deliveryAddress: input.delivery_address ?? null,
+          deliveryFee,
+          deliveryZoneName: input.delivery_zone_name ?? null,
+          customerBarangay: input.customer_barangay ?? null,
+          pickupReadyMinutes,
+          tableNumber: input.table_number ?? null,
+          notes: input.notes ?? null,
+          paymentMethod,
+          paymentStatus: 'pending',
+          discountAmount: acceptedQuotation?.discount ?? 0,
+          orderItems: {
+            create: items.map((it) => ({
+              productId: it.productId,
+              productName: it.productName,
+              variantId: it.variantId,
+              quantity: it.quantity,
+              price: it.price,
+              subtotal: it.subtotal,
+              status: ['dine_in', 'in_store'].includes(orderType)
+                ? 'preparing'
+                : null,
+            })),
+          },
         },
-      },
-      include: {
-        orderItems: true,
-        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
-        merchant: { include: { category: true } },
-      },
-    });
+        include: {
+          orderItems: true,
+          serviceRequests: {
+            include: { assignedStaff: true },
+            orderBy: { createdAt: 'desc' },
+          },
+          merchant: { include: { category: true } },
+        },
+      });
 
-    // Sales affect only the selected shop and variant. A tracked product can
-    // never fall back to the legacy merchant-wide Product.quantity field.
+      // Sales affect only the selected shop and variant. A tracked product can
+      // never fall back to the legacy merchant-wide Product.quantity field.
       const tracked = items.filter(
         (it): it is typeof it & { productId: number } => it.productId != null,
       );
 
       if (tracked.length > 0) {
         const ids = tracked.map((it) => it.productId);
-        const products = await tx.product.findMany({ where: { id: { in: ids }, merchantId: Number(merchantId) } });
-        const byId = new Map(products.map(product => [product.id, product]));
-        const assignments = await tx.shopProduct.findMany({ where: { shopId: shop.id, productId: { in: ids }, isEnabled: true } });
-        const assignedIds = new Set(assignments.map(assignment => assignment.productId));
+        const products = await tx.product.findMany({
+          where: { id: { in: ids }, merchantId: Number(merchantId) },
+        });
+        const byId = new Map(products.map((product) => [product.id, product]));
+        const assignments = await tx.shopProduct.findMany({
+          where: { shopId: shop.id, productId: { in: ids }, isEnabled: true },
+        });
+        const assignedIds = new Set(
+          assignments.map((assignment) => assignment.productId),
+        );
         for (const item of tracked) {
-            const product = byId.get(item.productId);
-            if (!product || !assignedIds.has(item.productId)) throw new BadRequestException(`${item.productName} is not sold by the selected shop`);
-            if (!product.trackInventory) continue;
-            if (product.hasVariants && item.variantId == null) throw new BadRequestException(`Select a variant for ${item.productName}`);
-            const balance = await tx.shopInventory.findFirst({ where: { merchantId: Number(merchantId), shopId: shop.id, productId: item.productId, variantId: item.variantId } });
-            if (!balance) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
-            if (balance.quantity - balance.reservedQuantity < item.quantity) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
-            const changed = await tx.shopInventory.updateMany({ where: { id: balance.id, reservedQuantity: balance.reservedQuantity }, data: { reservedQuantity: { increment: item.quantity } } });
-            if (changed.count !== 1) throw new BadRequestException(`${item.productName} is out of stock at the selected shop`);
-            const updated = await tx.shopInventory.findUniqueOrThrow({ where: { id: balance.id } });
-            await tx.inventoryMovement.create({ data: { merchantId: Number(merchantId), shopId: shop.id, productId: item.productId, variantId: item.variantId, type: 'reservation', quantityChange: item.quantity, balanceAfter: updated.quantity, reference: created.orderCode, referenceType: 'order', referenceId: String(created.id), createdBy: userId } });
+          const product = byId.get(item.productId);
+          if (!product || !assignedIds.has(item.productId))
+            throw new BadRequestException(
+              `${item.productName} is not sold by the selected shop`,
+            );
+          if (!product.trackInventory) continue;
+          if (product.hasVariants && item.variantId == null)
+            throw new BadRequestException(
+              `Select a variant for ${item.productName}`,
+            );
+          const balance = await tx.shopInventory.findFirst({
+            where: {
+              merchantId: Number(merchantId),
+              shopId: shop.id,
+              productId: item.productId,
+              variantId: item.variantId,
+            },
+          });
+          if (!balance)
+            throw new BadRequestException(
+              `${item.productName} is out of stock at the selected shop`,
+            );
+          if (balance.quantity - balance.reservedQuantity < item.quantity)
+            throw new BadRequestException(
+              `${item.productName} is out of stock at the selected shop`,
+            );
+          const changed = await tx.shopInventory.updateMany({
+            where: {
+              id: balance.id,
+              reservedQuantity: balance.reservedQuantity,
+            },
+            data: { reservedQuantity: { increment: item.quantity } },
+          });
+          if (changed.count !== 1)
+            throw new BadRequestException(
+              `${item.productName} is out of stock at the selected shop`,
+            );
+          const updated = await tx.shopInventory.findUniqueOrThrow({
+            where: { id: balance.id },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              merchantId: Number(merchantId),
+              shopId: shop.id,
+              productId: item.productId,
+              variantId: item.variantId,
+              type: 'reservation',
+              quantityChange: item.quantity,
+              balanceAfter: updated.quantity,
+              reference: created.orderCode,
+              referenceType: 'order',
+              referenceId: String(created.id),
+              createdBy: userId,
+            },
+          });
         }
       }
       return created;
     };
-    const created = existingTx ? await createOrderCore(existingTx) : await this.prisma.$transaction(createOrderCore);
+    const created = existingTx
+      ? await createOrderCore(existingTx)
+      : await this.prisma.$transaction(createOrderCore);
     if (existingTx) return created;
     await this.runOrderCreatedPostCommitEffects(created);
 
@@ -336,12 +527,16 @@ export class OrdersService {
           gateway,
           amount: totalAmount,
           description: `WeKonnek Order ${created.orderCode}`,
-          paymentMethod: paymentMethod === 'maya' || paymentMethod === 'xendit'
-            ? 'gcash'
-            : paymentMethod,
+          paymentMethod:
+            paymentMethod === 'maya' || paymentMethod === 'xendit'
+              ? 'gcash'
+              : paymentMethod,
           redirectSuccess: `${appUrl}/customer/orders/${created.id}?paid=1`,
           redirectFailed: `${appUrl}/customer/orders/${created.id}?paid=0`,
-          metadata: { orderId: String(created.id), orderCode: created.orderCode },
+          metadata: {
+            orderId: String(created.id),
+            orderCode: created.orderCode,
+          },
         });
         const updated = await this.prisma.wkOrder.update({
           where: { id: created.id },
@@ -377,22 +572,91 @@ export class OrdersService {
   }
 
   /** Shared post-commit effects for every newly persisted WkOrder. */
-  async runOrderCreatedPostCommitEffects(order: { id: number; orderCode: string; orderType: string; paymentMethod?: string; totalAmount: { toString(): string }; shopId: number | null; merchant?: { userId?: string | null }; orderItems?: Array<{ quantity: number }> }) {
+  async runOrderCreatedPostCommitEffects(order: {
+    id: number;
+    orderCode: string;
+    orderType: string;
+    paymentMethod?: string;
+    totalAmount: { toString(): string };
+    shopId: number | null;
+    merchant?: { userId?: string | null };
+    orderItems?: Array<{ quantity: number }>;
+  }) {
     try {
       if (order.merchant?.userId && order.paymentMethod !== 'qrph') {
-        const itemCount = (order.orderItems || []).reduce((count, item) => count + item.quantity, 0);
-        await this.notifications.notify({ userId: order.merchant.userId, title: 'New order received', body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`, type: NotificationType.order_update, data: { kind: 'new_order', orderId: String(order.id), orderCode: order.orderCode, shopId: String(order.shopId), orderType: order.orderType, url: merchantOrderNotificationUrl({ orderId: order.id, shopId: order.shopId || 0, orderType: order.orderType }) }, orderId: String(order.id) }).catch(() => undefined);
+        const itemCount = (order.orderItems || []).reduce(
+          (count, item) => count + item.quantity,
+          0,
+        );
+        await this.notifications
+          .notify({
+            userId: order.merchant.userId,
+            title: 'New order received',
+            body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`,
+            type: NotificationType.order_update,
+            data: {
+              kind: 'new_order',
+              orderId: String(order.id),
+              orderCode: order.orderCode,
+              shopId: String(order.shopId),
+              orderType: order.orderType,
+              url: merchantOrderNotificationUrl({
+                orderId: order.id,
+                shopId: order.shopId || 0,
+                orderType: order.orderType,
+              }),
+            },
+            orderId: String(order.id),
+          })
+          .catch(() => undefined);
       }
-    } catch { /* merchant alerts are non-critical */ }
+    } catch {
+      /* merchant alerts are non-critical */
+    }
     await this.dineInSync.recordOrder(order.id, 'ORDER_CREATED');
-    await this.trustTrade.ensureForWkOrder(order.id).catch((error: unknown) => this.logger.warn(`trust_trade_create_failed wkOrderId=${order.id} reason=${error instanceof Error ? error.message : 'unknown'}`));
+    await this.trustTrade
+      .ensureForWkOrder(order.id)
+      .catch((error: unknown) =>
+        this.logger.warn(
+          `trust_trade_create_failed wkOrderId=${order.id} reason=${error instanceof Error ? error.message : 'unknown'}`,
+        ),
+      );
   }
 
   async notifyMerchantPaidQrphOrder(orderId: number) {
-    const order = await this.prisma.wkOrder.findUnique({ where: { id: orderId }, include: { merchant: { select: { userId: true } }, orderItems: { select: { quantity: true } } } });
+    const order = await this.prisma.wkOrder.findUnique({
+      where: { id: orderId },
+      include: {
+        merchant: { select: { userId: true } },
+        orderItems: { select: { quantity: true } },
+      },
+    });
     if (!order?.merchant.userId) return;
-    const itemCount = order.orderItems.reduce((count, item) => count + item.quantity, 0);
-    await this.notifications.notify({ userId: order.merchant.userId, title: 'Paid order received', body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`, type: NotificationType.order_update, data: { kind: 'paid_order', orderId: String(order.id), orderCode: order.orderCode, shopId: String(order.shopId), orderType: order.orderType, url: merchantOrderNotificationUrl({ orderId: order.id, shopId: order.shopId || 0, orderType: order.orderType }) }, orderId: String(order.id) }).catch(() => undefined);
+    const itemCount = order.orderItems.reduce(
+      (count, item) => count + item.quantity,
+      0,
+    );
+    await this.notifications
+      .notify({
+        userId: order.merchant.userId,
+        title: 'Paid order received',
+        body: `Order ${order.orderCode} • ${itemCount} item${itemCount !== 1 ? 's' : ''} • ₱${Number(order.totalAmount).toFixed(2)}`,
+        type: NotificationType.order_update,
+        data: {
+          kind: 'paid_order',
+          orderId: String(order.id),
+          orderCode: order.orderCode,
+          shopId: String(order.shopId),
+          orderType: order.orderType,
+          url: merchantOrderNotificationUrl({
+            orderId: order.id,
+            shopId: order.shopId || 0,
+            orderType: order.orderType,
+          }),
+        },
+        orderId: String(order.id),
+      })
+      .catch(() => undefined);
   }
 
   private resolveGateway(
@@ -400,7 +664,8 @@ export class OrdersService {
     paymentMethod: string,
   ): WalletPaymentGateway {
     const g = (requested || '').toLowerCase();
-    if (g === 'maya' || paymentMethod === 'maya') return WalletPaymentGateway.maya;
+    if (g === 'maya' || paymentMethod === 'maya')
+      return WalletPaymentGateway.maya;
     if (g === 'xendit') return WalletPaymentGateway.xendit;
     if (g === 'paymongo') return WalletPaymentGateway.paymongo;
     // Default online gateway
@@ -422,7 +687,10 @@ export class OrdersService {
       where,
       include: {
         orderItems: true,
-        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
+        serviceRequests: {
+          include: { assignedStaff: true },
+          orderBy: { createdAt: 'desc' },
+        },
         merchant: { include: { category: true } },
         // customer info is useful for merchant/admin views
         ...(opts.merchantId || opts.isAdmin ? {} : {}),
@@ -435,10 +703,18 @@ export class OrdersService {
       const userIds = [...new Set(orders.map((o) => o.userId))];
       const users = await this.prisma.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          email: true,
+        },
       });
       const byId = new Map(users.map((u) => [u.id, u]));
-      return orders.map((o) => serializeOrder({ ...o, user: byId.get(o.userId) }));
+      return orders.map((o) =>
+        serializeOrder({ ...o, user: byId.get(o.userId) }),
+      );
     }
 
     return orders.map((o) => serializeOrder(o));
@@ -456,14 +732,23 @@ export class OrdersService {
             },
           },
         },
-        serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } },
+        serviceRequests: {
+          include: { assignedStaff: true },
+          orderBy: { createdAt: 'desc' },
+        },
         merchant: { include: { category: true } },
       },
     });
     if (!order) throw new NotFoundException('Order not found');
     const user = await this.prisma.user.findUnique({
       where: { id: order.userId },
-      select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        email: true,
+      },
     });
     return serializeOrder({ ...order, user });
   }
@@ -477,36 +762,130 @@ export class OrdersService {
     return serializeOrder(order).order_items;
   }
 
-  async updateStatus(id: number, status: string, actor?: { id: string; role?: string }) {
+  async updateStatus(
+    id: number,
+    status: string,
+    actor?: { id: string; role?: string },
+  ) {
     if (!status) throw new BadRequestException('status is required');
     const existing = await this.prisma.wkOrder.findUnique({
       where: { id: Number(id) },
       include: { orderItems: true },
     });
     if (!existing) throw new NotFoundException('Order not found');
+    if (
+      existing.orderType === 'pickup' &&
+      [
+        'out_for_delivery',
+        'rider_assigned',
+        'picked_up',
+        'in_transit',
+        'delivered',
+      ].includes(status)
+    ) {
+      throw new BadRequestException(
+        'Pickup orders are collected by the customer and cannot enter the delivery flow.',
+      );
+    }
     if (actor) {
-      const merchantAccess = ['admin', 'staff'].includes(String(actor.role)) || await this.prisma.merchant.findFirst({ where: { id: existing.merchantId, OR: [{ userId: actor.id }, { merchantStaff: { some: { userId: actor.id, isActive: true } } }] }, select: { id: true } });
-      if (!merchantAccess) throw new ForbiddenException('You are not allowed to update this merchant order');
-      const isProcessingAction = !['cancelled', existing.status].includes(status);
-      if (isProcessingAction && existing.paymentMethod === 'qrph' && existing.paymentStatus !== 'paid') throw new ConflictException('Payment has not been confirmed for this order.');
+      const merchantAccess =
+        ['admin', 'staff'].includes(String(actor.role)) ||
+        (await this.prisma.merchant.findFirst({
+          where: {
+            id: existing.merchantId,
+            OR: [
+              { userId: actor.id },
+              { merchantStaff: { some: { userId: actor.id, isActive: true } } },
+            ],
+          },
+          select: { id: true },
+        }));
+      if (!merchantAccess)
+        throw new ForbiddenException(
+          'You are not allowed to update this merchant order',
+        );
+      const isProcessingAction = !['cancelled', existing.status].includes(
+        status,
+      );
+      if (
+        isProcessingAction &&
+        existing.paymentMethod === 'qrph' &&
+        existing.paymentStatus !== 'paid'
+      )
+        throw new ConflictException(
+          'Payment has not been confirmed for this order.',
+        );
     }
 
     const wasFinalized = ['completed', 'delivered'].includes(existing.status);
     const willFinalize = ['completed', 'delivered'].includes(status);
-    const willCancel = status === 'cancelled' && existing.status !== 'cancelled' && !wasFinalized;
+    const willCancel =
+      status === 'cancelled' &&
+      existing.status !== 'cancelled' &&
+      !wasFinalized;
     if (existing.shopId && ((!wasFinalized && willFinalize) || willCancel)) {
-      await this.prisma.$transaction(async tx => {
-        for (const item of existing.orderItems.filter(item => item.productId != null)) {
-          const product = await tx.product.findUnique({ where: { id: item.productId! }, select: { trackInventory: true } });
+      await this.prisma.$transaction(async (tx) => {
+        for (const item of existing.orderItems.filter(
+          (item) => item.productId != null,
+        )) {
+          const product = await tx.product.findUnique({
+            where: { id: item.productId! },
+            select: { trackInventory: true },
+          });
           if (!product?.trackInventory) continue;
-          const balance = await tx.shopInventory.findFirst({ where: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId } });
-          if (!balance || balance.reservedQuantity < item.quantity) throw new BadRequestException(`Reserved inventory is missing for ${item.productName}`);
+          const balance = await tx.shopInventory.findFirst({
+            where: {
+              merchantId: existing.merchantId,
+              shopId: existing.shopId!,
+              productId: item.productId!,
+              variantId: item.variantId,
+            },
+          });
+          if (!balance || balance.reservedQuantity < item.quantity)
+            throw new BadRequestException(
+              `Reserved inventory is missing for ${item.productName}`,
+            );
           if (willCancel) {
-            const updated = await tx.shopInventory.update({ where: { id: balance.id }, data: { reservedQuantity: { decrement: item.quantity } } });
-            await tx.inventoryMovement.create({ data: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId, type: 'reservation_release', quantityChange: -item.quantity, balanceAfter: updated.quantity, reference: existing.orderCode, referenceType: 'order', referenceId: String(existing.id) } });
+            const updated = await tx.shopInventory.update({
+              where: { id: balance.id },
+              data: { reservedQuantity: { decrement: item.quantity } },
+            });
+            await tx.inventoryMovement.create({
+              data: {
+                merchantId: existing.merchantId,
+                shopId: existing.shopId!,
+                productId: item.productId!,
+                variantId: item.variantId,
+                type: 'reservation_release',
+                quantityChange: -item.quantity,
+                balanceAfter: updated.quantity,
+                reference: existing.orderCode,
+                referenceType: 'order',
+                referenceId: String(existing.id),
+              },
+            });
           } else {
-            const updated = await tx.shopInventory.update({ where: { id: balance.id }, data: { reservedQuantity: { decrement: item.quantity }, quantity: { decrement: item.quantity } } });
-            await tx.inventoryMovement.create({ data: { merchantId: existing.merchantId, shopId: existing.shopId!, productId: item.productId!, variantId: item.variantId, type: 'sale', quantityChange: -item.quantity, balanceAfter: updated.quantity, reference: existing.orderCode, referenceType: 'order', referenceId: String(existing.id) } });
+            const updated = await tx.shopInventory.update({
+              where: { id: balance.id },
+              data: {
+                reservedQuantity: { decrement: item.quantity },
+                quantity: { decrement: item.quantity },
+              },
+            });
+            await tx.inventoryMovement.create({
+              data: {
+                merchantId: existing.merchantId,
+                shopId: existing.shopId!,
+                productId: item.productId!,
+                variantId: item.variantId,
+                type: 'sale',
+                quantityChange: -item.quantity,
+                balanceAfter: updated.quantity,
+                reference: existing.orderCode,
+                referenceType: 'order',
+                referenceId: String(existing.id),
+              },
+            });
           }
         }
       });
@@ -536,30 +915,83 @@ export class OrdersService {
     if (willFinalize && ['dine_in', 'in_store'].includes(existing.orderType)) {
       await this.invoices.generateFromDineInOrder(Number(id));
       if (existing.shopId && existing.tableNumber) {
-        const siblings = await this.prisma.wkOrder.findMany({ where: { id: { not: Number(id) }, shopId: existing.shopId, tableNumber: { equals: existing.tableNumber, mode: 'insensitive' }, orderType: { in: ['dine_in', 'in_store'] }, status: { notIn: ['completed', 'cancelled', 'delivered'] } }, select: { id: true } });
-        for (const sibling of siblings) await this.updateStatus(sibling.id, 'cancelled');
+        const siblings = await this.prisma.wkOrder.findMany({
+          where: {
+            id: { not: Number(id) },
+            shopId: existing.shopId,
+            tableNumber: { equals: existing.tableNumber, mode: 'insensitive' },
+            orderType: { in: ['dine_in', 'in_store'] },
+            status: { notIn: ['completed', 'cancelled', 'delivered'] },
+          },
+          select: { id: true },
+        });
+        for (const sibling of siblings)
+          await this.updateStatus(sibling.id, 'cancelled');
       }
     }
-    if (['dine_in', 'in_store'].includes(existing.orderType)) await this.dineInSync.recordOrder(Number(id), status === 'completed' ? 'ORDER_COMPLETED' : 'ORDER_STATUS_CHANGED');
+    if (['dine_in', 'in_store'].includes(existing.orderType))
+      await this.dineInSync.recordOrder(
+        Number(id),
+        status === 'completed' ? 'ORDER_COMPLETED' : 'ORDER_STATUS_CHANGED',
+      );
     if (existing.userId && existing.status !== status) {
       const customerStates: Record<string, { title: string; body: string }> = {
-        accepted: { title: 'Order accepted', body: `Order ${existing.orderCode} was accepted.` },
-        confirmed: { title: 'Order accepted', body: `Order ${existing.orderCode} was accepted.` },
-        preparing: { title: 'Order preparing', body: `Order ${existing.orderCode} is being prepared.` },
-        ready: { title: 'Order ready', body: `Order ${existing.orderCode} is ready.` },
-        completed: { title: 'Order completed', body: `Order ${existing.orderCode} was completed.` },
-        delivered: { title: 'Order delivered', body: `Order ${existing.orderCode} was delivered.` },
-        cancelled: { title: 'Order cancelled', body: `Order ${existing.orderCode} was cancelled.` },
+        accepted: {
+          title: 'Order accepted',
+          body: `Order ${existing.orderCode} was accepted.`,
+        },
+        confirmed: {
+          title: 'Order accepted',
+          body: `Order ${existing.orderCode} was accepted.`,
+        },
+        preparing: {
+          title: 'Order preparing',
+          body: `Order ${existing.orderCode} is being prepared.`,
+        },
+        ready: {
+          title: 'Order ready',
+          body: `Order ${existing.orderCode} is ready.`,
+        },
+        completed: {
+          title: 'Order completed',
+          body: `Order ${existing.orderCode} was completed.`,
+        },
+        delivered: {
+          title: 'Order delivered',
+          body: `Order ${existing.orderCode} was delivered.`,
+        },
+        cancelled: {
+          title: 'Order cancelled',
+          body: `Order ${existing.orderCode} was cancelled.`,
+        },
       };
       const message = customerStates[status];
-      if (message) await this.notifications.notify({ userId: existing.userId, ...message, type: NotificationType.order_update, orderId: String(existing.id), isRead: ['completed', 'delivered'].includes(status), replaceExistingOrder: true, data: { kind: `order_${status}`, orderId: String(existing.id), url: `/customer/orders/${existing.id}` } }).catch(() => undefined);
+      if (message)
+        await this.notifications
+          .notify({
+            userId: existing.userId,
+            ...message,
+            type: NotificationType.order_update,
+            orderId: String(existing.id),
+            isRead: ['completed', 'delivered'].includes(status),
+            replaceExistingOrder: true,
+            data: {
+              kind: `order_${status}`,
+              orderId: String(existing.id),
+              url: `/customer/orders/${existing.id}`,
+            },
+          })
+          .catch(() => undefined);
     }
     return serializeOrder(order);
   }
 
   /** Releases a pending order's reservation exactly once after a terminal prepaid-payment outcome. */
   async cancelUnpaidQrphOrder(id: number) {
-    const existing = await this.prisma.wkOrder.findUnique({ where: { id }, include: { orderItems: true } });
+    const existing = await this.prisma.wkOrder.findUnique({
+      where: { id },
+      include: { orderItems: true },
+    });
     if (!existing || existing.status === 'cancelled') return existing;
     await this.updateStatus(id, 'cancelled');
     return this.prisma.wkOrder.findUnique({ where: { id } });
@@ -578,21 +1010,33 @@ export class OrdersService {
   }
 
   async updateItemStatus(orderId: number, itemId: number, status: string) {
-    if (!['preparing', 'served'].includes(status)) throw new BadRequestException('Item status must be preparing or served');
+    if (!['preparing', 'served'].includes(status))
+      throw new BadRequestException('Item status must be preparing or served');
     const item = await this.prisma.orderItem.findFirst({
       where: { id: itemId, orderId },
       include: { order: true },
     });
     if (!item) throw new NotFoundException('Order item not found');
-    if (!['dine_in', 'in_store'].includes(item.order.orderType)) throw new BadRequestException('Item status is available only for dine-in orders');
+    if (!['dine_in', 'in_store'].includes(item.order.orderType))
+      throw new BadRequestException(
+        'Item status is available only for dine-in orders',
+      );
 
-    await this.prisma.orderItem.update({ where: { id: itemId }, data: { status } });
-    const remaining = await this.prisma.orderItem.count({ where: { orderId, status: { not: 'served' } } });
+    await this.prisma.orderItem.update({
+      where: { id: itemId },
+      data: { status },
+    });
+    const remaining = await this.prisma.orderItem.count({
+      where: { orderId, status: { not: 'served' } },
+    });
     await this.prisma.wkOrder.update({
       where: { id: orderId },
       data: { status: remaining === 0 ? 'ready' : 'preparing' },
     });
-    await this.dineInSync.recordOrder(orderId, status === 'served' ? 'ITEM_SERVED' : 'ITEM_PREPARING');
+    await this.dineInSync.recordOrder(
+      orderId,
+      status === 'served' ? 'ITEM_SERVED' : 'ITEM_PREPARING',
+    );
     return this.findById(orderId);
   }
 
@@ -603,16 +1047,29 @@ export class OrdersService {
       discountType?: 'none' | 'sc_pwd' | 'voucher';
       totalDiners?: number;
       eligibleDiners?: number;
-      cards?: Array<{ type: 'sc' | 'pwd'; reference: string; name: string; address: string; idPhoto?: string }>;
+      cards?: Array<{
+        type: 'sc' | 'pwd';
+        reference: string;
+        name: string;
+        address: string;
+        idPhoto?: string;
+      }>;
       voucherCode?: string;
     },
   ) {
     const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
-    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
-    if (existing.orderType !== 'dine_in') throw new BadRequestException('Bill-out is available only for dine-in orders');
-    if (existing.status === 'bill_out') throw new BadRequestException('Bill-out has already been requested');
+    if (!existing || existing.userId !== userId)
+      throw new NotFoundException('Order not found');
+    if (existing.orderType !== 'dine_in')
+      throw new BadRequestException(
+        'Bill-out is available only for dine-in orders',
+      );
+    if (existing.status === 'bill_out')
+      throw new BadRequestException('Bill-out has already been requested');
     if (!['ready', 'bill_out'].includes(existing.status)) {
-      throw new BadRequestException('Bill-out is available after the order has been served');
+      throw new BadRequestException(
+        'Bill-out is available after the order has been served',
+      );
     }
 
     const discountType = input.discountType || 'none';
@@ -625,20 +1082,38 @@ export class OrdersService {
       const totalDiners = Number(input.totalDiners);
       const eligibleDiners = Number(input.eligibleDiners);
       const cards = input.cards || [];
-      if (!Number.isInteger(totalDiners) || totalDiners < 1) throw new BadRequestException('Enter the total number of diners');
-      if (!Number.isInteger(eligibleDiners) || eligibleDiners < 1 || eligibleDiners > totalDiners) throw new BadRequestException('Enter a valid number of SC/PWD diners');
-      if (cards.length !== eligibleDiners || cards.some(card => !card.reference?.trim() || !card.name?.trim() || !card.address?.trim() || !['sc', 'pwd'].includes(card.type))) {
-        throw new BadRequestException('Complete all card details for every SC/PWD diner');
+      if (!Number.isInteger(totalDiners) || totalDiners < 1)
+        throw new BadRequestException('Enter the total number of diners');
+      if (
+        !Number.isInteger(eligibleDiners) ||
+        eligibleDiners < 1 ||
+        eligibleDiners > totalDiners
+      )
+        throw new BadRequestException('Enter a valid number of SC/PWD diners');
+      if (
+        cards.length !== eligibleDiners ||
+        cards.some(
+          (card) =>
+            !card.reference?.trim() ||
+            !card.name?.trim() ||
+            !card.address?.trim() ||
+            !['sc', 'pwd'].includes(card.type),
+        )
+      ) {
+        throw new BadRequestException(
+          'Complete all card details for every SC/PWD diner',
+        );
       }
       const eligibleShare = gross * (eligibleDiners / totalDiners);
       const vatExclusiveShare = eligibleShare / 1.12;
-      const vatExemption = Math.round((eligibleShare - vatExclusiveShare) * 100) / 100;
-      const scPwdDiscount = Math.round((vatExclusiveShare * 0.2) * 100) / 100;
+      const vatExemption =
+        Math.round((eligibleShare - vatExclusiveShare) * 100) / 100;
+      const scPwdDiscount = Math.round(vatExclusiveShare * 0.2 * 100) / 100;
       discountAmount = Math.round((vatExemption + scPwdDiscount) * 100) / 100;
       discountDetails = {
         totalDiners,
         eligibleDiners,
-        cards: cards.map(card => ({
+        cards: cards.map((card) => ({
           type: card.type,
           reference: card.reference.trim(),
           name: card.name.trim(),
@@ -649,14 +1124,28 @@ export class OrdersService {
         scPwdDiscount,
       };
     } else if (discountType === 'voucher') {
-      if (!input.voucherCode?.trim()) throw new BadRequestException('Select a voucher from your wallet');
-      const validation = await this.vouchers.validate(input.voucherCode, userId, gross, 'dine_in');
-      if (!validation.valid || !validation.voucher) throw new BadRequestException(validation.reason || 'Voucher is not valid');
+      if (!input.voucherCode?.trim())
+        throw new BadRequestException('Select a voucher from your wallet');
+      const validation = await this.vouchers.validate(
+        input.voucherCode,
+        userId,
+        gross,
+        'dine_in',
+      );
+      if (!validation.valid || !validation.voucher)
+        throw new BadRequestException(
+          validation.reason || 'Voucher is not valid',
+        );
       discountAmount = Number(validation.discountAmount || 0);
       voucherId = validation.voucher.id;
-      discountDetails = { code: validation.voucher.code, title: validation.voucher.title };
+      discountDetails = {
+        code: validation.voucher.code,
+        title: validation.voucher.title,
+      };
     } else if (discountType !== 'none') {
-      throw new BadRequestException('Only one supported discount may be selected');
+      throw new BadRequestException(
+        'Only one supported discount may be selected',
+      );
     }
 
     const updated = await this.prisma.wkOrder.update({
@@ -672,26 +1161,88 @@ export class OrdersService {
       include: { orderItems: true, merchant: { include: { category: true } } },
     });
 
-    if (voucherId) await this.vouchers.redeem(voucherId, userId, String(id), discountAmount);
+    if (voucherId)
+      await this.vouchers.redeem(voucherId, userId, String(id), discountAmount);
     await this.dineInSync.recordOrder(id, 'BILL_REQUESTED');
-    const billOutMerchant = await this.prisma.merchant.findUnique({ where: { id: existing.merchantId }, select: { userId: true } });
-    if (billOutMerchant?.userId) await this.notifications.notify({ userId: billOutMerchant.userId, title: 'Bill-out requested', body: `Order ${existing.orderCode} requested bill-out.`, type: NotificationType.order_update, orderId: String(id), data: { kind: 'bill_out_requested', orderId: String(id), ...(existing.shopId ? { shopId: String(existing.shopId), url: merchantOrderNotificationUrl({ orderId: id, shopId: existing.shopId, orderType: existing.orderType }) } : { url: '/merchant/orders?tab=in_store' }) } }).catch(() => undefined);
+    const billOutMerchant = await this.prisma.merchant.findUnique({
+      where: { id: existing.merchantId },
+      select: { userId: true },
+    });
+    if (billOutMerchant?.userId)
+      await this.notifications
+        .notify({
+          userId: billOutMerchant.userId,
+          title: 'Bill-out requested',
+          body: `Order ${existing.orderCode} requested bill-out.`,
+          type: NotificationType.order_update,
+          orderId: String(id),
+          data: {
+            kind: 'bill_out_requested',
+            orderId: String(id),
+            ...(existing.shopId
+              ? {
+                  shopId: String(existing.shopId),
+                  url: merchantOrderNotificationUrl({
+                    orderId: id,
+                    shopId: existing.shopId,
+                    orderType: existing.orderType,
+                  }),
+                }
+              : { url: '/merchant/orders?tab=in_store' }),
+          },
+        })
+        .catch(() => undefined);
     return serializeOrder(updated);
   }
 
   async saveBillOutDraft(id: number, userId: string, input: any) {
-    const existing = await this.prisma.wkOrder.findFirst({ where: { id, userId } });
-    if (!existing || existing.orderType !== 'dine_in') throw new NotFoundException('Dine-in order not found');
-    if (!['ready', 'bill_out'].includes(existing.status)) throw new BadRequestException('Bill-out details can be edited only after all items are served');
+    const existing = await this.prisma.wkOrder.findFirst({
+      where: { id, userId },
+    });
+    if (!existing || existing.orderType !== 'dine_in')
+      throw new NotFoundException('Dine-in order not found');
+    if (!['ready', 'bill_out'].includes(existing.status))
+      throw new BadRequestException(
+        'Bill-out details can be edited only after all items are served',
+      );
     const discountType = String(input.discountType || 'none');
-    if (!['none', 'sc_pwd', 'voucher'].includes(discountType)) throw new BadRequestException('Invalid discount type');
-    const details = discountType === 'sc_pwd' ? {
-      draft: true,
-      totalDiners: Math.max(1, Number(input.totalDiners || 1)),
-      eligibleDiners: Math.max(1, Number(input.eligibleDiners || 1)),
-      cards: Array.isArray(input.cards) ? input.cards.map((card: any) => ({ type: card.type === 'pwd' ? 'pwd' : 'sc', reference: String(card.reference || '').slice(0, 100), name: String(card.name || '').slice(0, 150), address: String(card.address || '').slice(0, 250), idPhoto: String(card.idPhoto || '').slice(0, 1000) })) : [],
-    } : discountType === 'voucher' ? { draft: true, code: String(input.voucherCode || '').slice(0, 80) } : null;
-    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { discountType: discountType === 'none' ? null : discountType, discountDetails: details as any, discountAmount: 0 }, include: { orderItems: true, merchant: { include: { category: true } }, serviceRequests: { include: { assignedStaff: true }, orderBy: { createdAt: 'desc' } } } });
+    if (!['none', 'sc_pwd', 'voucher'].includes(discountType))
+      throw new BadRequestException('Invalid discount type');
+    const details =
+      discountType === 'sc_pwd'
+        ? {
+            draft: true,
+            totalDiners: Math.max(1, Number(input.totalDiners || 1)),
+            eligibleDiners: Math.max(1, Number(input.eligibleDiners || 1)),
+            cards: Array.isArray(input.cards)
+              ? input.cards.map((card: any) => ({
+                  type: card.type === 'pwd' ? 'pwd' : 'sc',
+                  reference: String(card.reference || '').slice(0, 100),
+                  name: String(card.name || '').slice(0, 150),
+                  address: String(card.address || '').slice(0, 250),
+                  idPhoto: String(card.idPhoto || '').slice(0, 1000),
+                }))
+              : [],
+          }
+        : discountType === 'voucher'
+          ? { draft: true, code: String(input.voucherCode || '').slice(0, 80) }
+          : null;
+    const updated = await this.prisma.wkOrder.update({
+      where: { id },
+      data: {
+        discountType: discountType === 'none' ? null : discountType,
+        discountDetails: details as any,
+        discountAmount: 0,
+      },
+      include: {
+        orderItems: true,
+        merchant: { include: { category: true } },
+        serviceRequests: {
+          include: { assignedStaff: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
     await this.dineInSync.recordOrder(id, 'BILL_OUT_DRAFT_UPDATED');
     return serializeOrder(updated);
   }
@@ -702,29 +1253,53 @@ export class OrdersService {
       include: { merchant: { select: { userId: true } } },
     });
     if (!existing) throw new NotFoundException('Order not found');
-    if (existing.merchant.userId !== userId && !['admin', 'staff'].includes(String(role))) {
+    if (
+      existing.merchant.userId !== userId &&
+      !['admin', 'staff'].includes(String(role))
+    ) {
       throw new ForbiddenException('This ticket belongs to another merchant');
     }
-    if (existing.status !== 'bill_out') throw new BadRequestException('The customer has not requested bill-out');
+    if (existing.status !== 'bill_out')
+      throw new BadRequestException('The customer has not requested bill-out');
     const order = await this.prisma.wkOrder.update({
       where: { id },
-      data: { status: 'payment_pending', paymentMethod: 'pending_selection', paymentStatus: 'pending' },
+      data: {
+        status: 'payment_pending',
+        paymentMethod: 'pending_selection',
+        paymentStatus: 'pending',
+      },
       include: { orderItems: true, merchant: { include: { category: true } } },
     });
     await this.dineInSync.recordOrder(id, 'BILL_OUT_CONFIRMED');
     return serializeOrder(order);
   }
 
-  async checkoutPayment(id: number, userId: string, method: 'manual' | 'gcash' | 'maya' | 'card') {
+  async checkoutPayment(
+    id: number,
+    userId: string,
+    method: 'manual' | 'gcash' | 'maya' | 'card',
+  ) {
     const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
-    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
-    if (existing.status !== 'payment_pending') throw new BadRequestException('Wait for the merchant to confirm bill-out');
+    if (!existing || existing.userId !== userId)
+      throw new NotFoundException('Order not found');
+    if (existing.status !== 'payment_pending')
+      throw new BadRequestException(
+        'Wait for the merchant to confirm bill-out',
+      );
     if (method === 'manual') {
-      const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: 'cash', paymentStatus: 'pending' }, include: { orderItems: true, merchant: { include: { category: true } } } });
+      const updated = await this.prisma.wkOrder.update({
+        where: { id },
+        data: { paymentMethod: 'cash', paymentStatus: 'pending' },
+        include: {
+          orderItems: true,
+          merchant: { include: { category: true } },
+        },
+      });
       await this.dineInSync.recordOrder(id, 'PAYMENT_METHOD_SELECTED');
       return serializeOrder(updated);
     }
-    if (!['gcash', 'maya', 'card'].includes(method)) throw new BadRequestException('Unsupported payment method');
+    if (!['gcash', 'maya', 'card'].includes(method))
+      throw new BadRequestException('Unsupported payment method');
     const gateway = this.resolveGateway(undefined, method);
     const appUrl = process.env.APP_BASE_URL || 'http://localhost:3001';
     const result = await this.paymentGateway.createPayment({
@@ -736,20 +1311,58 @@ export class OrdersService {
       redirectFailed: `${appUrl}/customer/orders/${id}?paid=0`,
       metadata: { orderId: String(id), orderCode: existing.orderCode },
     });
-    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: method, paymentRef: result.gatewayTransactionId, paymentUrl: result.paymentUrl }, include: { orderItems: true, merchant: { include: { category: true } } } });
+    const updated = await this.prisma.wkOrder.update({
+      where: { id },
+      data: {
+        paymentMethod: method,
+        paymentRef: result.gatewayTransactionId,
+        paymentUrl: result.paymentUrl,
+      },
+      include: { orderItems: true, merchant: { include: { category: true } } },
+    });
     await this.dineInSync.recordOrder(id, 'PAYMENT_METHOD_SELECTED');
     return serializeOrder(updated);
   }
 
   /** Select a payment method for a non-dine-in order already awaiting buyer selection. */
-  async selectPaymentMethod(id: number, userId: string, method: 'gcash' | 'maya' | 'card') {
+  async selectPaymentMethod(
+    id: number,
+    userId: string,
+    method: 'gcash' | 'maya' | 'card',
+  ) {
     const existing = await this.prisma.wkOrder.findUnique({ where: { id } });
-    if (!existing || existing.userId !== userId) throw new NotFoundException('Order not found');
-    if (existing.orderType === 'dine_in') throw new BadRequestException('Use bill-out payment for dine-in orders');
-    if (existing.paymentMethod !== 'pending_selection' || existing.paymentStatus === 'paid' || ['cancelled', 'completed', 'delivered'].includes(existing.status)) throw new BadRequestException('Order is not eligible for payment selection');
-    if (!['gcash', 'maya', 'card'].includes(method)) throw new BadRequestException('Unsupported payment method');
-    const result = await this.paymentGateway.createPayment({ gateway: this.resolveGateway(undefined, method), amount: Number(existing.totalAmount), description: `WeKonnek Order ${existing.orderCode}`, paymentMethod: method === 'maya' ? 'gcash' : method, redirectSuccess: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=1`, redirectFailed: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=0`, metadata: { orderId: String(id), orderCode: existing.orderCode } });
-    const updated = await this.prisma.wkOrder.update({ where: { id }, data: { paymentMethod: method, paymentRef: result.gatewayTransactionId, paymentUrl: result.paymentUrl }, include: { orderItems: true, merchant: { include: { category: true } } } });
+    if (!existing || existing.userId !== userId)
+      throw new NotFoundException('Order not found');
+    if (existing.orderType === 'dine_in')
+      throw new BadRequestException('Use bill-out payment for dine-in orders');
+    if (
+      existing.paymentMethod !== 'pending_selection' ||
+      existing.paymentStatus === 'paid' ||
+      ['cancelled', 'completed', 'delivered'].includes(existing.status)
+    )
+      throw new BadRequestException(
+        'Order is not eligible for payment selection',
+      );
+    if (!['gcash', 'maya', 'card'].includes(method))
+      throw new BadRequestException('Unsupported payment method');
+    const result = await this.paymentGateway.createPayment({
+      gateway: this.resolveGateway(undefined, method),
+      amount: Number(existing.totalAmount),
+      description: `WeKonnek Order ${existing.orderCode}`,
+      paymentMethod: method === 'maya' ? 'gcash' : method,
+      redirectSuccess: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=1`,
+      redirectFailed: `${process.env.APP_BASE_URL || 'http://localhost:3001'}/customer/orders/${id}?paid=0`,
+      metadata: { orderId: String(id), orderCode: existing.orderCode },
+    });
+    const updated = await this.prisma.wkOrder.update({
+      where: { id },
+      data: {
+        paymentMethod: method,
+        paymentRef: result.gatewayTransactionId,
+        paymentUrl: result.paymentUrl,
+      },
+      include: { orderItems: true, merchant: { include: { category: true } } },
+    });
     return serializeOrder(updated);
   }
 
@@ -758,11 +1371,16 @@ export class OrdersService {
     if (!orderId) return;
     const id = Number(orderId);
     if (Number.isNaN(id)) return;
-    const existing = await this.prisma.wkOrder.findUnique({ where: { id } }).catch(() => null);
+    const existing = await this.prisma.wkOrder
+      .findUnique({ where: { id } })
+      .catch(() => null);
     if (!existing) return;
     if (status === 'completed' && existing.status === 'payment_pending') {
       await this.updateStatus(id, 'completed');
-      await this.prisma.wkOrder.update({ where: { id }, data: { paymentStatus: 'paid' } });
+      await this.prisma.wkOrder.update({
+        where: { id },
+        data: { paymentStatus: 'paid' },
+      });
       return;
     }
     await this.prisma.wkOrder.update({
@@ -774,43 +1392,171 @@ export class OrdersService {
     });
   }
 
-  async createServiceRequest(orderId: number, userId: string, input: { type?: string; details?: string }) {
-    const allowed = new Set(['spoon_fork', 'water_cold', 'water_hot', 'condiments', 'plates_saucers', 'other']);
-    const type = String(input.type || '').trim().toLowerCase();
-    const details = String(input.details || '').trim().slice(0, 250) || null;
-    if (!allowed.has(type)) throw new BadRequestException('Select a valid service request');
-    if (type === 'other' && !details) throw new BadRequestException('Describe what you need');
-    const order = await this.prisma.wkOrder.findFirst({ where: { id: orderId, userId } });
-    if (!order || order.orderType !== 'dine_in' || !order.shopId) throw new NotFoundException('Active dine-in order not found');
-    if (['bill_out', 'payment_pending', 'completed', 'cancelled'].includes(order.status)) throw new BadRequestException('Service requests are closed for this ticket');
-    const request = await this.prisma.dineInServiceRequest.create({ data: { orderId, shopId: order.shopId, requestedByUserId: userId, type, details } });
-    await this.dineInSync.record(order.shopId, 'SERVICE_REQUEST_CREATED', request.id, { serviceRequest: this.serializeServiceRequest(request), orderId });
-    const requestMerchant = await this.prisma.merchant.findUnique({ where: { id: order.merchantId }, select: { userId: true } });
-    if (requestMerchant?.userId) await this.notifications.notify({ userId: requestMerchant.userId, title: 'Table assistance requested', body: `Order ${order.orderCode} requested table assistance.`, type: NotificationType.order_update, orderId: String(orderId), data: { kind: 'table_assistance', orderId: String(orderId), requestId: String(request.id), shopId: String(order.shopId), url: merchantOrderNotificationUrl({ orderId, shopId: order.shopId, orderType: order.orderType }) } }).catch(() => undefined);
+  async createServiceRequest(
+    orderId: number,
+    userId: string,
+    input: { type?: string; details?: string },
+  ) {
+    const allowed = new Set([
+      'spoon_fork',
+      'water_cold',
+      'water_hot',
+      'condiments',
+      'plates_saucers',
+      'other',
+    ]);
+    const type = String(input.type || '')
+      .trim()
+      .toLowerCase();
+    const details =
+      String(input.details || '')
+        .trim()
+        .slice(0, 250) || null;
+    if (!allowed.has(type))
+      throw new BadRequestException('Select a valid service request');
+    if (type === 'other' && !details)
+      throw new BadRequestException('Describe what you need');
+    const order = await this.prisma.wkOrder.findFirst({
+      where: { id: orderId, userId },
+    });
+    if (!order || order.orderType !== 'dine_in' || !order.shopId)
+      throw new NotFoundException('Active dine-in order not found');
+    if (
+      ['bill_out', 'payment_pending', 'completed', 'cancelled'].includes(
+        order.status,
+      )
+    )
+      throw new BadRequestException(
+        'Service requests are closed for this ticket',
+      );
+    const request = await this.prisma.dineInServiceRequest.create({
+      data: {
+        orderId,
+        shopId: order.shopId,
+        requestedByUserId: userId,
+        type,
+        details,
+      },
+    });
+    await this.dineInSync.record(
+      order.shopId,
+      'SERVICE_REQUEST_CREATED',
+      request.id,
+      { serviceRequest: this.serializeServiceRequest(request), orderId },
+    );
+    const requestMerchant = await this.prisma.merchant.findUnique({
+      where: { id: order.merchantId },
+      select: { userId: true },
+    });
+    if (requestMerchant?.userId)
+      await this.notifications
+        .notify({
+          userId: requestMerchant.userId,
+          title: 'Table assistance requested',
+          body: `Order ${order.orderCode} requested table assistance.`,
+          type: NotificationType.order_update,
+          orderId: String(orderId),
+          data: {
+            kind: 'table_assistance',
+            orderId: String(orderId),
+            requestId: String(request.id),
+            shopId: String(order.shopId),
+            url: merchantOrderNotificationUrl({
+              orderId,
+              shopId: order.shopId,
+              orderType: order.orderType,
+            }),
+          },
+        })
+        .catch(() => undefined);
     return this.serializeServiceRequest(request);
   }
 
-  async updateServiceRequest(orderId: number, requestId: number, actorUserId: string, input: { assignedStaffId?: number | null; status?: string }) {
-    const request = await this.prisma.dineInServiceRequest.findFirst({ where: { id: requestId, orderId }, include: { order: true } });
+  async updateServiceRequest(
+    orderId: number,
+    requestId: number,
+    actorUserId: string,
+    input: { assignedStaffId?: number | null; status?: string },
+  ) {
+    const request = await this.prisma.dineInServiceRequest.findFirst({
+      where: { id: requestId, orderId },
+      include: { order: true },
+    });
     if (!request) throw new NotFoundException('Service request not found');
-    const owner = await this.prisma.merchant.findFirst({ where: { id: request.order.merchantId, userId: actorUserId } });
-    const staffActor = owner ? null : await this.prisma.merchantStaff.findFirst({ where: { merchantId: request.order.merchantId, userId: actorUserId, isActive: true } });
-    if (!owner && !staffActor) throw new ForbiddenException('Shop access is required');
-    const status = input.status ? String(input.status).toLowerCase() : undefined;
-    if (status && !['pending', 'assigned', 'completed'].includes(status)) throw new BadRequestException('Invalid request status');
-    const assignedStaffId = input.assignedStaffId === null ? null : input.assignedStaffId ? Number(input.assignedStaffId) : undefined;
+    const owner = await this.prisma.merchant.findFirst({
+      where: { id: request.order.merchantId, userId: actorUserId },
+    });
+    const staffActor = owner
+      ? null
+      : await this.prisma.merchantStaff.findFirst({
+          where: {
+            merchantId: request.order.merchantId,
+            userId: actorUserId,
+            isActive: true,
+          },
+        });
+    if (!owner && !staffActor)
+      throw new ForbiddenException('Shop access is required');
+    const status = input.status
+      ? String(input.status).toLowerCase()
+      : undefined;
+    if (status && !['pending', 'assigned', 'completed'].includes(status))
+      throw new BadRequestException('Invalid request status');
+    const assignedStaffId =
+      input.assignedStaffId === null
+        ? null
+        : input.assignedStaffId
+          ? Number(input.assignedStaffId)
+          : undefined;
     if (assignedStaffId) {
-      const assigned = await this.prisma.merchantStaff.findFirst({ where: { id: assignedStaffId, merchantId: request.order.merchantId, isActive: true, OR: [{ branchId: request.shopId }, { branchId: null }] } });
-      if (!assigned) throw new BadRequestException('Select an active crew member for this shop');
+      const assigned = await this.prisma.merchantStaff.findFirst({
+        where: {
+          id: assignedStaffId,
+          merchantId: request.order.merchantId,
+          isActive: true,
+          OR: [{ branchId: request.shopId }, { branchId: null }],
+        },
+      });
+      if (!assigned)
+        throw new BadRequestException(
+          'Select an active crew member for this shop',
+        );
     }
-    const nextStatus = status || (assignedStaffId ? 'assigned' : request.status);
-    const updated = await this.prisma.dineInServiceRequest.update({ where: { id: requestId }, data: { ...(assignedStaffId !== undefined ? { assignedStaffId, assignedAt: assignedStaffId ? new Date() : null } : {}), status: nextStatus, completedAt: nextStatus === 'completed' ? new Date() : null }, include: { assignedStaff: true } });
-    await this.dineInSync.record(request.shopId, 'SERVICE_REQUEST_UPDATED', updated.id, { serviceRequest: this.serializeServiceRequest(updated), orderId });
+    const nextStatus =
+      status || (assignedStaffId ? 'assigned' : request.status);
+    const updated = await this.prisma.dineInServiceRequest.update({
+      where: { id: requestId },
+      data: {
+        ...(assignedStaffId !== undefined
+          ? { assignedStaffId, assignedAt: assignedStaffId ? new Date() : null }
+          : {}),
+        status: nextStatus,
+        completedAt: nextStatus === 'completed' ? new Date() : null,
+      },
+      include: { assignedStaff: true },
+    });
+    await this.dineInSync.record(
+      request.shopId,
+      'SERVICE_REQUEST_UPDATED',
+      updated.id,
+      { serviceRequest: this.serializeServiceRequest(updated), orderId },
+    );
     return this.serializeServiceRequest(updated);
   }
 
   private serializeServiceRequest(request: any) {
-    return { id: request.id, order_id: request.orderId, type: request.type, details: request.details, status: request.status, assigned_staff_id: request.assignedStaffId, assigned_staff_name: request.assignedStaff?.displayName || null, assigned_at: request.assignedAt, completed_at: request.completedAt, created_at: request.createdAt };
+    return {
+      id: request.id,
+      order_id: request.orderId,
+      type: request.type,
+      details: request.details,
+      status: request.status,
+      assigned_staff_id: request.assignedStaffId,
+      assigned_staff_name: request.assignedStaff?.displayName || null,
+      assigned_at: request.assignedAt,
+      completed_at: request.completedAt,
+      created_at: request.createdAt,
+    };
   }
 
   async getStats(merchantId?: number) {
@@ -820,6 +1566,10 @@ export class OrdersService {
       this.prisma.wkOrder.count({ where: { ...where, status: 'pending' } }),
       this.prisma.wkOrder.count({ where: { ...where, status: 'completed' } }),
     ]);
-    return { totalOrders: total, pendingOrders: pending, completedOrders: completed };
+    return {
+      totalOrders: total,
+      pendingOrders: pending,
+      completedOrders: completed,
+    };
   }
 }

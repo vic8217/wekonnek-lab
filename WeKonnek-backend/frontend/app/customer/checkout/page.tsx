@@ -19,6 +19,33 @@ import PayWithQrph, { type PayCoolsPaymentDto } from '@/components/PayWithQrph';
 // customer session scope used by the main login page and navigation.
 const API = '';
 
+const PICKUP_READY_OPTIONS = [15, 30, 45, 60];
+
+function PickupReadyTimePicker({ value, onChange }: { value: number; onChange: (minutes: number) => void }) {
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+      <h2 className="text-sm font-bold text-gray-900">When should your order be ready?</h2>
+      <p className="mt-1 text-xs text-gray-600">Choose your pickup time. Orders need at least 15 minutes of preparation.</p>
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        {PICKUP_READY_OPTIONS.map((minutes) => (
+          <button
+            type="button"
+            key={minutes}
+            onClick={() => onChange(minutes)}
+            className={`rounded-xl border px-2 py-2 text-xs font-bold transition-colors ${
+              value === minutes
+                ? 'border-[#DB0002] bg-[#DB0002] text-white'
+                : 'border-amber-200 bg-white text-gray-700 hover:border-[#DB0002]'
+            }`}
+          >
+            {minutes} min
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface MerchantInfo {
   id: number;
   name: string;
@@ -329,6 +356,7 @@ export default function CheckoutPage() {
   const [showBarangayList, setShowBarangayList] = useState(false);
   const [barangayOptions, setBarangayOptions] = useState<BarangayOption[]>([]);
   const [tableNumber, setTableNumber] = useState(tableParam ?? '');
+  const [pickupReadyMinutes, setPickupReadyMinutes] = useState(15);
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'gcash' | 'maya' | 'card' | 'qrph'>('cod');
   const [qrphAvailable, setQrphAvailable] = useState(false);
@@ -526,25 +554,6 @@ export default function CheckoutPage() {
     };
   }, [qrphOrderId, qrphPayment?.paymentId, qrphStatus, router]);
 
-  const retryQrph = async () => {
-    if (!qrphOrderId) return;
-    setQrphStatus('CREATING');
-    try {
-      const token = await getToken();
-      const res = await fetch(`/api/backend/orders/${qrphOrderId}/paycools-payment`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const payment = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payment.message || 'Unable to create a new QR code');
-      setQrphPayment(payment);
-      setQrphStatus(payment.status || 'PENDING');
-    } catch (error) {
-      setQrphStatus('FAILED');
-      toast.error(error instanceof Error ? error.message : 'Unable to create a new QR code');
-    }
-  };
-
   const deliveryFee = orderType === 'delivery' ? deliveryFeeResult.fee : 0;
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + deliveryFee;
@@ -637,6 +646,7 @@ export default function CheckoutPage() {
           delivery_zone_id: orderType === 'delivery' ? (deliveryFeeResult.merchantZone?.id || null) : null,
           delivery_zone_name: orderType === 'delivery' ? (deliveryFeeResult.merchantZone?.name || null) : null,
           customer_barangay: orderType === 'delivery' ? customerBarangay : null,
+          pickup_ready_minutes: orderType === 'pickup' ? pickupReadyMinutes : null,
           table_number: orderType === 'dine_in' ? tableNumber : null,
           notes: notes || null,
           // Dine-in payment is collected later when the merchant moves the
@@ -854,6 +864,10 @@ export default function CheckoutPage() {
                 />
               </div>
             </div>
+          )}
+
+          {orderType === 'pickup' && (
+            <PickupReadyTimePicker value={pickupReadyMinutes} onChange={setPickupReadyMinutes} />
           )}
 
           {/* Table Number */}
@@ -1143,6 +1157,10 @@ export default function CheckoutPage() {
               </div>
             )}
 
+            {orderType === 'pickup' && (
+              <PickupReadyTimePicker value={pickupReadyMinutes} onChange={setPickupReadyMinutes} />
+            )}
+
             {orderType === 'dine_in' && (
               <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
                 <h2 className="font-bold text-gray-900 mb-4">Table Number</h2>
@@ -1286,7 +1304,13 @@ export default function CheckoutPage() {
             <PayWithQrph
               payment={qrphPayment}
               status={qrphStatus}
-              onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? retryQrph : undefined}
+              onClose={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? () => {
+                const orderId = qrphOrderId;
+                setQrphPayment(null);
+                setQrphStatus(null);
+                setQrphOrderId(null);
+                if (orderId) router.replace(`/customer/orders/${orderId}?placed=1`);
+              } : undefined}
             />
           </div>
         </div>

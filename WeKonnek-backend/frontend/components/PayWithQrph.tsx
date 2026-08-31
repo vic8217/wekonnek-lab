@@ -42,11 +42,11 @@ function useCountdown(expiresAt: string | null, status: DisplayStatus) {
 export default function PayWithQrph({
   payment,
   status,
-  onRetry,
+  onClose,
 }: {
   payment: PayCoolsPaymentDto | null;
   status: DisplayStatus;
-  onRetry?: () => void;
+  onClose?: () => void;
 }) {
   const countdown = useCountdown(payment?.expiresAt || null, status);
   const heading =
@@ -121,13 +121,18 @@ export default function PayWithQrph({
           payment. We wait for the bank or e-wallet to confirm.
         </p>
       )}
-      {(status === 'FAILED' || status === 'EXPIRED') && onRetry && (
+      {(status === 'FAILED' || status === 'EXPIRED') && (
+        <p className="mt-4 text-sm text-slate-600">
+          This order is no longer eligible for QR payment. Review the order to choose an available next step.
+        </p>
+      )}
+      {(status === 'FAILED' || status === 'EXPIRED') && onClose && (
         <button
           type="button"
-          onClick={onRetry}
-          className="mt-4 w-full rounded-xl bg-[#DB0002] py-2.5 text-sm font-black text-white"
+          onClick={onClose}
+          className="mt-4 w-full rounded-xl bg-slate-800 py-2.5 text-sm font-black text-white"
         >
-          Generate a new QR code
+          Close
         </button>
       )}
     </section>

@@ -191,6 +191,13 @@ export class OrderPayCoolsService {
         where: { id: pending.id },
         data: { status: PlatformPaymentStatus.FAILED },
       });
+      await this.lifecycle.event(this.prisma, pending, {
+        eventType: 'QR_GENERATION_FAILED',
+        actorType: 'SYSTEM',
+        previousStatus: PlatformPaymentStatus.PENDING,
+        resultingStatus: PlatformPaymentStatus.FAILED,
+        safeMessage: 'PayCools QR generation failed',
+      });
       throw error;
     }
   }
@@ -468,6 +475,7 @@ export class OrderPayCoolsService {
       where: { id: orderId },
       include: {
         merchant: { select: { id: true, commerceDomain: true } },
+        orderItems: { select: { id: true } },
       },
     });
     if (!order || order.userId !== userId) {
@@ -479,6 +487,13 @@ export class OrderPayCoolsService {
     });
     if (order.paymentStatus === 'paid') {
       throw new BadRequestException('Order is already paid');
+    }
+    if (
+      !Number.isFinite(moneyNumber(order.totalAmount)) ||
+      moneyNumber(order.totalAmount) <= 0 ||
+      order.orderItems?.length === 0
+    ) {
+      throw new BadRequestException('Order is not eligible for payment');
     }
     if (TERMINAL_ORDER_STATUSES.includes(order.status)) {
       throw new BadRequestException('Order is not eligible for payment');

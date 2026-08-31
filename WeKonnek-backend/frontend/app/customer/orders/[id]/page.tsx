@@ -658,7 +658,7 @@ export default function CustomerOrderDetailPage() {
               <PayWithQrph
                 payment={qrphPayment}
                 status={qrphStatus}
-                onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? startQrphPayment : undefined}
+                onClose={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? () => { setQrphPayment(null); setQrphStatus(null); } : undefined}
               />
             </div>
           )}
@@ -670,7 +670,7 @@ export default function CustomerOrderDetailPage() {
         <PayWithQrph
           payment={qrphPayment}
           status={qrphStatus}
-          onRetry={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? startQrphPayment : undefined}
+          onClose={qrphStatus === 'FAILED' || qrphStatus === 'EXPIRED' ? () => { setQrphPayment(null); setQrphStatus(null); } : undefined}
         />
       )}
 
