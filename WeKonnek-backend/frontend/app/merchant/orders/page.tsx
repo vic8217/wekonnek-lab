@@ -37,6 +37,8 @@ interface Order {
   delivery_zone_name?: string;
   customer_barangay?: string;
   delivery_fee?: number;
+  payment_method?: string;
+  payment_status?: string;
   pickup_ready_minutes?: number | null;
   created_at: string;
   time_ago: string;
@@ -50,6 +52,20 @@ interface OrderItem {
   price: number;
   subtotal: number;
 }
+
+const orderTypeLabel = (type?: string) => ({
+  delivery: 'Delivery',
+  pickup: 'Pick-up',
+  take_out: 'Pick-up / Take-out',
+  dine_in: 'Dine-in',
+  in_store: 'Dine-in',
+}[type || ''] || 'Order');
+
+const paymentStatusLabel = (order: Pick<Order, 'payment_method' | 'payment_status'>) => {
+  if (order.payment_status === 'paid') return 'Paid';
+  if (order.payment_method === 'qrph') return 'Waiting for payment';
+  return String(order.payment_status || 'unpaid').replace(/_/g, ' ');
+};
 
 interface Reservation {
   id: number;
@@ -265,6 +281,8 @@ export default function MerchantOrdersPage() {
           delivery_zone_name: order.delivery_zone_name || undefined,
           customer_barangay: order.customer_barangay || undefined,
           delivery_fee: parseFloat(order.delivery_fee) || 0,
+          payment_method: order.payment_method || order.paymentMethod,
+          payment_status: order.payment_status || order.paymentStatus,
           created_at: order.created_at,
           time_ago: timeAgo,
         };
@@ -940,7 +958,7 @@ export default function MerchantOrdersPage() {
                 <div key={order.id} className="bg-white rounded-lg shadow-sm p-4 border border-gray-200 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <h3 className="text-base font-bold text-gray-900">{order.order_code}</h3>
+                      <h3 className="text-base font-bold text-gray-900">Order #{order.order_code}</h3>
                       <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${getRetailStatusColor(order.status)}`}>
                         {getRetailStatusLabel(order.status)}
                       </span>
@@ -954,6 +972,11 @@ export default function MerchantOrdersPage() {
                       </svg>
                       <span className="text-xs">{order.customer_name} · {order.items_count} item{order.items_count === 1 ? '' : 's'}</span>
                     </div>
+                  </div>
+                  <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                    <span className="font-semibold text-slate-600">Type: {orderTypeLabel(order.order_type)}</span>
+                    <span className="font-semibold text-amber-700">Payment: {paymentStatusLabel(order)}</span>
+                    <span className="font-semibold text-slate-700">Order: {getRetailStatusLabel(order.status)}</span>
                   </div>
                   <div className="flex items-center justify-between pt-3 border-t border-gray-100 gap-2 flex-wrap">
                     <span className="text-lg font-bold text-gray-900">₱{Number(order.total_amount).toFixed(2)}</span>
@@ -1146,7 +1169,7 @@ function OrderCard({
       <div className="flex items-center justify-between">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h4 className="text-sm lg:text-base font-bold text-gray-900">{order.order_code}</h4>
+            <h4 className="text-sm lg:text-base font-bold text-gray-900">Order #{order.order_code}</h4>
             <span className={`px-2 py-0.5 rounded-full text-[10px] lg:text-xs font-semibold border ${statusColors[order.status] || 'bg-gray-100 text-gray-600'}`}>
               {order.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
             </span>
@@ -1155,6 +1178,7 @@ function OrderCard({
           <p className="text-xs text-gray-500 mt-0.5">
             {order.customer_name} · {order.items_count} item{order.items_count === 1 ? '' : 's'} · {order.time_ago}
           </p>
+          <p className="mt-1 text-[11px] font-semibold text-slate-600">Type: {orderTypeLabel(order.order_type)} · Payment: <span className="text-amber-700">{paymentStatusLabel(order)}</span></p>
           {/* Delivery Zone Info */}
           {order.order_type === 'delivery' && (order.customer_barangay || order.delivery_zone_name) && (
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -1236,17 +1260,18 @@ function OrderDetailsModal({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="order-details-title">
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="sticky top-0 flex items-start justify-between border-b border-gray-200 bg-white p-5">
-          <div><h2 id="order-details-title" className="text-xl font-black text-gray-900">Order {order.order_code}</h2><p className="mt-1 text-sm text-gray-500">{order.customer_name} · {order.items_count} item{order.items_count === 1 ? '' : 's'}</p></div>
+          <div><h2 id="order-details-title" className="text-xl font-black text-gray-900">Order #{order.order_code}</h2><p className="mt-1 text-sm text-gray-500">{order.customer_name} · {order.items_count} item{order.items_count === 1 ? '' : 's'}</p></div>
           <button onClick={onClose} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close order details">✕</button>
         </div>
         <div className="space-y-5 p-5">
           <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Fulfillment</p><p className="mt-1 font-semibold capitalize">{order.order_type.replaceAll('_', ' ')}</p></div>
-            <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Status</p><p className="mt-1 font-semibold capitalize">{order.status.replaceAll('_', ' ')}</p></div>
+            <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Order type</p><p className="mt-1 font-semibold">{orderTypeLabel(order.order_type)}</p></div>
+            <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Payment status</p><p className="mt-1 font-semibold capitalize">{paymentStatusLabel(order)}</p><p className="mt-1 text-xs text-gray-500">Order: {order.status.replaceAll('_', ' ')}</p></div>
             <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Order total</p><p className="mt-1 font-black">₱{Number(order.total_amount).toFixed(2)}</p></div>
           </div>
           {order.delivery_address && <div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><p className="text-xs font-bold uppercase text-blue-700">Delivery address</p><p className="mt-1 text-sm text-blue-900">{order.delivery_address}</p></div>}
           <section><h3 className="mb-3 font-black text-gray-900">Items ordered</h3>{order.items.length === 0 ? <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">No item details were returned for this order.</div> : <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">{order.items.map(item => <label key={item.id} className={`flex items-center gap-4 p-4 transition-colors ${order.status === 'preparing' ? 'cursor-pointer' : ''} ${preparedItemIds.has(item.id) ? 'bg-green-50' : order.status === 'preparing' ? 'hover:bg-gray-50' : ''}`}>{order.status === 'preparing' && <input type="checkbox" checked={preparedItemIds.has(item.id)} onChange={() => togglePrepared(item.id)} className="size-5 shrink-0 accent-green-600" aria-label={`Mark ${item.product_name} as prepared`} />}<div className="min-w-0 flex-1"><p className={`font-semibold ${preparedItemIds.has(item.id) ? 'text-green-800 line-through' : 'text-gray-900'}`}>{item.product_name}</p><p className="mt-1 text-xs text-gray-500">₱{item.price.toFixed(2)} × {item.quantity}</p></div><p className="font-black text-gray-900">₱{item.subtotal.toFixed(2)}</p></label>)}</div>}</section>
+          <div className="space-y-1 border-t border-gray-100 pt-3 text-sm"><div className="flex justify-between"><span>Items / Subtotal</span><b>₱{Math.max(0, Number(order.total_amount) - Number(order.delivery_fee ?? 0)).toFixed(2)}</b></div><div className="flex justify-between text-gray-600"><span>Delivery fee</span><span>₱{Number(order.delivery_fee ?? 0).toFixed(2)}</span></div><div className="flex justify-between border-t border-gray-200 pt-2 text-base font-black"><span>Total</span><span>₱{Number(order.total_amount).toFixed(2)}</span></div></div>
         </div>
         <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-gray-200 bg-white p-5">
           {canStartPreparing && <button onClick={() => onStatusChange(order.id, 'preparing')} className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700">Start Preparing Order</button>}

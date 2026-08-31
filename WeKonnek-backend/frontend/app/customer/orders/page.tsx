@@ -14,6 +14,9 @@ interface Order {
   merchant_location: string;
   status: string;
   total_amount: number;
+  delivery_fee?: number;
+  order_type?: string;
+  table_number?: string | null;
   items: string[];
   created_at: string;
   payment_method?: string;
@@ -64,6 +67,9 @@ export default function CustomerOrdersPage() {
         merchant_location: order.merchants?.city || order.merchant?.city || order.merchants?.state || '',
         status: order.status,
         total_amount: order.total_amount || order.totalAmount || 0,
+        delivery_fee: Number(order.delivery_fee ?? order.deliveryFee ?? 0),
+        order_type: order.order_type || order.orderType,
+        table_number: order.table_number || order.tableNumber || null,
         items: (order.order_items || order.orderItems || []).map((item: any) => `${item.quantity}x ${item.product_name || item.productName}`),
         created_at: order.created_at || order.createdAt,
         payment_method: order.payment_method || order.paymentMethod,
@@ -128,6 +134,8 @@ export default function CustomerOrdersPage() {
     if (days < 7) return `${days}d ago`;
     return new Date(dateStr).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
   };
+  const orderTypeLabel = (type?: string) => ({ delivery: 'Delivery', pickup: 'Pick-up', take_out: 'Pick-up / Take-out', dine_in: 'Dine-in' }[String(type || '').toLowerCase()] || 'Order');
+  const paymentLabel = (order: Order) => order.payment_status === 'paid' ? 'Paid ✓' : order.payment_method === 'qrph' ? 'Waiting for payment' : String(order.payment_status || 'Pending').replace(/_/g, ' ');
 
   const pendingCount = allOrders.filter(order => PENDING_STATUSES.has(String(order.status).toLowerCase())).length;
   const completedCount = allOrders.filter(order => COMPLETED_STATUSES.has(String(order.status).toLowerCase())).length;
@@ -259,7 +267,7 @@ export default function CustomerOrdersPage() {
 
                   {/* Footer */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50/50">
-                    <div><span className="text-[11px] text-gray-400 font-mono">{order.order_code}</span>{order.payment_method === 'qrph' && order.payment_status !== 'paid' && order.status !== 'cancelled' && <p className="mt-1 text-[10px] font-bold text-amber-700">Payment: Awaiting Payment</p>}</div>
+                    <div><span className="text-[11px] text-gray-400 font-mono">Order #{order.order_code}</span><p className="mt-1 text-[10px] font-bold text-slate-600">{orderTypeLabel(order.order_type)}{order.order_type === 'dine_in' && order.table_number ? ` · ${order.table_number}` : ''}</p><p className="mt-1 text-[10px] font-bold text-amber-700">Payment: {paymentLabel(order)}</p></div>
                     {order.total_amount > 0 && (
                       <span className="text-sm font-bold text-gray-900">₱{Number(order.total_amount).toFixed(2)}</span>
                     )}
@@ -413,7 +421,8 @@ export default function CustomerOrdersPage() {
                         </>
                       )}
                     </div>
-                    {order.payment_method === 'qrph' && order.payment_status !== 'paid' && order.status !== 'cancelled' && <p className="mb-3 text-xs font-bold text-amber-700">Payment Status: Awaiting Payment</p>}
+                    <p className="mb-1 text-xs font-bold text-amber-700">Payment: {paymentLabel(order)}</p>
+                    <p className="mb-3 text-xs font-bold text-slate-700">Order: {String(order.status).replace(/_/g, ' ')}</p>
                     <p className="text-sm text-gray-600">{order.items.join(' • ')}</p>
                   </Link>
                 ))

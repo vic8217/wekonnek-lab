@@ -208,7 +208,7 @@ export default function CartPage() {
           <h2 className="text-lg font-bold text-gray-900 mb-1">Your cart is empty</h2>
           <p className="text-sm text-gray-500 mb-5">Browse local shops and add items to get started.</p>
           <Link
-            href="/merchants"
+            href="/customer/dashboard"
             className="inline-block px-5 py-3 bg-[#DB0002] text-white rounded-xl font-semibold active:bg-[#B80002] transition-colors"
           >
             Browse Shops
@@ -229,7 +229,7 @@ export default function CartPage() {
             >
               {/* Merchant header */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-50">
-                <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
                   {cart.logoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={cart.logoUrl} alt={cart.merchantName} className="w-full h-full object-cover" />
@@ -252,7 +252,7 @@ export default function CartPage() {
               <div className="divide-y divide-gray-50">
                 {cart.items.map((item) => (
                   <div key={`${item.product_id}:${item.variant_id ?? 'base'}`} className="flex items-center gap-3 px-4 py-3">
-                    <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
                       {item.image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={item.image_url} alt={item.product_name} className="w-full h-full object-cover" />
@@ -267,7 +267,7 @@ export default function CartPage() {
                       )}
                       <p className="text-xs text-gray-400">₱{item.price.toFixed(2)}</p>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => changeQty(cart.merchantId, item.product_id, item.variant_id, -1)}
                         className="w-7 h-7 border border-gray-200 rounded-lg flex items-center justify-center text-sm text-gray-500"

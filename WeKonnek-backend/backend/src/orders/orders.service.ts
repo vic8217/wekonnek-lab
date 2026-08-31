@@ -12,7 +12,13 @@ import { NotificationsService } from '../modules/notifications/notifications.ser
 import { VouchersService } from '../modules/vouchers/vouchers.service';
 import { InvoicesService } from '../modules/invoices/invoices.service';
 import { DineInSyncService } from '../dine-in-crew/dine-in-sync.service';
-import { Prisma, WalletPaymentGateway, NotificationType } from '@prisma/client';
+import {
+  Prisma,
+  WalletPaymentGateway,
+  NotificationType,
+  PlatformPaymentSourceType,
+  PlatformPaymentStatus,
+} from '@prisma/client';
 import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
 import { TrustTradeService } from '../trust-trade/trust-trade.service';
@@ -154,6 +160,10 @@ function serializeOrder(order: any) {
     payment_status: order.paymentStatus,
     payment_ref: order.paymentRef,
     payment_url: order.paymentUrl,
+    // This is a read-only projection from a successfully paid platform payment.
+    // WkOrder deliberately does not maintain a duplicate payment timestamp.
+    paid_at: order.paidAt ?? null,
+    paidAt: order.paidAt ?? null,
     discount_type: order.discountType,
     discount_amount: order.discountAmount,
     discount_details: order.discountDetails,
@@ -183,6 +193,42 @@ function serializeOrder(order: any) {
 
 @Injectable()
 export class OrdersService {
+  private async withAuthoritativePaidAt<T extends { id: number }>(orders: T[]) {
+    if (orders.length === 0) return orders;
+
+    const payments = await this.prisma.platformPaymentTransaction.findMany({
+      where: {
+        sourceId: { in: orders.map((order) => String(order.id)) },
+        sourceType: {
+          in: [
+            PlatformPaymentSourceType.RESTAURANT_ORDER,
+            PlatformPaymentSourceType.RETAIL_ORDER,
+            PlatformPaymentSourceType.TAKE_OUT,
+          ],
+        },
+        status: PlatformPaymentStatus.PAID,
+        paidAt: { not: null },
+      },
+      select: { sourceId: true, paidAt: true },
+      orderBy: { paidAt: 'desc' },
+    });
+    const paidAtByOrderId = new Map<number, Date>();
+    for (const payment of payments) {
+      const orderId = Number(payment.sourceId);
+      if (
+        Number.isInteger(orderId) &&
+        payment.paidAt &&
+        !paidAtByOrderId.has(orderId)
+      ) {
+        paidAtByOrderId.set(orderId, payment.paidAt);
+      }
+    }
+    return orders.map((order) => ({
+      ...order,
+      paidAt: paidAtByOrderId.get(order.id) ?? null,
+    }));
+  }
+
   private readonly logger = new Logger(OrdersService.name);
   constructor(
     private readonly prisma: PrismaService,
@@ -712,12 +758,15 @@ export class OrdersService {
         },
       });
       const byId = new Map(users.map((u) => [u.id, u]));
-      return orders.map((o) =>
+      const ordersWithPaidAt = await this.withAuthoritativePaidAt(orders);
+      return ordersWithPaidAt.map((o) =>
         serializeOrder({ ...o, user: byId.get(o.userId) }),
       );
     }
 
-    return orders.map((o) => serializeOrder(o));
+    return (await this.withAuthoritativePaidAt(orders)).map((o) =>
+      serializeOrder(o),
+    );
   }
 
   async findById(id: number) {
@@ -750,7 +799,8 @@ export class OrdersService {
         email: true,
       },
     });
-    return serializeOrder({ ...order, user });
+    const [orderWithPaidAt] = await this.withAuthoritativePaidAt([order]);
+    return serializeOrder({ ...orderWithPaidAt, user });
   }
 
   async findItems(id: number) {

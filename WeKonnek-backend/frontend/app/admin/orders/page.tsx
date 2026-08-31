@@ -12,6 +12,10 @@ interface Order {
   user_id: string;
   merchant_id: number;
   status: string;
+  order_type?: string;
+  payment_method?: string;
+  payment_status?: string;
+  paid_at?: string | null;
   total_amount: number;
   delivery_address: string;
   delivery_fee: number;
@@ -28,6 +32,9 @@ interface MerchantOption {
   id: number;
   name: string;
 }
+
+const orderTypeLabel = (type?: string) => ({ delivery: 'Delivery', pickup: 'Pick-up', take_out: 'Pick-up / Take-out', dine_in: 'Dine-in', in_store: 'Dine-in' }[type || ''] || 'Order');
+const paymentStatusLabel = (order: Pick<Order, 'payment_method' | 'payment_status'>) => order.payment_status === 'paid' ? 'Paid' : order.payment_method === 'qrph' ? 'Waiting for payment' : String(order.payment_status || 'unpaid').replace(/_/g, ' ');
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -81,6 +88,10 @@ export default function AdminOrdersPage() {
         user_id: o.user_id || o.userId,
         merchant_id: o.merchant_id || o.merchantId,
         status: o.status,
+        order_type: o.order_type || o.orderType,
+        payment_method: o.payment_method || o.paymentMethod,
+        payment_status: o.payment_status || o.paymentStatus,
+        paid_at: o.paid_at || o.paidAt || null,
         total_amount: o.total_amount || o.totalAmount,
         delivery_address: o.delivery_address || o.deliveryAddress,
         delivery_fee: o.delivery_fee || o.deliveryFee,
@@ -319,12 +330,14 @@ export default function AdminOrdersPage() {
           <table className="w-full">
             <thead>
               <tr className="bg-[#DB0002] text-white">
-                <th className="px-4 py-3 text-left font-semibold text-sm">Order Code</th>
+                <th className="px-4 py-3 text-left font-semibold text-sm">Order Reference</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Customer</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Merchant</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Items</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Total</th>
-                <th className="px-4 py-3 text-left font-semibold text-sm">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-sm">Order Type</th>
+                <th className="px-4 py-3 text-left font-semibold text-sm">Payment Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-sm">Order Status</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Date</th>
                 <th className="px-4 py-3 text-left font-semibold text-sm">Actions</th>
               </tr>
@@ -332,18 +345,20 @@ export default function AdminOrdersPage() {
             <tbody>
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan={10} className="px-4 py-12 text-center text-gray-500">
                     No orders found
                   </td>
                 </tr>
               ) : (
                 paginatedOrders.map((order) => (
                   <tr key={order.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-mono text-sm font-medium text-gray-900">{order.order_code}</td>
+                    <td className="px-4 py-3 font-mono text-sm font-medium text-gray-900">Order #{order.order_code}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{order.customer_name}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{order.merchant_name}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{order.item_count}</td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">₱{Number(order.total_amount).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{orderTypeLabel(order.order_type)}</td>
+                    <td className="px-4 py-3 text-sm font-medium capitalize text-amber-700">{paymentStatusLabel(order)}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${getStatusColor(order.status)}`}>
                         {order.status.replace(/_/g, ' ')}
@@ -399,7 +414,7 @@ export default function AdminOrdersPage() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <div>
-                <h3 className="text-xl font-bold text-gray-900">Order {selectedOrder.order_code}</h3>
+                <h3 className="text-xl font-bold text-gray-900">Order #{selectedOrder.order_code}</h3>
                 <p className="text-sm text-gray-500">
                   {new Date(selectedOrder.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </p>
@@ -411,12 +426,14 @@ export default function AdminOrdersPage() {
               </button>
             </div>
             <div className="p-6 space-y-6">
-              {/* Status */}
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-gray-600">Status:</span>
+              {/* Authoritative order and payment statuses are distinct. */}
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium text-gray-600">Order status:</span>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${getStatusColor(selectedOrder.status)}`}>
                   {selectedOrder.status.replace(/_/g, ' ')}
                 </span>
+                <span className="text-sm font-medium text-gray-600">Payment status:</span>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium capitalize text-amber-800">{paymentStatusLabel(selectedOrder)}</span>
               </div>
 
               {/* Info Grid */}
@@ -430,13 +447,22 @@ export default function AdminOrdersPage() {
                   <p className="font-medium text-gray-900">{selectedOrder.merchant_name}</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 mb-1">Order Type</p>
+                  <p className="font-medium text-gray-900">{orderTypeLabel(selectedOrder.order_type)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-xs text-gray-500 mb-1">Total Amount</p>
                   <p className="font-bold text-gray-900 text-lg">₱{Number(selectedOrder.total_amount).toFixed(2)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 mb-1">Items / Subtotal</p>
+                  <p className="font-medium text-gray-900">₱{Math.max(0, Number(selectedOrder.total_amount) - Number(selectedOrder.delivery_fee ?? 0)).toFixed(2)}</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-xs text-gray-500 mb-1">Delivery Fee</p>
                   <p className="font-medium text-gray-900">₱{Number(selectedOrder.delivery_fee ?? 0).toFixed(2)}</p>
                 </div>
+                {selectedOrder.paid_at && <div className="bg-gray-50 rounded-lg p-4"><p className="text-xs text-gray-500 mb-1">Paid At</p><p className="font-medium text-gray-900">{new Date(selectedOrder.paid_at).toLocaleString()}</p></div>}
                 {selectedOrder.table_number && (
                   <div className="bg-gray-50 rounded-lg p-4">
                     <p className="text-xs text-gray-500 mb-1">Table Number</p>

@@ -33,6 +33,7 @@ interface OrderRow {
   order_type: string | null;
   payment_method?: string | null;
   payment_status?: string | null;
+  paid_at?: string | null;
   payment_url?: string | null;
   discount_type?: string | null;
   discount_amount?: number | null;
@@ -304,6 +305,15 @@ export default function CustomerOrderDetailPage() {
       0,
     );
   }, [order]);
+  const presentationItemSubtotal = useMemo(
+    () => Math.max(0, Number(order?.total_amount ?? 0) - Number(order?.delivery_fee ?? 0)),
+    [order?.delivery_fee, order?.total_amount],
+  );
+  const paymentStatusLabel = order?.payment_status === 'paid'
+    ? 'Paid'
+    : order?.payment_method === 'qrph'
+      ? 'Waiting for payment'
+      : String(order?.payment_status || 'unpaid').replace(/_/g, ' ');
 
   const submitServiceRequest = async () => {
     if (!order) return;
@@ -540,6 +550,14 @@ export default function CustomerOrderDetailPage() {
         </ol>
       </div>}
 
+      <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div><p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Payment status</p><p className="mt-1 text-sm font-black capitalize text-gray-900">{paymentStatusLabel}</p></div>
+          <div className="text-right"><p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Order status</p><p className="mt-1 text-sm font-black capitalize text-gray-900">{order.status.replace(/_/g, ' ')}</p></div>
+        </div>
+        {order.paid_at && <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">Paid at {formatDate(order.paid_at)}</p>}
+      </section>
+
       {/* Items */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -584,15 +602,13 @@ export default function CustomerOrderDetailPage() {
 
         <div className="mt-4 space-y-1 text-sm">
           <div className="flex items-center justify-between text-gray-600">
-            <span>Subtotal</span>
-            <span>₱{subtotal.toFixed(2)}</span>
+            <span>Items / Subtotal</span>
+            <span>₱{presentationItemSubtotal.toFixed(2)}</span>
           </div>
-          {Number(order.delivery_fee) > 0 && (
-            <div className="flex items-center justify-between text-gray-600">
-              <span>Delivery fee</span>
-              <span>₱{Number(order.delivery_fee).toFixed(2)}</span>
-            </div>
-          )}
+          <div className="flex items-center justify-between text-gray-600">
+            <span>Delivery fee</span>
+            <span>₱{Number(order.delivery_fee ?? 0).toFixed(2)}</span>
+          </div>
           {order.discount_type === 'sc_pwd' && savedDiscount > 0 && (
             <div className="my-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs">
               <p className="font-black text-emerald-900">SC/PWD computation</p>
