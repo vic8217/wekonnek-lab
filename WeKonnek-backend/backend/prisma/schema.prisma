@@ -931,6 +931,9 @@ model WkOrder {
   status           String   @default("pending") @db.VarChar(50)
   orderType        String   @default("delivery") @map("order_type") @db.VarChar(50)
   totalAmount      Decimal  @map("total_amount") @db.Decimal(10, 2)
+  transactionFeeRate Decimal @default(0.00) @map("transaction_fee_rate") @db.Decimal(5, 2)
+  transactionFeeBasisNetOfVat Decimal @default(0.00) @map("transaction_fee_basis_net_of_vat") @db.Decimal(12, 2)
+  transactionFeeAmount Decimal @default(0.00) @map("transaction_fee_amount") @db.Decimal(10, 2)
   deliveryAddress  String?  @map("delivery_address") @db.Text
   deliveryFee      Decimal  @default(0.00) @map("delivery_fee") @db.Decimal(10, 2)
   deliveryZoneName String?  @map("delivery_zone_name") @db.VarChar(255)

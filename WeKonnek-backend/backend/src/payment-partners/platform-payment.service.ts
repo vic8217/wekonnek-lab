@@ -48,6 +48,10 @@ type AdminOrder = {
   id: number;
   orderCode: string;
   orderType: string;
+  totalAmount: Prisma.Decimal;
+  transactionFeeRate: Prisma.Decimal;
+  transactionFeeBasisNetOfVat: Prisma.Decimal;
+  transactionFeeAmount: Prisma.Decimal;
   shop: { id: number; name: string } | null;
 };
 
@@ -231,6 +235,11 @@ export class PlatformPaymentService {
         row.providerTransactionId || row.providerQrCodeId || null,
       status: row.status,
       amount: Number(row.amount),
+      orderAmount: order ? Number(order.totalAmount) - Number(order.transactionFeeAmount) : null,
+      transactionFeeRate: order ? Number(order.transactionFeeRate) : null,
+      transactionFeeBasisNetOfVat: order ? Number(order.transactionFeeBasisNetOfVat) : null,
+      transactionFeeAmount: order ? Number(order.transactionFeeAmount) : null,
+      totalCharged: order ? Number(order.totalAmount) : Number(row.amount),
       currency: row.currency,
       sourceType: row.sourceType,
       orderReference: order?.orderCode || null,

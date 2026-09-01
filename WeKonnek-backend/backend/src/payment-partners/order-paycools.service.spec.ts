@@ -285,7 +285,7 @@ describe('OrderPayCoolsService', () => {
     );
   });
 
-  it('creates a restaurant PayCools payment from the stored order amount', async () => {
+  it('sends exactly WkOrder.totalAmount to PayCools', async () => {
     const { service, paycools, platformPayments, order } = createStore({
       orderType: 'delivery',
       commerceDomain: CommerceDomain.FOOD,

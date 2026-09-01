@@ -22,6 +22,7 @@ import {
 import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
 import { TrustTradeService } from '../trust-trade/trust-trade.service';
+import { calculateTransactionFee, isMerchantVatRegistered, transactionFeeSnapshot } from './transaction-fee';
 
 interface OrderItemInput {
   product_id?: number;
@@ -86,6 +87,11 @@ const ONLINE_METHODS = new Set(['gcash', 'grab_pay', 'card', 'maya', 'xendit']);
 
 function serializeOrder(order: any) {
   if (!order) return order;
+  const feeSnapshot = transactionFeeSnapshot({
+    transactionFeeRate: order.transactionFeeRate ?? 0,
+    transactionFeeBasisNetOfVat: order.transactionFeeBasisNetOfVat ?? 0,
+    transactionFeeAmount: order.transactionFeeAmount ?? 0,
+  });
   const items = (order.orderItems || []).map((it: any) => ({
     id: it.id,
     order_id: it.orderId,
@@ -166,6 +172,12 @@ function serializeOrder(order: any) {
     paidAt: order.paidAt ?? null,
     discount_type: order.discountType,
     discount_amount: order.discountAmount,
+    transaction_fee_rate: feeSnapshot.rate,
+    transactionFeeRate: feeSnapshot.rate,
+    transaction_fee_basis_net_of_vat: feeSnapshot.basisNetOfVat,
+    transactionFeeBasisNetOfVat: feeSnapshot.basisNetOfVat,
+    transaction_fee_amount: feeSnapshot.amount,
+    transactionFeeAmount: feeSnapshot.amount,
     discount_details: order.discountDetails,
     voucher_id: order.voucherId,
     created_at: order.createdAt,
@@ -408,19 +420,55 @@ export class OrdersService {
 
     const itemsSubtotal = items.reduce((s, it) => s + it.subtotal, 0);
     const deliveryFee = Number(input.delivery_fee) || 0;
-    const totalAmount =
+    const requestedOrderAmount =
       (input.total_amount ?? input.totalAmount) != null
         ? Number(input.total_amount ?? input.totalAmount)
         : itemsSubtotal + deliveryFee;
     if (
       acceptedQuotation &&
-      Math.abs(totalAmount - acceptedQuotation.total) > 0.005
+      Math.abs(requestedOrderAmount - acceptedQuotation.total) > 0.005
     )
       throw new BadRequestException('Accepted quotation total is inconsistent');
 
     const paymentMethod = (input.payment_method || 'cod').toLowerCase();
     const isOnline = ONLINE_METHODS.has(paymentMethod);
     const orderType = input.order_type ?? input.orderType ?? 'delivery';
+    // Subscription and VAT configuration are management-owned.  Checkout and
+    // merchants never supply the rate, basis, fee, or final amount.
+    const [plan, billingProfile] = await Promise.all([
+      db.subscriptionPlanDefinition.findUnique({
+        where: {
+          audience_tier: {
+            audience: 'merchant',
+            tier: merchant.subscriptionTier.toLowerCase(),
+          },
+        },
+        select: { variableOrderPercent: true },
+      }),
+      db.billingProfile.findFirst({
+        where: { isDefault: true },
+        select: { isVatRegistered: true, vatRate: true },
+      }),
+    ]);
+    const transactionFee = calculateTransactionFee({
+      merchandiseGross: itemsSubtotal,
+      merchandiseDiscount: acceptedQuotation?.discount ?? 0,
+      ratePercent: plan?.variableOrderPercent ?? 0,
+      vatRatePercent: billingProfile?.vatRate ?? 0,
+      isVatRegistered: isMerchantVatRegistered(
+        merchant.taxClassification,
+        billingProfile?.isVatRegistered ?? false,
+      ),
+    });
+    // The fee base is discounted merchandise only: delivery and this fee are
+    // expressly excluded, so customer charges cannot compound.
+    const totalAmount = Number(
+      transactionFee.merchandiseAfterDiscount
+        .plus(deliveryFee)
+        .plus(transactionFee.amount)
+        .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+        .toString(),
+    );
     const requestedPickupReadyMinutes =
       input.pickup_ready_minutes ?? input.pickupReadyMinutes;
     const pickupReadyMinutes =
@@ -446,6 +494,9 @@ export class OrdersService {
           status: 'pending',
           orderType,
           totalAmount,
+          transactionFeeRate: transactionFee.rate,
+          transactionFeeBasisNetOfVat: transactionFee.basisNetOfVat,
+          transactionFeeAmount: transactionFee.amount,
           deliveryAddress: input.delivery_address ?? null,
           deliveryFee,
           deliveryZoneName: input.delivery_zone_name ?? null,
