@@ -133,6 +133,9 @@ export default function CoordinatorMerchantReviewPage() {
   const [saving, setSaving] = useState(false);
   const [generatingRecoveryKey, setGeneratingRecoveryKey] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [details, setDetails] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -258,6 +261,37 @@ export default function CoordinatorMerchantReviewPage() {
     }
   };
 
+  const beginEditingDetails = () => {
+    if (!application) return;
+    setDetails({
+      business_name: application.business_name || '', contact_name: application.contact_name || '', email: application.email || '', phone: application.phone || '',
+      category_name: application.category_name || '', city_municipality: application.city_municipality || '', council_district: application.council_district || '',
+      geographic_area: application.geographic_area || application.barangay || '', address: application.address || '', branch_count: String(application.branch_count || 0),
+      product_count: application.product_count == null ? '' : String(application.product_count), business_description: application.business_description || '',
+    });
+    setEditingDetails(true);
+  };
+
+  const saveDetails = async () => {
+    if (!application) return;
+    setSavingDetails(true);
+    try {
+      const response = await fetch(`/api/backend/merchant-applications/coordinator/leads/${id}/details`, {
+        method: 'PATCH', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...details, has_branches: Number(details.branch_count || 0) > 0 }),
+      });
+      const body = await readResponseBody(response);
+      if (!response.ok) throw new Error(body.message || 'Unable to update application details');
+      setApplication(current => current ? { ...current, ...body } : current);
+      setEditingDetails(false);
+      toast.success('Application details updated.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to update application details');
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
   if (loading) return <div className="rounded-2xl border border-[#d2ddea] bg-white p-16 text-center text-sm text-[#4d6385]">Loading merchant application…</div>;
   if (error || !application) return <div><Link href="/coordinator/applications" className="inline-flex items-center gap-2 text-sm font-bold text-[#075cff]"><ArrowLeft size={17} /> Back to applications</Link><div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error || 'Application not found'}</div></div>;
 
@@ -291,8 +325,8 @@ export default function CoordinatorMerchantReviewPage() {
     )}
 
     <section className="rounded-2xl border border-[#d2ddea] bg-white p-5 shadow-sm">
-      <h3 className="text-base font-black text-[#071d43]">Application details</h3>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="flex items-center justify-between gap-3"><h3 className="text-base font-black text-[#071d43]">Application details</h3>{!editingDetails && <button type="button" onClick={beginEditingDetails} className="inline-flex items-center gap-2 rounded-xl border border-[#ccd8e9] bg-white px-3 py-2 text-sm font-black text-[#075cff] hover:bg-blue-50"><Pencil size={16} /> Edit details</button>}</div>
+      {editingDetails ? <ApplicationDetailsEditor details={details} onChange={(field, value) => setDetails(current => ({ ...current, [field]: value }))} onCancel={() => setEditingDetails(false)} onSave={saveDetails} saving={savingDetails} /> : <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Detail label="Contact person" value={application.contact_name} />
         <Detail label="Email" value={application.email} />
         <Detail label="Phone" value={application.phone} />
@@ -306,7 +340,7 @@ export default function CoordinatorMerchantReviewPage() {
         <Detail label="Selected plan" value={`${application.subscription_tier} · ${application.subscription_plan}`} capitalize />
         <Detail label="Submitted" value={new Date(application.submitted_at).toLocaleString()} />
         <Detail label="Business description" value={application.business_description} wide />
-      </div>
+      </div>}
     </section>
 
     <section className="rounded-2xl border border-[#d2ddea] bg-white p-5 shadow-sm">
@@ -392,6 +426,18 @@ export default function CoordinatorMerchantReviewPage() {
     </section>
 
     {canEditSubscription && <div className="sticky bottom-4 flex justify-end"><button onClick={save} disabled={saving || !selectedTier} className="inline-flex min-w-40 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white shadow-lg hover:bg-emerald-700 disabled:opacity-60"><Save size={17} />{saving ? 'Submitting…' : application.status === 'approved' ? 'Save subscription changes' : 'Submit for approval'}</button></div>}
+  </div>;
+}
+
+function ApplicationDetailsEditor({ details, onChange, onCancel, onSave, saving }: { details: Record<string, string>; onChange: (field: string, value: string) => void; onCancel: () => void; onSave: () => void; saving: boolean }) {
+  const fields: Array<[string, string, string, boolean?]> = [
+    ['business_name', 'Business name', 'text'], ['contact_name', 'Contact person', 'text'], ['email', 'Email', 'email'], ['phone', 'Phone', 'tel'],
+    ['category_name', 'Category', 'text'], ['city_municipality', 'City / Municipality', 'text'], ['council_district', 'Council district', 'text'], ['geographic_area', 'Barangay / Area', 'text'],
+    ['address', 'Address', 'text', true], ['branch_count', 'Branches', 'number'], ['product_count', 'Estimated products', 'number'], ['business_description', 'Business description', 'text', true],
+  ];
+  return <div className="mt-4 space-y-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{fields.map(([field, label, type, wide]) => <label key={field} className={`block ${wide ? 'sm:col-span-2 lg:col-span-3' : ''}`}><span className="text-[10px] font-bold uppercase tracking-wide text-[#4d6385]">{label}</span>{field === 'business_description' ? <textarea value={details[field] || ''} onChange={event => onChange(field, event.target.value)} rows={4} maxLength={5000} className="mt-1.5 w-full rounded-xl border border-[#ccd8e9] px-3 py-2 text-sm text-[#071d43] outline-none focus:border-[#075cff]" /> : <input type={type} min={type === 'number' ? 0 : undefined} value={details[field] || ''} onChange={event => onChange(field, event.target.value)} required={field === 'contact_name' || field === 'email'} className="mt-1.5 h-11 w-full rounded-xl border border-[#ccd8e9] px-3 text-sm text-[#071d43] outline-none focus:border-[#075cff]" />}</label>)}</div>
+    <div className="flex justify-end gap-3"><button type="button" onClick={onCancel} disabled={saving} className="rounded-xl border border-[#ccd8e9] px-4 py-2.5 text-sm font-black text-[#365078]">Cancel</button><button type="button" onClick={onSave} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-[#075cff] px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"><Save size={16} />{saving ? 'Saving…' : 'Save details'}</button></div>
   </div>;
 }
 

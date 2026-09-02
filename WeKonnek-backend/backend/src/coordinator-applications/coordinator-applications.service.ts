@@ -236,6 +236,16 @@ export class CoordinatorApplicationsService {
       const matchingUser = await tx.user.findFirst({
         where: { OR: [{ email: existing.email }, { phone: existing.mobileNumber }] },
       });
+      // A person can begin as a customer and later become a coordinator, but a
+      // portal account must never be repurposed based solely on a matching
+      // email or phone number. Doing so can leave the other portal's account
+      // linked to its application and makes password resets affect the wrong
+      // role.
+      if (matchingUser && matchingUser.role !== UserRole.customer && matchingUser.role !== UserRole.coordinator) {
+        throw new BadRequestException(
+          'This email or mobile number is already assigned to a non-coordinator portal account. Use different contact details for this coordinator application.',
+        );
+      }
       const linkedApplication = matchingUser
         ? await tx.coordinatorApplication.findUnique({
             where: { userId: matchingUser.id },

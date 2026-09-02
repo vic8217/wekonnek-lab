@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { computeExpiry } from '../subscriptions/subscription-plans';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, UserRole } from '@prisma/client';
 import { NotificationsService } from '../modules/notifications/notifications.service';
 
 function serializeApplication(a: any) {
@@ -742,6 +742,15 @@ export class MerchantApplicationsService {
       const matchingUser = merchantUserId
         ? await this.prisma.user.findUnique({ where: { id: merchantUserId } })
         : await this.prisma.user.findFirst({ where: { OR: [{ email: application.email }, { phone: application.phone || '' }] } });
+      // Do not turn a coordinator, staff member, or other portal user into a
+      // merchant just because the contact details match. Besides changing the
+      // wrong role, this leaves the original portal's application state (such
+      // as coordinator temporary-credential expiry) attached to the user.
+      if (matchingUser && matchingUser.role !== UserRole.customer && matchingUser.role !== UserRole.merchant) {
+        throw new BadRequestException(
+          'This email or mobile number is already assigned to a non-merchant portal account. Use different contact details for this merchant application.',
+        );
+      }
       const user = matchingUser
         ? await this.prisma.user.update({ where: { id: matchingUser.id }, data: { firstName, lastName, email: application.email, phone: application.phone || matchingUser.phone, password, mustChangePassword: true, role: 'merchant', isActive: true, isVerified: true, status: 'active' } })
         : await this.prisma.user.create({ data: { firstName, lastName, email: application.email, phone: application.phone || `merchant-${application.id}`, password, mustChangePassword: true, role: 'merchant', isActive: true, isVerified: true, status: 'active' } });
@@ -790,11 +799,63 @@ export class MerchantApplicationsService {
       },
     });
     if (!application?.userId) throw new BadRequestException('Merchant ID or recovery key is invalid');
+    const user = await this.prisma.user.findUnique({ where: { id: application.userId }, select: { role: true } });
+    if (user?.role !== UserRole.merchant) {
+      throw new BadRequestException('Merchant ID or recovery key is invalid');
+    }
     await this.prisma.user.update({
       where: { id: application.userId },
       data: { password: await bcrypt.hash(newPassword, 10), mustChangePassword: false },
     });
     return { message: 'Password changed successfully' };
+  }
+
+  async updateCoordinatorLeadDetails(id: number, user: { id: string }, input: Record<string, unknown>) {
+    const application = await this.prisma.merchantApplication.findFirst({
+      where: { id, assignedCoordinatorId: user.id, status: { in: ['pending', 'reviewing', 'for_approval', 'approved'] } },
+    });
+    if (!application) throw new ForbiddenException('This application is not assigned to your coordinator account');
+
+    const text = (field: string, maxLength: number, fallback = '') => String(input[field] ?? fallback).trim().slice(0, maxLength);
+    const email = text('email', 255, application.email).toLowerCase();
+    const phone = text('phone', 20, application.phone || '') || null;
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new BadRequestException('Enter a valid email address');
+    if (!text('contact_name', 255, application.contactName || '')) throw new BadRequestException('Contact person is required');
+
+    if (application.userId && (email !== application.email.toLowerCase() || phone !== application.phone)) {
+      const conflictingUser = await this.prisma.user.findFirst({
+        where: { id: { not: application.userId }, OR: [{ email }, ...(phone ? [{ phone }] : [])] },
+        select: { id: true },
+      });
+      if (conflictingUser) throw new BadRequestException('That email or phone number is already used by another account');
+    }
+
+    const data = {
+      businessName: text('business_name', 255, application.businessName),
+      contactName: text('contact_name', 255, application.contactName || ''),
+      email,
+      phone,
+      categoryName: text('category_name', 150, application.categoryName || '') || null,
+      cityMunicipality: text('city_municipality', 100, application.cityMunicipality || '') || null,
+      councilDistrict: text('council_district', 100, application.councilDistrict || '') || null,
+      barangay: text('barangay', 150, application.barangay || '') || null,
+      geographicArea: text('geographic_area', 150, application.geographicArea || '') || null,
+      address: text('address', 500, application.address || '') || null,
+      businessDescription: text('business_description', 5000, application.businessDescription || '') || null,
+      hasBranches: Boolean(input.has_branches),
+      branchCount: Math.max(0, Math.min(10000, Number(input.branch_count) || 0)),
+      productCount: input.product_count == null || input.product_count === '' ? null : Math.max(0, Math.min(1000000, Number(input.product_count) || 0)),
+    };
+    const updated = await this.prisma.$transaction(async tx => {
+      if (application.userId) {
+        const account = await tx.user.findUnique({ where: { id: application.userId }, select: { role: true } });
+        if (account?.role === UserRole.merchant) {
+          await tx.user.update({ where: { id: application.userId }, data: { email, ...(phone ? { phone } : {}) } });
+        }
+      }
+      return tx.merchantApplication.update({ where: { id }, data });
+    });
+    return serializeApplication(updated);
   }
 
   private async provisionMerchant(application: any) {

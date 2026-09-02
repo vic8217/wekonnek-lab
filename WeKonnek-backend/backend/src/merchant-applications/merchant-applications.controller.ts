@@ -80,6 +80,12 @@ export class MerchantApplicationsController {
     return this.applicationsService.findAssignedCoordinatorLead(id, req.user);
   }
 
+  @Patch('coordinator/leads/:id/details')
+  @UseGuards(JwtAuthGuard)
+  updateCoordinatorLeadDetails(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
+    return this.applicationsService.updateCoordinatorLeadDetails(id, req.user, body);
+  }
+
   @Post('coordinator/leads/:id/recovery-key')
   @UseGuards(JwtAuthGuard)
   generateCoordinatorMerchantRecoveryKey(
