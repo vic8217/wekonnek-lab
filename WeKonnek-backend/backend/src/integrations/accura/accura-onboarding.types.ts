@@ -22,6 +22,15 @@ export type AccuraTaxClassification =
   (typeof ACCURA_TAX_CLASSIFICATIONS)[number];
 export type AccuraDocumentType = (typeof ACCURA_DOCUMENT_TYPES)[number];
 
+/** Mapped ACCURA Company Branch used by WeKonnek setup/mapping. */
+export type AccuraRegisteredBranch = {
+  id: string;
+  code: string;
+  name: string;
+  addressLine1: string;
+  active: boolean;
+};
+
 export function mapWeKonnekTaxToAccura(
   value: string | null | undefined,
 ): AccuraTaxClassification | '' {

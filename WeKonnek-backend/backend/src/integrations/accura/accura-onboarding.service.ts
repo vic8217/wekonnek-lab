@@ -22,6 +22,7 @@ import {
   reviewStatusLabel,
   SECTION_LABELS,
   type AccuraDocumentType,
+  type AccuraRegisteredBranch,
   type AccuraTaxClassification,
 } from './accura-onboarding.types';
 import {
@@ -522,7 +523,7 @@ export class AccuraOnboardingService {
     };
   }
 
-  private branchView(row: unknown) {
+  private branchView(row: unknown): AccuraRegisteredBranch {
     const branch = asRecord(row) ?? {};
     const address = asRecord(branch.address);
     return {
@@ -565,6 +566,7 @@ export class AccuraOnboardingService {
     const link = await this.prisma.accuraMerchantLink.findUnique({
       where: { merchantId: merchant.id },
     });
+    const registeredBranches: AccuraRegisteredBranch[] = [];
     return {
       unavailable: true,
       unavailableMessage: merchantFacingAccuraError(category),
@@ -602,7 +604,7 @@ export class AccuraOnboardingService {
         sections: [],
         canSubmit: false,
       },
-      registeredBranches: [],
+      registeredBranches,
       documents: [],
       shops,
       notice:
