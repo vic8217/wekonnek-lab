@@ -2,9 +2,11 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
@@ -26,6 +28,7 @@ import {
   type AccuraTaxClassification,
 } from './accura-onboarding.types';
 import {
+  ACCURA_ONBOARDING_FETCH,
   accuraErrorCode,
   accuraPlatformRequest,
   readPlatformConfig,
@@ -52,13 +55,18 @@ type Prefill = {
 @Injectable()
 export class AccuraOnboardingService {
   private readonly logger = new Logger(AccuraOnboardingService.name);
+  private readonly fetchImpl: AccuraOnboardingFetch;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly fetchImpl: AccuraOnboardingFetch = (url, init) =>
-      globalThis.fetch(url, init),
-  ) {}
+    @Optional()
+    @Inject(ACCURA_ONBOARDING_FETCH)
+    fetchImpl?: AccuraOnboardingFetch,
+  ) {
+    this.fetchImpl =
+      fetchImpl ?? ((url, init) => globalThis.fetch(url, init));
+  }
 
   async getSetup(user: SessionUser) {
     const merchant = await this.requireMerchant(user);

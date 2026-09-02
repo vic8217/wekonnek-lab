@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -8,6 +8,7 @@ import {
   type AccuraOrderSnapshot,
 } from './accura-client.mapping';
 import {
+  ACCURA_CLIENT_FETCH,
   ACCURA_INVOICE_CREATE_PATH,
   DEFAULT_ACCURA_API_TIMEOUT_MS,
   accuraBasicAuthorization,
@@ -39,13 +40,18 @@ type AccuraFetch = (
 @Injectable()
 export class AccuraClientService {
   private readonly logger = new Logger(AccuraClientService.name);
+  private readonly fetchImpl: AccuraFetch;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly fetchImpl: AccuraFetch = (url, init) =>
-      globalThis.fetch(url, init),
-  ) {}
+    @Optional()
+    @Inject(ACCURA_CLIENT_FETCH)
+    fetchImpl?: AccuraFetch,
+  ) {
+    this.fetchImpl =
+      fetchImpl ?? ((url, init) => globalThis.fetch(url, init));
+  }
 
   async issueInvoiceForOrder(
     wkOrderId: number,

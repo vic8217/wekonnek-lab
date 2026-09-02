@@ -1,4 +1,5 @@
 export const ACCURA_INVOICE_CREATE_PATH = '/api/v1/integrations/invoices';
+export const ACCURA_CLIENT_FETCH = 'ACCURA_CLIENT_FETCH';
 export const DEFAULT_ACCURA_API_TIMEOUT_MS = 10_000;
 export const ACCURA_IDEMPOTENCY_KEY_PREFIX = 'wekonnek:wkorder:';
 export const ACCURA_IDEMPOTENCY_KEY_SUFFIX = ':accura-invoice';

@@ -1,6 +1,8 @@
 import { DEFAULT_ACCURA_API_TIMEOUT_MS } from './accura-client.types';
 import { platformAuthorization } from './accura-onboarding.types';
 
+export const ACCURA_ONBOARDING_FETCH = 'ACCURA_ONBOARDING_FETCH';
+
 export type AccuraOnboardingFetch = (
   url: string,
   init?: RequestInit,
