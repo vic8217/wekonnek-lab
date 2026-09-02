@@ -70,6 +70,11 @@ export default function MerchantSidebar({
     { href: "/merchant/notifications", label: "Notifications", icon: "bell" },
     { href: "/merchant/profile", label: "Profile", icon: "person" },
     { href: "/merchant/settings/security", label: "Settings", icon: "shield" },
+    {
+      href: "/merchant/settings/e-receipt",
+      label: "E-Receipt / Tax Setup",
+      icon: "receipt",
+    },
   ];
   const merchantHiddenItems = new Set([
     "In-Store Orders",
@@ -86,6 +91,7 @@ export default function MerchantSidebar({
     "Inventory",
     "Profile",
     "Settings",
+    "E-Receipt / Tax Setup",
   ]);
   const menuItems = merchantMenuItems
     .filter((item) =>

@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentGatewayService } from '../modules/wallet/payment-gateway.service';
@@ -23,6 +24,7 @@ import { CoordinatorApplicationsService } from '../coordinator-applications/coor
 import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
 import { TrustTradeService } from '../trust-trade/trust-trade.service';
 import { calculateTransactionFee, isMerchantVatRegistered, transactionFeeSnapshot } from './transaction-fee';
+import { AccuraIssuanceJobsService } from '../integrations/accura/accura-issuance-jobs.service';
 
 interface OrderItemInput {
   product_id?: number;
@@ -251,6 +253,7 @@ export class OrdersService {
     private readonly dineInSync: DineInSyncService,
     private readonly coordinatorApplications: CoordinatorApplicationsService,
     private readonly trustTrade: TrustTradeService,
+    @Optional() private readonly accuraIssuance?: AccuraIssuanceJobsService,
   ) {}
 
   private generateOrderCode(): string {
@@ -1478,18 +1481,35 @@ export class OrdersService {
     if (!existing) return;
     if (status === 'completed' && existing.status === 'payment_pending') {
       await this.updateStatus(id, 'completed');
-      await this.prisma.wkOrder.update({
-        where: { id },
-        data: { paymentStatus: 'paid' },
-      });
+      await this.commitPaidAndEnqueueAccura(id, { paymentStatus: 'paid' }, true);
       return;
     }
-    await this.prisma.wkOrder.update({
-      where: { id },
-      data: {
+    await this.commitPaidAndEnqueueAccura(
+      id,
+      {
         paymentStatus: status === 'completed' ? 'paid' : 'failed',
         ...(status === 'completed' ? { status: 'processing' } : {}),
       },
+      status === 'completed',
+    );
+  }
+
+  /**
+   * Persist WkOrder paid/failed and, on verified paid settlement, the ACCURA
+   * issuance job in the same transaction. Never calls ACCURA HTTP.
+   */
+  private async commitPaidAndEnqueueAccura(
+    id: number,
+    data: Prisma.WkOrderUpdateInput,
+    enqueue: boolean,
+  ) {
+    if (!enqueue || !this.accuraIssuance) {
+      await this.prisma.wkOrder.update({ where: { id }, data });
+      return;
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wkOrder.update({ where: { id }, data });
+      await this.accuraIssuance!.enqueueForSettledOrder(tx, id);
     });
   }
 

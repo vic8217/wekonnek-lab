@@ -10,6 +10,7 @@ import { DineInCrewModule } from '../dine-in-crew/dine-in-crew.module';
 import { CoordinatorApplicationsModule } from '../coordinator-applications/coordinator-applications.module';
 import { TrustTradeModule } from '../trust-trade/trust-trade.module';
 import { PaymentPartnersModule } from '../payment-partners/payment-partners.module';
+import { AccuraModule } from '../integrations/accura/accura.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { PaymentPartnersModule } from '../payment-partners/payment-partners.modu
     CoordinatorApplicationsModule,
     TrustTradeModule,
     forwardRef(() => PaymentPartnersModule),
+    AccuraModule,
   ],
   controllers: [OrdersController, PaymentsWebhookController],
   providers: [OrdersService, PaymentGatewayService],

@@ -7,7 +7,9 @@ import { join } from 'path';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   // Enable CORS for frontend apps (Flutter, PWA)
   app.enableCors({

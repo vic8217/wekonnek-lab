@@ -125,7 +125,12 @@ export default function SecuritySettingsPage() {
         </Link>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Security Settings</h1>
-          <p className="text-sm text-gray-500">Manage two-factor authentication</p>
+          <p className="text-sm text-gray-500">
+            Manage two-factor authentication.{' '}
+            <Link href="/merchant/settings/e-receipt" className="text-[#DB0002] hover:underline">
+              E-Receipt / Tax Setup
+            </Link>
+          </p>
         </div>
       </div>
 

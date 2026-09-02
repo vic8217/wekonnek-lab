@@ -50,6 +50,7 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/docs/database-initialization.md
 !backend/docs/VISUAL_SEARCH_PROVIDER_POC.md
 !backend/docs/VISUAL_SEARCH_HOLD.md
+!backend/docs/ACCURA_INTEGRATION.md
 !backend/benchmark-fixtures/
 !backend/benchmark-fixtures/vertex-poc-v1/
 !backend/benchmark-fixtures/vertex-poc-v1/dataset.json

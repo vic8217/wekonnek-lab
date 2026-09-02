@@ -57,6 +57,7 @@ import { PaymentPartnersModule } from './payment-partners/payment-partners.modul
 import { SocialAuthModule } from './social-auth/social-auth.module';
 import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.module';
 import { RfqModule } from './rfq/rfq.module';
+import { AccuraModule } from './integrations/accura/accura.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -131,6 +132,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     SocialAuthModule,
     DeliveryPartnersModule,
     RfqModule,
+    AccuraModule,
   ],
   controllers: [AppController],
   providers: [AppService],
