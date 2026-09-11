@@ -2,7 +2,15 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import toast from 'react-hot-toast';
 import { getToken, useAuth } from '@/hooks/use-auth';
+import {
+  accuraBusinessInfoPresentation,
+  accuraOnboardingPresentation,
+  hasAuthoritativeTaxpayerProfile,
+  submittedForReviewNotice,
+  statusToneClass,
+} from '@/lib/accura-onboarding-presentation';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -95,7 +103,9 @@ function emptyForm(): ProfileForm {
 function formFromSetup(setup: SetupResponse): ProfileForm {
   const profile = setup.profile || emptyForm();
   const prefill = setup.prefill || emptyForm();
-  const pick = (key: keyof ProfileForm) => profile[key] || prefill[key] || '';
+  const saved = hasAuthoritativeTaxpayerProfile(profile);
+  const pick = (key: keyof ProfileForm) =>
+    saved ? profile[key] || '' : profile[key] || prefill[key] || '';
   return {
     legalName: pick('legalName'),
     tradeName: pick('tradeName'),
@@ -108,18 +118,6 @@ function formFromSetup(setup: SetupResponse): ProfileForm {
   };
 }
 
-function statusTone(setup: SetupResponse) {
-  if (setup.status.suspended) return 'bg-red-50 border-red-200 text-red-800';
-  if (setup.status.correctionRequired || setup.status.reviewStatus === 'NEEDS_CORRECTION') {
-    return 'bg-amber-50 border-amber-200 text-amber-900';
-  }
-  if (setup.status.approvedForAccuraSetup) return 'bg-green-50 border-green-200 text-green-800';
-  if (setup.status.reviewStatus === 'UNDER_REVIEW' || setup.status.reviewStatus === 'SUBMITTED') {
-    return 'bg-blue-50 border-blue-200 text-blue-800';
-  }
-  return 'bg-gray-50 border-gray-200 text-gray-800';
-}
-
 export default function EReceiptTaxSetupPage() {
   const { user } = useAuth();
   const [setup, setSetup] = useState<SetupResponse | null>(null);
@@ -128,6 +126,8 @@ export default function EReceiptTaxSetupPage() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [submitNotice, setSubmitNotice] = useState<{ title: string; body: string } | null>(null);
+  const [editingBusinessInfo, setEditingBusinessInfo] = useState(false);
   const [branchCode, setBranchCode] = useState('');
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
@@ -142,6 +142,7 @@ export default function EReceiptTaxSetupPage() {
   const applySetup = useCallback((next: SetupResponse) => {
     setSetup(next);
     setForm(formFromSetup(next));
+    setEditingBusinessInfo(false);
   }, []);
 
   const load = useCallback(async () => {
@@ -174,6 +175,7 @@ export default function EReceiptTaxSetupPage() {
     setBusy(label);
     setError(null);
     setSuccess(null);
+    if (label !== 'submit') setSubmitNotice(null);
     try {
       const res = await work();
       const data = await res.json().catch(() => ({}));
@@ -193,6 +195,35 @@ export default function EReceiptTaxSetupPage() {
     });
   }, [setup]);
 
+  const presentation = useMemo(
+    () =>
+      setup
+        ? accuraOnboardingPresentation({
+            unavailable: setup.unavailable,
+            suspended: setup.status.suspended,
+            reviewStatus: setup.status.reviewStatus,
+            correctionRequired: setup.status.correctionRequired,
+            readinessComplete: setup.readiness.complete,
+            readinessPercent: setup.readiness.percent,
+          })
+        : null,
+    [setup],
+  );
+
+  const businessInfo = useMemo(
+    () =>
+      setup
+        ? accuraBusinessInfoPresentation({
+            profile: setup.profile,
+            reviewStatus: setup.status.reviewStatus,
+            correctionRequired: setup.status.correctionRequired,
+            unavailable: setup.unavailable,
+            editing: editingBusinessInfo,
+          })
+        : null,
+    [setup, editingBusinessInfo],
+  );
+
   if (user && user.role !== 'merchant') {
     return (
       <div className="max-w-3xl mx-auto p-6 text-sm text-gray-600">
@@ -203,6 +234,8 @@ export default function EReceiptTaxSetupPage() {
 
   const saveProfile = async (event: FormEvent) => {
     event.preventDefault();
+    if (!businessInfo?.showSave && !businessInfo?.showSaveChanges) return;
+    const updating = Boolean(businessInfo.showSaveChanges);
     try {
       await run('save', () =>
         fetch(`${API}/api/integrations/accura/onboarding/profile`, {
@@ -219,10 +252,22 @@ export default function EReceiptTaxSetupPage() {
           }),
         }),
       );
-      setSuccess('Saved. ACCURA now holds the current draft.');
+      setSuccess(
+        updating
+          ? 'Business information updated successfully.'
+          : 'Business information saved successfully.',
+      );
     } catch (err) {
+      if (updating) setEditingBusinessInfo(true);
       setError(err instanceof Error ? err.message : 'Unable to save.');
     }
+  };
+
+  const cancelBusinessInfoEdit = () => {
+    if (!setup) return;
+    setForm(formFromSetup(setup));
+    setEditingBusinessInfo(false);
+    setError(null);
   };
 
   const createBranch = async (event: FormEvent) => {
@@ -291,6 +336,7 @@ export default function EReceiptTaxSetupPage() {
   };
 
   const submitReview = async () => {
+    if (!presentation?.submitEnabled || busy) return;
     try {
       await run('submit', () =>
         fetch(`${API}/api/integrations/accura/onboarding/submit`, {
@@ -298,18 +344,17 @@ export default function EReceiptTaxSetupPage() {
           headers: authHeaders(),
         }),
       );
-      setSuccess('Submitted for ACCURA review.');
+      const notice = submittedForReviewNotice(true);
+      setSubmitNotice(notice);
+      setSuccess(null);
+      if (notice) toast.success(`${notice.title}. ${notice.body}`);
     } catch (err) {
+      setSubmitNotice(submittedForReviewNotice(false));
       setError(err instanceof Error ? err.message : 'Unable to submit for review.');
     }
   };
 
-  const canSubmit =
-    Boolean(setup?.readiness.canSubmit) &&
-    !setup?.unavailable &&
-    !setup?.status.suspended &&
-    setup?.status.reviewStatus !== 'SUBMITTED' &&
-    setup?.status.reviewStatus !== 'UNDER_REVIEW';
+  const canSubmit = Boolean(presentation?.submitEnabled);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-16">
@@ -328,28 +373,28 @@ export default function EReceiptTaxSetupPage() {
       </div>
 
       {loading && <div className="bg-white border border-gray-200 rounded-xl p-6 text-sm text-gray-500">Loading ACCURA status…</div>}
-      {success && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">{success}</div>}
+      {submitNotice && (
+        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-4 rounded-lg">
+          <p className="text-sm font-bold uppercase tracking-wide">{submitNotice.title}</p>
+          <p className="text-sm mt-1">{submitNotice.body}</p>
+        </div>
+      )}
+      {success && !submitNotice && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">{success}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
 
       {setup && (
         <>
-          <section className={`rounded-xl border p-6 space-y-3 ${statusTone(setup)}`}>
+          <section className={`rounded-xl border p-6 space-y-3 ${statusToneClass(presentation?.phase || 'incomplete')}`}>
             <p className="text-xs uppercase tracking-wide font-semibold">Registration Status</p>
             <h2 className="text-xl font-bold">
-              {setup.unavailable
-                ? 'ACCURA status temporarily unavailable'
-                : setup.status.suspended
-                  ? 'ACCURA E-Receipt Account Suspended'
-                  : setup.status.reviewStatusLabel || 'Incomplete'}
+              {presentation?.title || 'Setup Incomplete'}
             </h2>
+            {presentation?.body && <p className="text-sm">{presentation.body}</p>}
             {!setup.unavailable && setup.status.companyAccountStatusLabel && (
               <p className="text-sm">Account status: {setup.status.companyAccountStatusLabel}</p>
             )}
-            {setup.status.approvedForAccuraSetup && !setup.status.suspended && (
-              <p className="text-sm font-medium">Approved for ACCURA E-Receipt Setup</p>
-            )}
             {setup.status.issuanceActive && <p className="text-sm font-medium">E-Receipt Issuance: ACTIVE</p>}
-            {setup.status.correctionRequired && setup.status.correctionNotes && (
+            {presentation?.phase === 'correction' && setup.status.correctionNotes && (
               <p className="text-sm whitespace-pre-wrap">{setup.status.correctionNotes}</p>
             )}
             {setup.unavailable && (
@@ -385,42 +430,45 @@ export default function EReceiptTaxSetupPage() {
                 {' '}(this is not replaced by the registered taxpayer name)
               </p>
             )}
-            {usedPrefill && (
+            {usedPrefill && businessInfo && !businessInfo.saved && (
               <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 Some fields were filled from your WeKonnek merchant profile for convenience. Review them before saving. ACCURA remains the official record after you save.
               </p>
             )}
+            {businessInfo?.lockLabel && (
+              <p className="text-sm font-medium text-gray-700">{businessInfo.lockLabel}</p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label className="text-sm space-y-1 md:col-span-2">
                 <span className="font-medium text-gray-700">Registered Business Name</span>
-                <input className="w-full border rounded-lg px-3 py-2" value={form.legalName} onChange={(e) => setForm({ ...form, legalName: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.legalName} onChange={(e) => setForm({ ...form, legalName: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
               <label className="text-sm space-y-1">
                 <span className="font-medium text-gray-700">Trade Name</span>
-                <input className="w-full border rounded-lg px-3 py-2" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
               <label className="text-sm space-y-1">
                 <span className="font-medium text-gray-700">TIN</span>
-                <input className="w-full border rounded-lg px-3 py-2" autoComplete="off" value={form.tin} onChange={(e) => setForm({ ...form, tin: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" autoComplete="off" value={form.tin} onChange={(e) => setForm({ ...form, tin: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
               <label className="text-sm space-y-1 md:col-span-2">
                 <span className="font-medium text-gray-700">Registered Business Address</span>
-                <input className="w-full border rounded-lg px-3 py-2" value={form.registeredAddressLine1} onChange={(e) => setForm({ ...form, registeredAddressLine1: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.registeredAddressLine1} onChange={(e) => setForm({ ...form, registeredAddressLine1: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
               <label className="text-sm space-y-1">
                 <span className="font-medium text-gray-700">Contact email</span>
-                <input className="w-full border rounded-lg px-3 py-2" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
               <label className="text-sm space-y-1">
                 <span className="font-medium text-gray-700">Contact phone</span>
-                <input className="w-full border rounded-lg px-3 py-2" value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} disabled={setup.unavailable} />
+                <input className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} disabled={Boolean(businessInfo?.fieldsDisabled)} />
               </label>
             </div>
 
             <h3 className="text-base font-semibold text-gray-900 pt-2">Tax Configuration</h3>
             <label className="text-sm space-y-1 block">
               <span className="font-medium text-gray-700">VAT / Tax Classification</span>
-              <select className="w-full border rounded-lg px-3 py-2" value={form.classification} onChange={(e) => setForm({ ...form, classification: e.target.value as ProfileForm['classification'] })} disabled={setup.unavailable}>
+              <select className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-50" value={form.classification} onChange={(e) => setForm({ ...form, classification: e.target.value as ProfileForm['classification'] })} disabled={Boolean(businessInfo?.fieldsDisabled)}>
                 <option value="">Select</option>
                 <option value="VAT">VAT</option>
                 <option value="NON_VAT">Non-VAT</option>
@@ -428,9 +476,38 @@ export default function EReceiptTaxSetupPage() {
               </select>
             </label>
             {form.code && <p className="text-xs text-gray-500">ACCURA client code: {form.code}</p>}
-            <button type="submit" disabled={setup.unavailable || Boolean(busy)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50">
-              {busy === 'save' ? 'Saving…' : 'Save'}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              {businessInfo?.showSave && (
+                <button type="submit" disabled={Boolean(busy)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50">
+                  {busy === 'save' ? 'Saving…' : 'Save'}
+                </button>
+              )}
+              {businessInfo?.showEdit && (
+                <button
+                  type="button"
+                  onClick={() => setEditingBusinessInfo(true)}
+                  disabled={Boolean(busy)}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
+                >
+                  Edit
+                </button>
+              )}
+              {businessInfo?.showSaveChanges && (
+                <button type="submit" disabled={Boolean(busy)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50">
+                  {busy === 'save' ? 'Saving…' : 'Save Changes'}
+                </button>
+              )}
+              {businessInfo?.showCancel && (
+                <button
+                  type="button"
+                  onClick={cancelBusinessInfoEdit}
+                  disabled={Boolean(busy)}
+                  className="border border-gray-300 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </form>
 
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
@@ -520,14 +597,24 @@ export default function EReceiptTaxSetupPage() {
             <p className="text-sm text-gray-500">
               ACCURA System Admin reviews this setup. You cannot activate e-receipt issuance yourself.
             </p>
-            <button
-              type="button"
-              onClick={() => void submitReview()}
-              disabled={!canSubmit || Boolean(busy)}
-              className="w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
-            >
-              {busy === 'submit' ? 'Submitting…' : 'Submit for ACCURA Review'}
-            </button>
+            {presentation?.submitKind === 'none' ? (
+              <div className="w-full bg-gray-100 text-gray-600 py-3 rounded-lg font-medium text-center text-sm">
+                {presentation.phase === 'approved'
+                  ? 'Approved for ACCURA Setup'
+                  : presentation.phase === 'under_review'
+                    ? 'Under ACCURA Review'
+                    : 'Submitted for Review'}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void submitReview()}
+                disabled={!canSubmit || Boolean(busy)}
+                className="w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {busy === 'submit' ? 'Submitting…' : presentation?.submitLabel || 'Submit for ACCURA Review'}
+              </button>
+            )}
           </section>
         </>
       )}

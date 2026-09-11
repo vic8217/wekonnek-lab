@@ -21,6 +21,7 @@ import {
   DOCUMENT_TYPE_LABELS,
   mapWeKonnekTaxToAccura,
   merchantFacingAccuraError,
+  merchantFacingLifecycleLabel,
   reviewStatusLabel,
   SECTION_LABELS,
   type AccuraDocumentType,
@@ -475,20 +476,22 @@ export class AccuraOnboardingService {
         profile.companyAccountStatus ||
         'PENDING_REVIEW',
     );
+    const correctionRequired = Boolean(
+      readiness.correctionRequired || profile.correctionRequired,
+    );
+    const readinessComplete = Boolean(readiness.complete);
     return {
       reviewStatus,
-      reviewStatusLabel: String(
-        readiness.reviewStatusLabel ||
-          profile.reviewStatusLabel ||
-          reviewStatusLabel(reviewStatus),
+      reviewStatusLabel: merchantFacingLifecycleLabel(
+        reviewStatus,
+        readinessComplete,
+        correctionRequired,
       ),
       companyAccountStatus: accountStatus,
       companyAccountStatusLabel: accountStatusLabel(accountStatus),
       issuanceActive: accountStatus === 'ACTIVE',
       suspended: accountStatus === 'SUSPENDED',
-      correctionRequired: Boolean(
-        readiness.correctionRequired || profile.correctionRequired,
-      ),
+      correctionRequired,
       correctionNotes:
         typeof readiness.correctionNotes === 'string'
           ? readiness.correctionNotes

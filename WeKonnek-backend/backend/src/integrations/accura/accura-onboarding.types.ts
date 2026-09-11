@@ -112,12 +112,30 @@ export function platformAuthorization(
 }
 
 export const REVIEW_STATUS_LABELS: Record<string, string> = {
-  INCOMPLETE: 'Incomplete',
-  SUBMITTED: 'Submitted',
-  UNDER_REVIEW: 'Under Review',
-  NEEDS_CORRECTION: 'Needs Correction',
-  APPROVED: 'Approved for ACCURA E-Receipt Setup',
+  INCOMPLETE: 'Setup Incomplete',
+  SUBMITTED: 'Submitted for Review',
+  UNDER_REVIEW: 'Under ACCURA Review',
+  NEEDS_CORRECTION: 'Correction Required',
+  APPROVED: 'Approved for ACCURA Setup',
 };
+
+export function merchantFacingLifecycleLabel(
+  reviewStatus: string | null | undefined,
+  readinessComplete: boolean,
+  correctionRequired = false,
+): string {
+  const review = String(reviewStatus || 'INCOMPLETE');
+  if (correctionRequired || review === 'NEEDS_CORRECTION') {
+    return 'Correction Required';
+  }
+  if (review === 'APPROVED') return 'Approved for ACCURA Setup';
+  if (review === 'UNDER_REVIEW') return 'Under ACCURA Review';
+  if (review === 'SUBMITTED') return 'Submitted for Review';
+  if (review === 'INCOMPLETE' || !reviewStatus) {
+    return readinessComplete ? 'Ready for Submission' : 'Setup Incomplete';
+  }
+  return reviewStatusLabel(reviewStatus);
+}
 
 export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   BIR_CERTIFICATE_OF_REGISTRATION: 'Certificate of Registration',

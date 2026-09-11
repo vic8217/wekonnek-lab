@@ -329,9 +329,10 @@ magic bytes and size, does not keep a duplicate file, and never returns
 7. When ACCURA reports setup complete, click **Submit for ACCURA Review**.
 8. In ACCURA System Admin, open Tax Registrations. Request correction or
    approve. Optional `activate: true` is an ACCURA System Admin action only.
-9. Refresh WeKonnek. Expected labels: Incomplete, Submitted, Under Review,
-   Needs Correction, or **Approved for ACCURA E-Receipt Setup**. Never
-   “BIR Approved”. If the ACCURA company is ACTIVE, WeKonnek also shows
+9. Refresh WeKonnek. Expected labels: Setup Incomplete, Ready for
+   Submission, Submitted for Review, Under ACCURA Review, Correction
+   Required, or **Approved for ACCURA Setup**. Never “BIR Approved”. If
+   the ACCURA company is ACTIVE, WeKonnek also shows
    **E-Receipt Issuance: ACTIVE**. If SUSPENDED, WeKonnek shows
    **ACCURA E-Receipt Account Suspended** and does not pretend issuance is
    available.

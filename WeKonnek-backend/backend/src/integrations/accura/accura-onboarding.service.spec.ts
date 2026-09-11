@@ -392,6 +392,20 @@ describe('AccuraOnboardingService', () => {
     expect(setup.profile.tin).toBe('123456789000');
     expect(setup.status.reviewStatus).toBe('INCOMPLETE');
     expect(prisma.audits.some((row: any) => row.action === 'PROFILE_SAVE')).toBe(true);
+    const second = await service.saveProfile(merchantUser, {
+      legalName: 'ABC FOOD CORPORATION',
+      tin: '123456789000',
+      classification: 'VAT',
+      registeredAddressLine1: '1 Ayala Ave',
+    });
+    expect(second.profile.legalName).toBe('ABC FOOD CORPORATION');
+    expect(
+      accura.calls.filter(
+        (call) =>
+          call.method === 'POST' &&
+          /\/platform\/clients$/.test(String(call.url).split('?')[0]),
+      ),
+    ).toHaveLength(1);
   });
 
   it('uploads a document by proxy without retaining WeKonnek storage keys', async () => {
@@ -439,9 +453,14 @@ describe('AccuraOnboardingService', () => {
       },
       'BIR_CERTIFICATE_OF_REGISTRATION',
     );
+    const ready = await service.getSetup(merchantUser);
+    expect(ready.readiness.complete).toBe(true);
+    expect(ready.status.reviewStatus).toBe('INCOMPLETE');
+    expect(ready.status.reviewStatusLabel).toBe('Ready for Submission');
     const submitted = await service.submit(merchantUser);
     expect(submitted.status.reviewStatus).toBe('SUBMITTED');
     expect(submitted.readiness.complete).toBe(true);
+    expect(submitted.status.reviewStatusLabel).toBe('Submitted for Review');
   });
 
   it('surfaces needs correction, approved, and suspended ACCURA states', async () => {
@@ -454,6 +473,7 @@ describe('AccuraOnboardingService', () => {
     client.correctionNotes = 'Please upload a clearer Certificate of Registration.';
     const correction = await service.getSetup(merchantUser);
     expect(correction.status.correctionRequired).toBe(true);
+    expect(correction.status.reviewStatusLabel).toBe('Correction Required');
     expect(correction.status.correctionNotes).toMatch(/Certificate of Registration/);
     client.reviewStatus = 'APPROVED';
     client.companyAccountStatus = 'ACTIVE';

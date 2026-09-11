@@ -173,6 +173,7 @@ export default function AddressPickerPage() {
             address: query,
             details: JSON.stringify({
               addressLine: form.addressLine,
+              region: form.region,
               district: form.district,
               barangay: form.barangay,
               city: form.city,
@@ -242,7 +243,17 @@ export default function AddressPickerPage() {
           <select
             required
             value={form.city}
-            onChange={(event) => setForm(current => ({ ...current, city: event.target.value, district: '', barangay: '', province: findZoneCity(zoneCities, event.target.value)?.provinceName || 'Metro Manila' }))}
+            onChange={(event) => {
+              const city = findZoneCity(zoneCities, event.target.value);
+              setForm((current) => ({
+                ...current,
+                region: city ? zoneRegionName(city) : current.region,
+                city: event.target.value,
+                district: '',
+                barangay: '',
+                province: city?.provinceName || 'Metro Manila',
+              }));
+            }}
             className="mt-1 w-full rounded-xl border bg-white p-3 font-normal"
           ><option value="">Select city</option>{citiesInZoneRegion(zoneCities, form.region).map(item => <option key={item.code} value={item.name}>{item.name}</option>)}</select>
         </label>

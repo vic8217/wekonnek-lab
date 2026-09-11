@@ -8,12 +8,9 @@ import {
   ArrowLeft,
   CalendarDays,
   Heart,
-  Home,
   LayoutGrid,
-  Map,
   MapPin,
   Mic,
-  Package,
   Pill,
   QrCode,
   Search,
@@ -24,7 +21,6 @@ import {
   Tag,
   Tickets,
   Truck,
-  UserRound,
   UtensilsCrossed,
   Wrench,
   type LucideIcon,
@@ -341,14 +337,6 @@ const photos = [
   "/assets/homepage-section-7/image-3.png",
   "/assets/homepage-section-7/image-4.png",
 ];
-const sidebarNav = [
-  { icon: Home, label: "Home", href: "/customer/dashboard" },
-  { icon: Map, label: "Explore Map", href: "/customer/map" },
-  { icon: Tag, label: "Vouchers & Deals", href: "/customer/deals" },
-  { icon: Package, label: "My Orders", href: "/customer/orders" },
-  { icon: UserRound, label: "Profile", href: "/customer/profile" },
-];
-
 export default function CategoryMarketplacePage() {
   const slug = String(useParams().slug || "food");
   const fallbackConfig = configs[slug] || {
@@ -424,48 +412,7 @@ export default function CategoryMarketplacePage() {
   }, [slug]);
 
   return (
-    <div className="min-h-screen bg-white text-[#111827] xl:grid xl:grid-cols-[250px_minmax(0,1fr)]">
-      <aside className="hidden min-h-screen border-r border-slate-200 bg-white p-5 xl:flex xl:flex-col">
-        <Link href="/customer/dashboard" className="flex items-center gap-3">
-          <Image
-            src="/images/weKonnekLogov1.png"
-            alt="WeKonnek"
-            width={58}
-            height={58}
-            className="size-14 object-contain"
-          />
-          <div>
-            <b className="text-blue-700">
-              WE<span className="text-red-600">KONNEK</span>
-            </b>
-            <p className="text-xs text-slate-500">Customer App</p>
-          </div>
-        </Link>
-        <div className="mt-10 rounded-2xl bg-red-50 p-4">
-          <p className="text-xs font-bold text-red-600">BROWSING NEAR</p>
-          <p className="mt-2 font-black">Your City</p>
-          <p className="text-xs text-slate-500">Local shops and offers</p>
-        </div>
-        <nav className="mt-6 space-y-2">
-          {sidebarNav.map(({ icon: Icon, label, href }) => (
-            <Link
-              key={label}
-              href={href}
-              className="flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              <Icon size={19} />
-              {label}
-            </Link>
-          ))}
-        </nav>
-        <Link
-          href="/customer/scan"
-          className="mt-auto flex min-h-12 items-center justify-center gap-3 rounded-xl bg-slate-950 text-sm font-bold text-white"
-        >
-          <QrCode size={19} /> Scan QR
-        </Link>
-      </aside>
-
+    <div className="min-h-screen bg-white text-[#111827]">
       <main className="min-w-0">
         <header className="bg-[#ff0719] px-5 py-4 text-white shadow-[0_12px_25px_rgba(255,7,25,.2)] lg:px-8">
           <div className="flex items-center gap-4">

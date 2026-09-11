@@ -5,6 +5,7 @@ import {
   detectAllowedDocumentMime,
   mapWeKonnekTaxToAccura,
   merchantFacingAccuraError,
+  merchantFacingLifecycleLabel,
   REVIEW_STATUS_LABELS,
   reviewStatusLabel,
 } from './accura-onboarding.types';
@@ -52,9 +53,18 @@ describe('ACCURA onboarding contract helpers', () => {
       'ACCURA E-Receipt Account Suspended',
     );
     expect(reviewStatusLabel('APPROVED')).toBe(
-      'Approved for ACCURA E-Receipt Setup',
+      'Approved for ACCURA Setup',
     );
     expect(REVIEW_STATUS_LABELS.APPROVED).not.toMatch(/BIR Approved/i);
+    expect(merchantFacingLifecycleLabel('INCOMPLETE', false)).toBe(
+      'Setup Incomplete',
+    );
+    expect(merchantFacingLifecycleLabel('INCOMPLETE', true)).toBe(
+      'Ready for Submission',
+    );
+    expect(merchantFacingLifecycleLabel('SUBMITTED', true)).toBe(
+      'Submitted for Review',
+    );
     expect(merchantFacingAccuraError('NETWORK')).not.toMatch(/stack/i);
   });
 
