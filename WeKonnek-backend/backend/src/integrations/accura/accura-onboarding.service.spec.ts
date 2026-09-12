@@ -202,6 +202,22 @@ function createAccura(options?: { down?: boolean; rejectAuth?: boolean }) {
       client.reviewStatus = 'SUBMITTED';
       return jsonResult(200, { reviewStatus: 'SUBMITTED' });
     }
+    if (leaf === 'handoffs' && method === 'POST') {
+      const body = (parsedBody || {}) as Record<string, unknown>;
+      if (body.redirectUrl != null || body.returnUrl != null) {
+        return jsonResult(400, { error: 'DESTINATION_NOT_ALLOWED' });
+      }
+      if (body.destination && body.destination !== 'COMPLETE_SETUP') {
+        return jsonResult(400, { error: 'DESTINATION_NOT_ALLOWED' });
+      }
+      return jsonResult(201, {
+        destination: 'COMPLETE_SETUP',
+        expiresAt: '2026-09-11T08:01:30.000Z',
+        correlationId: body.correlationId || 'corr-mock',
+        redirectUrl:
+          'https://merchant.example.test/handoff/complete-setup?code=abcdefghijklmnopqrstuvwxyz0123456789-_ABC',
+      });
+    }
     return jsonResult(404, { error: 'NOT_FOUND' });
   });
   return { fetchImpl, clients, calls };
@@ -239,6 +255,7 @@ function readinessBody(client: StoredClient) {
     },
   };
   client.complete = Object.values(sections).every((section) => section.complete);
+  const sectionList = Object.values(sections);
   return {
     reviewStatus: client.reviewStatus,
     reviewStatusLabel:
@@ -247,6 +264,9 @@ function readinessBody(client: StoredClient) {
         : client.reviewStatus.replaceAll('_', ' '),
     companyAccountStatus: client.companyAccountStatus,
     complete: client.complete,
+    percent: Math.round(
+      (sectionList.filter((section) => section.complete).length / sectionList.length) * 100,
+    ),
     missing: Object.values(sections).flatMap((section) => section.missing as string[]),
     sections,
     correctionRequired: client.reviewStatus === 'NEEDS_CORRECTION',
@@ -554,5 +574,78 @@ describe('AccuraOnboardingService', () => {
     const setup = await service.getSetup(merchantUser);
     expect(setup.unavailable).toBe(true);
     expect(accura.fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('creates a COMPLETE_SETUP handoff for the signed-in merchant only', async () => {
+    const accura = createAccura();
+    const prisma = prismaFor([MERCHANT_A, MERCHANT_B], []);
+    const service = createService(prisma, accura.fetchImpl, {
+      ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
+    });
+    const spoofedBody = {
+      destination: 'COMPLETE_SETUP' as const,
+      merchantId: 22,
+    };
+    const result = await service.createHandoff(merchantUser, spoofedBody);
+    expect(result.destination).toBe('COMPLETE_SETUP');
+    expect(result.redirectUrl).toContain('/handoff/complete-setup?code=');
+    expect(result.redirectUrl).toContain('https://merchant.example.test/');
+    expect(JSON.stringify(result)).not.toContain(PLATFORM_SECRET);
+    expect(JSON.stringify(result)).not.toContain(INVOICE_SECRET);
+    expect(result.redirectUrl).not.toMatch(/[?&]tin=/i);
+    expect(JSON.stringify(result)).not.toContain(MERCHANT_A.tin);
+    expect(result).not.toHaveProperty('companyId');
+    const handoffCall = accura.calls.find((call) =>
+      String(call.url).includes('/clients/merchant-11/handoffs'),
+    );
+    expect(handoffCall).toBeTruthy();
+    expect(handoffCall?.url).not.toContain('merchant-22');
+    expect(handoffCall?.body).toEqual(
+      expect.objectContaining({
+        destination: 'COMPLETE_SETUP',
+        initiatingUserRef: 'user-a',
+      }),
+    );
+    expect(
+      prisma.audits.some(
+        (row: any) =>
+          row.action === 'HANDOFF_REQUEST' &&
+          row.result === 'ok' &&
+          row.merchantId === 11 &&
+          row.actorUserId === 'user-a' &&
+          row.correlationId,
+      ),
+    ).toBe(true);
+    await expect(
+      service.createHandoff({ id: 'cust-1', role: UserRole.customer }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.createHandoff({
+        id: 'user-a',
+        role: UserRole.merchant,
+        portal: 'shop',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('handles unavailable ACCURA without returning platform secrets', async () => {
+    const prisma = prismaFor([MERCHANT_A], []);
+    const down = createAccura({ down: true });
+    await expect(
+      createService(prisma, down.fetchImpl, {
+        ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
+      }).createHandoff(merchantUser),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: 'ACCURA setup is temporarily unavailable. Please try again.',
+    });
+    expect(JSON.stringify(prisma.audits)).not.toContain(PLATFORM_SECRET);
+    const missingUrl = createAccura();
+    await expect(
+      createService(prisma, missingUrl.fetchImpl).createHandoff(merchantUser),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: 'ACCURA setup is temporarily unavailable. Please try again.',
+    });
   });
 });

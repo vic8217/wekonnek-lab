@@ -22,7 +22,8 @@ Required environment for WeKonnek marketplace invoice issuance:
 
 | Variable | Purpose |
 |---|---|
-| `ACCURA_API_BASE_URL` | ACCURA origin, no trailing slash needed |
+| `ACCURA_API_BASE_URL` | ACCURA API origin, no trailing slash needed |
+| `ACCURA_MERCHANT_APP_URL` | ACCURA merchant web origin for COMPLETE_SETUP redirects (backend-only, HTTPS in production) |
 | `ACCURA_PLATFORM_CLIENT_ID` | PLATFORM IntegrationClient id |
 | `ACCURA_PLATFORM_CLIENT_SECRET` | PLATFORM API secret (shown once; never in the browser) |
 | `ACCURA_SERIES_ID` | ACCURA `NumberSeries` id sent as `seriesId` (must belong to the delegated company) |
@@ -247,13 +248,23 @@ run the ACCURA worker.
 
 ## Merchant Tax Registration / E-Receipt Setup
 
-WeKonnek Merchant Admin is the onboarding UI. ACCURA remains authoritative
-for taxpayer/e-receipt registration. WeKonnek does not store a second
+ACCURA is the canonical merchant registration and compliance UI. WeKonnek
+Merchant Admin shows integration status, shop ↔ ACCURA branch mapping, and
+a secure COMPLETE_SETUP handoff. WeKonnek does not store a second
 `taxProfile` and does not claim BIR approval.
 
-Navigation: Merchant Admin → Settings → E-Receipt / Tax Setup  
+Navigation: Merchant Admin → Settings → ACCURA E-Invoice
 (`/merchant/settings/e-receipt`). Customers, coordinators, and the shop
 portal cannot use this page.
+
+Taxpayer fields (legal name, TIN, tax classification, registered address,
+branches, documents, submit-for-review) are edited in ACCURA `/setup`.
+WeKonnek compatibility routes for those fields remain for now; they are
+not shown in the merchant UI.
+
+There is no verified WeKonnek-to-ACCURA merchant invoice deep-link.
+`/invoices` in ACCURA remains Cloud-session scoped. Do not invent a
+“View E-Invoices” destination until ACCURA publishes one.
 
 ### Platform vs invoice credentials
 
@@ -288,6 +299,7 @@ Required ACCURA scopes (Task 3A names):
 - `platform-client-profile:write`
 - `platform-client-documents:write`
 - `platform-client-onboarding:submit`
+- `platform-client-handoff:create`
 - `platform-invoice:create`
 
 WeKonnek browser routes (JWT merchant):
@@ -301,6 +313,7 @@ WeKonnek browser routes (JWT merchant):
 | POST | `/api/integrations/accura/onboarding/shop-mappings` |
 | GET/POST | `/api/integrations/accura/onboarding/documents` |
 | POST | `/api/integrations/accura/onboarding/submit` |
+| POST | `/api/integrations/accura/onboarding/handoff` |
 
 A WeKonnek Shop is not automatically a BIR registered branch. Shop ↔ ACCURA
 branch mapping is explicit, merchant-scoped, and required before marketplace
@@ -319,25 +332,16 @@ magic bytes and size, does not keep a duplicate file, and never returns
    WeKonnek `ACCURA_PLATFORM_*` only. Configure the platform webhook with
    `ACCURA_WEBHOOK_SECRET` (never the API secret).
 2. Sign in as a WeKonnek merchant (not shop portal, not coordinator).
-3. Open **E-Receipt / Tax Setup**. Review prefilled WeKonnek values.
-4. Save registered business information and tax classification. Status stays
-   Incomplete until ACCURA readiness is complete.
-5. Add actual registered taxpayer branches. Map WeKonnek shops only when
-   the merchant chooses a registered branch.
-6. Upload a Certificate of Registration or other tax registration document
-   (PDF/JPG/PNG, max 10 MB).
-7. When ACCURA reports setup complete, click **Submit for ACCURA Review**.
-8. In ACCURA System Admin, open Tax Registrations. Request correction or
-   approve. Optional `activate: true` is an ACCURA System Admin action only.
-9. Refresh WeKonnek. Expected labels: Setup Incomplete, Ready for
-   Submission, Submitted for Review, Under ACCURA Review, Correction
-   Required, or **Approved for ACCURA Setup**. Never “BIR Approved”. If
-   the ACCURA company is ACTIVE, WeKonnek also shows
-   **E-Receipt Issuance: ACTIVE**. If SUSPENDED, WeKonnek shows
-   **ACCURA E-Receipt Account Suspended** and does not pretend issuance is
-   available.
-10. Place a paid sandbox order after mapping the WeKonnek shop to the
-    ACCURA registered branch. Path:
+3. Open **ACCURA E-Invoice**. WeKonnek shows integration status, shop
+   mapping, and **Continue Setup in ACCURA** / **Open ACCURA**. Taxpayer
+   fields are edited in ACCURA, not WeKonnek.
+4. Complete business, tax, branch, and document setup in ACCURA `/setup`.
+5. Map WeKonnek shops to ACCURA registered branches in WeKonnek.
+6. ACCURA System Admin reviews and may activate. WeKonnek shows
+   Setup Incomplete, Under Review, Correction Required, Ready for
+   activation, Active, or Suspended. Never “BIR Approved”.
+7. Place a paid sandbox order after mapping the WeKonnek shop to the
+   ACCURA registered branch. Path:
     paid `WkOrder` → `AccuraIssuanceJob` → PLATFORM
     `POST /api/v1/integrations/invoices` with `externalClientReference`
     `merchant-<id>` → `invoice.issued` webhook → `WkOrderAccuraInvoice`.

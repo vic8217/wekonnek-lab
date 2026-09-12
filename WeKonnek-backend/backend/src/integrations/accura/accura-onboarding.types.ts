@@ -74,6 +74,7 @@ export function merchantFacingAccuraError(code: string | undefined): string {
     case 'UNAUTHORIZED_CLIENT':
     case 'SCOPE_REQUIRED':
     case 'PLATFORM_AUTHORITY_REQUIRED':
+    case 'HANDOFF_NOT_CONFIGURED':
       return 'E-Receipt service is not configured for this environment.';
     default:
       return 'E-Receipt service is temporarily unavailable. Your saved WeKonnek merchant data has not been lost.';

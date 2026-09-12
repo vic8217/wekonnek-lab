@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   accuraBusinessInfoPresentation,
+  accuraEInvoiceStatusPage,
   accuraOnboardingPresentation,
   hasAuthoritativeTaxpayerProfile,
   isAccuraReadinessComplete,
   submittedForReviewNotice,
-} from './accura-onboarding-presentation';
+} from './accura-onboarding-presentation.ts';
 
 test('80% readiness keeps submit disabled and Setup Incomplete', () => {
   const ui = accuraOnboardingPresentation({
@@ -243,4 +244,66 @@ test('Correction Requested enables Edit again', () => {
   });
   assert.equal(editing.showSaveChanges, true);
   assert.equal(editing.fieldsDisabled, false);
+});
+
+test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
+  const incomplete = accuraEInvoiceStatusPage({
+    reviewStatus: 'INCOMPLETE',
+    readinessPercent: 40,
+    sections: [
+      {
+        key: 'taxpayerIdentity',
+        label: 'Registered business information',
+        complete: false,
+        missing: ['legalName'],
+      },
+      {
+        key: 'invoiceSetup',
+        label: 'Invoice numbering (ACCURA)',
+        complete: false,
+        missing: ['activeNumberSeries'],
+      },
+    ],
+  });
+  assert.equal(incomplete.displayState, 'SETUP_INCOMPLETE');
+  assert.equal(incomplete.title, 'Setup Incomplete');
+  assert.equal(incomplete.progressPercent, 40);
+  assert.equal(incomplete.handoffLabel, 'Continue Setup in ACCURA');
+  assert.equal(incomplete.sections.some((row) => row.missing.includes('legalName')), false);
+  assert.equal(
+    incomplete.sections.some((row) =>
+      row.missing.includes('Invoice numbering is pending ACCURA activation'),
+    ),
+    true,
+  );
+
+  const active = accuraEInvoiceStatusPage({
+    reviewStatus: 'APPROVED',
+    issuanceActive: true,
+    approvedForAccuraSetup: true,
+    readinessPercent: 100,
+    readinessComplete: true,
+    sections: [],
+  });
+  assert.equal(active.displayState, 'ACTIVE');
+  assert.equal(active.title, 'Active');
+  assert.equal(active.handoffLabel, 'Open ACCURA');
+
+  const lastKnown = accuraEInvoiceStatusPage({
+    unavailable: true,
+    lastKnown: true,
+    lastKnownPercent: 40,
+    reviewStatus: 'UNDER_REVIEW',
+  });
+  assert.equal(lastKnown.displayState, 'UNAVAILABLE');
+  assert.equal(lastKnown.progressPercent, 40);
+  assert.equal(lastKnown.handoffEnabled, false);
+
+  const vanished = accuraEInvoiceStatusPage({
+    unavailable: true,
+    lastKnown: true,
+    lastKnownPercent: null,
+    reviewStatus: 'UNDER_REVIEW',
+  });
+  assert.equal(vanished.progressPercent, null);
 });

@@ -82,3 +82,9 @@ export class MapAccuraShopBranchDto {
   @IsString()
   accuraBranchId?: string | null;
 }
+
+export class CreateAccuraHandoffDto {
+  @IsOptional()
+  @IsIn(['COMPLETE_SETUP'])
+  destination?: 'COMPLETE_SETUP';
+}

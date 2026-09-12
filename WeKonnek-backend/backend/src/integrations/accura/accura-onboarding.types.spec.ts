@@ -52,6 +52,9 @@ describe('ACCURA onboarding contract helpers', () => {
     expect(merchantFacingAccuraError('CLIENT_ACCOUNT_SUSPENDED')).toBe(
       'ACCURA E-Receipt Account Suspended',
     );
+    expect(merchantFacingAccuraError('HANDOFF_NOT_CONFIGURED')).toBe(
+      'E-Receipt service is not configured for this environment.',
+    );
     expect(reviewStatusLabel('APPROVED')).toBe(
       'Approved for ACCURA Setup',
     );

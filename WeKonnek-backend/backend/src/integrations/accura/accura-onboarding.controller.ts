@@ -24,6 +24,7 @@ import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
 import { Roles, RolesGuard } from '../../modules/auth/guards/roles.guard';
 import {
   CreateAccuraOnboardingBranchDto,
+  CreateAccuraHandoffDto,
   MapAccuraShopBranchDto,
   UpdateAccuraOnboardingBranchDto,
   UpdateAccuraOnboardingProfileDto,
@@ -141,5 +142,17 @@ export class AccuraOnboardingController {
   @ApiOperation({ summary: 'Submit ACCURA e-receipt setup for review' })
   submit(@Req() req: { user: { id: string; role?: string; portal?: string } }) {
     return this.onboarding.submit(req.user);
+  }
+
+  @Post('handoff')
+  @ApiOperation({
+    summary:
+      'Create a one-time ACCURA COMPLETE_SETUP handoff for the signed-in merchant',
+  })
+  createHandoff(
+    @Req() req: { user: { id: string; role?: string; portal?: string } },
+    @Body() body: CreateAccuraHandoffDto,
+  ) {
+    return this.onboarding.createHandoff(req.user, body);
   }
 }

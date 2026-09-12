@@ -252,3 +252,151 @@ export function statusToneClass(phase: AccuraOnboardingPhase) {
   }
   return 'bg-gray-50 border-gray-200 text-gray-800';
 }
+
+export const ACCURA_MISSING_KEY_LABELS: Record<string, string> = {
+  legalName: 'Business legal name is still needed in ACCURA',
+  tin: 'Tax identification is still needed in ACCURA',
+  classification: 'Tax classification is still needed in ACCURA',
+  registeredAddressLine1: 'Registered address is still needed in ACCURA',
+  branch: 'A registered branch is still needed in ACCURA',
+  activeBranch: 'A registered branch is still needed in ACCURA',
+  hasBranches: 'Branch declaration is still needed in ACCURA',
+  supportingDocument: 'A registration document is still needed in ACCURA',
+  activeNumberSeries: 'Invoice numbering is pending ACCURA activation',
+};
+
+export const ACCURA_SECTION_LABELS: Record<string, string> = {
+  taxpayerIdentity: 'Business registration',
+  taxProfile: 'Tax configuration',
+  branches: 'Branch registration',
+  documents: 'Documents',
+  invoiceSetup: 'Invoice numbering',
+  review: 'ACCURA review',
+  activation: 'Invoice activation',
+};
+
+export type AccuraIntegrationDisplayState =
+  | 'NOT_CONNECTED'
+  | 'SETUP_INCOMPLETE'
+  | 'UNDER_REVIEW'
+  | 'CORRECTION_REQUIRED'
+  | 'READY_FOR_ACTIVATION'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'UNAVAILABLE';
+
+export type AccuraEInvoiceStatusInput = {
+  unavailable?: boolean;
+  lastKnown?: boolean;
+  lastKnownPercent?: number | null;
+  notConfigured?: boolean;
+  suspended?: boolean;
+  correctionRequired?: boolean;
+  reviewStatus?: string | null;
+  issuanceActive?: boolean;
+  approvedForAccuraSetup?: boolean;
+  readinessComplete?: boolean;
+  readinessPercent?: number;
+  sections?: Array<{ key: string; label: string; complete: boolean; missing: string[] }>;
+};
+
+export function friendlyMissingLabel(key: string) {
+  return ACCURA_MISSING_KEY_LABELS[key] || 'Additional information is still needed in ACCURA';
+}
+
+export function accuraIntegrationDisplayState(
+  input: AccuraEInvoiceStatusInput,
+): AccuraIntegrationDisplayState {
+  if (input.unavailable) {
+    if (!input.lastKnown && input.notConfigured) return 'NOT_CONNECTED';
+    return 'UNAVAILABLE';
+  }
+  if (input.suspended) return 'SUSPENDED';
+  if (input.correctionRequired || input.reviewStatus === 'NEEDS_CORRECTION') {
+    return 'CORRECTION_REQUIRED';
+  }
+  if (input.issuanceActive) return 'ACTIVE';
+  if (input.approvedForAccuraSetup || input.reviewStatus === 'APPROVED') {
+    return 'READY_FOR_ACTIVATION';
+  }
+  if (input.reviewStatus === 'SUBMITTED' || input.reviewStatus === 'UNDER_REVIEW') {
+    return 'UNDER_REVIEW';
+  }
+  return 'SETUP_INCOMPLETE';
+}
+
+const DISPLAY_TITLES: Record<AccuraIntegrationDisplayState, string> = {
+  NOT_CONNECTED: 'Not connected',
+  SETUP_INCOMPLETE: 'Setup Incomplete',
+  UNDER_REVIEW: 'Under Review',
+  CORRECTION_REQUIRED: 'Correction Required',
+  READY_FOR_ACTIVATION: 'Ready for activation',
+  ACTIVE: 'Active',
+  SUSPENDED: 'Suspended',
+  UNAVAILABLE: 'Temporarily unavailable',
+};
+
+export function accuraEInvoiceStatusPage(input: AccuraEInvoiceStatusInput) {
+  const displayState = accuraIntegrationDisplayState(input);
+  const livePercent = Number.isFinite(Number(input.readinessPercent))
+    ? Number(input.readinessPercent)
+    : null;
+  const cachedPercent =
+    input.lastKnownPercent == null ? null : Number(input.lastKnownPercent);
+  const progressPercent = input.unavailable
+    ? input.lastKnown
+      ? cachedPercent
+      : null
+    : livePercent;
+  const reviewComplete = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(
+    String(input.reviewStatus || ''),
+  );
+  const sections = [
+    ...(input.sections || []).map((section) => ({
+      key: section.key,
+      label: ACCURA_SECTION_LABELS[section.key] || section.label,
+      complete: section.complete,
+      missing: (section.missing || [])
+        .map((item) => friendlyMissingLabel(item))
+        .filter((label, index, all) => all.indexOf(label) === index),
+    })),
+    {
+      key: 'review',
+      label: ACCURA_SECTION_LABELS.review,
+      complete: reviewComplete,
+      missing: reviewComplete ? [] : ['ACCURA review has not been submitted'],
+    },
+    {
+      key: 'activation',
+      label: ACCURA_SECTION_LABELS.activation,
+      complete: Boolean(input.issuanceActive),
+      missing: input.issuanceActive
+        ? []
+        : [friendlyMissingLabel('activeNumberSeries')],
+    },
+  ];
+  return {
+    displayState,
+    title: DISPLAY_TITLES[displayState],
+    body: 'Your taxpayer registration and e-invoice compliance setup are managed securely in ACCURA.',
+    progressPercent,
+    lastKnown: Boolean(input.unavailable && input.lastKnown),
+    handoffLabel: input.issuanceActive ? 'Open ACCURA' : 'Continue Setup in ACCURA',
+    handoffEnabled: !input.unavailable,
+    sections,
+  };
+}
+
+export function statusPageToneClass(state: AccuraIntegrationDisplayState) {
+  if (state === 'SUSPENDED' || state === 'CORRECTION_REQUIRED') {
+    return 'bg-red-50 border-red-200 text-red-800';
+  }
+  if (state === 'ACTIVE' || state === 'READY_FOR_ACTIVATION') {
+    return 'bg-green-50 border-green-200 text-green-800';
+  }
+  if (state === 'UNDER_REVIEW') return 'bg-blue-50 border-blue-200 text-blue-800';
+  if (state === 'UNAVAILABLE' || state === 'NOT_CONNECTED') {
+    return 'bg-amber-50 border-amber-200 text-amber-900';
+  }
+  return 'bg-gray-50 border-gray-200 text-gray-800';
+}

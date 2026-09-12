@@ -53,6 +53,7 @@ describe('AccuraOnboardingController HTTP', () => {
   const submit = jest.fn();
   const mapShop = jest.fn();
   const uploadDocument = jest.fn();
+  const createHandoff = jest.fn();
 
   beforeEach(async () => {
     currentUser = { id: 'user-a', role: UserRole.merchant };
@@ -65,6 +66,13 @@ describe('AccuraOnboardingController HTTP', () => {
     submit.mockReset().mockResolvedValue({ status: { reviewStatus: 'SUBMITTED' } });
     mapShop.mockReset().mockResolvedValue({ shops: [] });
     uploadDocument.mockReset().mockResolvedValue({ documents: [] });
+    createHandoff.mockReset().mockResolvedValue({
+      destination: 'COMPLETE_SETUP',
+      redirectUrl:
+        'https://merchant.example.test/handoff/complete-setup?code=abcdefghijklmnopqrstuvwxyz0123456789-_ABC',
+      expiresAt: '2026-09-11T08:01:30.000Z',
+      correlationId: 'corr-1',
+    });
     const module = await Test.createTestingModule({
       controllers: [AccuraOnboardingController],
       providers: [
@@ -80,6 +88,7 @@ describe('AccuraOnboardingController HTTP', () => {
             mapShop,
             submit,
             uploadDocument,
+            createHandoff,
           },
         },
       ],
@@ -168,5 +177,39 @@ describe('AccuraOnboardingController HTTP', () => {
       expect.objectContaining({ originalname: 'cor.pdf' }),
       'BIR_CERTIFICATE_OF_REGISTRATION',
     );
+  });
+
+  it('lets an authenticated merchant request a handoff without a browser merchantId', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/integrations/accura/onboarding/handoff')
+      .send({ destination: 'COMPLETE_SETUP' })
+      .expect(201);
+    expect(createHandoff).toHaveBeenCalledWith(
+      { id: 'user-a', role: UserRole.merchant },
+      expect.objectContaining({ destination: 'COMPLETE_SETUP' }),
+    );
+    expect(response.body.redirectUrl).toContain(
+      '/handoff/complete-setup?code=',
+    );
+    expect(JSON.stringify(response.body)).not.toContain('platform-secret');
+    await request(app.getHttpServer())
+      .post('/api/integrations/accura/onboarding/handoff')
+      .send({ destination: 'COMPLETE_SETUP', merchantId: 22 })
+      .expect(400);
+    expect(createHandoff).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unauthenticated and customer handoff requests', async () => {
+    currentUser = null;
+    await request(app.getHttpServer())
+      .post('/api/integrations/accura/onboarding/handoff')
+      .send({ destination: 'COMPLETE_SETUP' })
+      .expect(403);
+    currentUser = { id: 'cust-1', role: UserRole.customer };
+    await request(app.getHttpServer())
+      .post('/api/integrations/accura/onboarding/handoff')
+      .send({ destination: 'COMPLETE_SETUP' })
+      .expect(403);
+    expect(createHandoff).not.toHaveBeenCalled();
   });
 });

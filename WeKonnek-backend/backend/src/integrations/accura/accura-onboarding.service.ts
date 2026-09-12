@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   ForbiddenException,
   HttpException,
@@ -36,6 +37,12 @@ import {
   type AccuraOnboardingFetch,
   type AccuraPlatformConfig,
 } from './accura-onboarding.http';
+import {
+  ACCURA_HANDOFF_DESTINATION,
+  ACCURA_HANDOFF_UNAVAILABLE,
+  readAccuraMerchantAppUrl,
+  validateAccuraHandoffRedirectUrl,
+} from './accura-handoff';
 
 type SessionUser = {
   id: string;
@@ -263,6 +270,111 @@ export class AccuraOnboardingService {
     return this.loadSetup(merchant, user, false);
   }
 
+  async createHandoff(user: SessionUser, body?: { destination?: string }) {
+    const merchant = await this.requireMerchant(user);
+    const correlationId = randomUUID();
+    const destination = String(body?.destination || ACCURA_HANDOFF_DESTINATION);
+    if (destination !== ACCURA_HANDOFF_DESTINATION) {
+      await this.audit(
+        merchant.id,
+        user.id,
+        'HANDOFF_REQUEST',
+        'rejected',
+        'DESTINATION_NOT_ALLOWED',
+        correlationId,
+      );
+      throw new HttpException(
+        ACCURA_HANDOFF_UNAVAILABLE,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const merchantAppUrl = readAccuraMerchantAppUrl((key) =>
+      this.config.get<string>(key),
+    );
+    const machine = this.tryMachine();
+    if (!machine || !merchantAppUrl) {
+      await this.audit(
+        merchant.id,
+        user.id,
+        'HANDOFF_REQUEST',
+        'unavailable',
+        'NOT_CONFIGURED',
+        correlationId,
+      );
+      throw new HttpException(
+        ACCURA_HANDOFF_UNAVAILABLE,
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    try {
+      await this.ensureProvisioned(merchant, user);
+      const reference = accuraExternalClientReference(merchant.id);
+      const result = await this.platformJson(
+        'POST',
+        `${ACCURA_PLATFORM_CLIENTS_PATH}/${encodeURIComponent(reference)}/handoffs`,
+        {
+          destination: ACCURA_HANDOFF_DESTINATION,
+          initiatingUserRef: user.id,
+          correlationId,
+        },
+      );
+      this.assertOk(result.status, result.body, [200, 201]);
+      const payload = asRecord(result.body) ?? {};
+      const redirectUrl = validateAccuraHandoffRedirectUrl(
+        payload.redirectUrl,
+        merchantAppUrl,
+      );
+      if (!redirectUrl) {
+        await this.audit(
+          merchant.id,
+          user.id,
+          'HANDOFF_REQUEST',
+          'unavailable',
+          'INVALID_REDIRECT',
+          correlationId,
+        );
+        throw new HttpException(
+          ACCURA_HANDOFF_UNAVAILABLE,
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
+      await this.audit(
+        merchant.id,
+        user.id,
+        'HANDOFF_REQUEST',
+        'ok',
+        undefined,
+        correlationId,
+      );
+      return {
+        destination: ACCURA_HANDOFF_DESTINATION,
+        redirectUrl,
+        expiresAt:
+          typeof payload.expiresAt === 'string' ? payload.expiresAt : null,
+        correlationId,
+      };
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        error.message === ACCURA_HANDOFF_UNAVAILABLE
+      ) {
+        throw error;
+      }
+      await this.audit(
+        merchant.id,
+        user.id,
+        'HANDOFF_REQUEST',
+        'unavailable',
+        'NETWORK',
+        correlationId,
+      );
+      throw new HttpException(
+        ACCURA_HANDOFF_UNAVAILABLE,
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
   private async loadSetup(
     merchant: {
       id: number;
@@ -331,6 +443,7 @@ export class AccuraOnboardingService {
         accountStatus: String(
           readiness.companyAccountStatus || profile.companyAccountStatus || '',
         ),
+        readinessPercent: this.readinessView(readiness).percent,
       });
       const registeredAddress = asRecord(profile.registeredAddress);
       const taxProfile = asRecord(profile.taxProfile);
@@ -519,15 +632,22 @@ export class AccuraOnboardingService {
           : [],
       };
     });
-    const total = namedSections.length;
-    const done = namedSections.filter((section) => section.complete).length;
+    const accuraPercent = Number(readiness.percent);
+    const fromSections = namedSections.length
+      ? Math.round(
+          (namedSections.filter((section) => section.complete).length /
+            namedSections.length) *
+            100,
+        )
+      : complete
+        ? 100
+        : 0;
+    const percent = Number.isFinite(accuraPercent)
+      ? Math.max(0, Math.min(100, Math.round(accuraPercent)))
+      : fromSections;
     return {
       complete,
-      percent: total
-        ? Math.round((done / total) * 100)
-        : complete
-          ? 100
-          : 0,
+      percent,
       missing,
       sections: namedSections,
       canSubmit: complete,
@@ -607,10 +727,14 @@ export class AccuraOnboardingService {
         correctionNotes: null,
         approvedForAccuraSetup: false,
         lastKnown: Boolean(link?.lastReviewStatus),
+        lastKnownPercent: link?.lastReadinessPercent ?? null,
       },
       readiness: {
         complete: false,
-        percent: 0,
+        percent:
+          typeof link?.lastReadinessPercent === 'number'
+            ? link.lastReadinessPercent
+            : 0,
         missing: [],
         sections: [],
         canSubmit: false,
@@ -712,9 +836,18 @@ export class AccuraOnboardingService {
 
   private async rememberStatus(
     merchantId: number,
-    input: { reviewStatus: string; accountStatus: string },
+    input: {
+      reviewStatus: string;
+      accountStatus: string;
+      readinessPercent?: number;
+    },
   ) {
     const reference = accuraExternalClientReference(merchantId);
+    const percent =
+      typeof input.readinessPercent === 'number' &&
+      Number.isFinite(input.readinessPercent)
+        ? Math.max(0, Math.min(100, Math.round(input.readinessPercent)))
+        : null;
     await this.prisma.accuraMerchantLink.upsert({
       where: { merchantId },
       create: {
@@ -722,11 +855,13 @@ export class AccuraOnboardingService {
         externalClientReference: reference,
         lastReviewStatus: input.reviewStatus || null,
         lastAccountStatus: input.accountStatus || null,
+        lastReadinessPercent: percent,
         lastSyncedAt: new Date(),
       },
       update: {
         lastReviewStatus: input.reviewStatus || null,
         lastAccountStatus: input.accountStatus || null,
+        lastReadinessPercent: percent,
         lastSyncedAt: new Date(),
       },
     });
@@ -738,6 +873,7 @@ export class AccuraOnboardingService {
     action: string,
     result: string,
     errorCategory?: string,
+    correlationId?: string,
   ) {
     await this.prisma.accuraOnboardingAuditEvent.create({
       data: {
@@ -746,10 +882,11 @@ export class AccuraOnboardingService {
         action,
         result,
         errorCategory: errorCategory || null,
+        correlationId: correlationId || null,
       },
     });
     this.logger.log(
-      `accura_onboarding action=${action} result=${result} merchantId=${merchantId}`,
+      `accura_onboarding action=${action} result=${result} merchantId=${merchantId}${correlationId ? ` correlationId=${correlationId}` : ''}`,
     );
   }
 }

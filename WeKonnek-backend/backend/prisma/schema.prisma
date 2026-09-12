@@ -1047,6 +1047,7 @@ model AccuraMerchantLink {
   externalClientReference   String    @unique @map("external_client_reference") @db.VarChar(80)
   lastReviewStatus          String?   @map("last_review_status") @db.VarChar(40)
   lastAccountStatus         String?   @map("last_account_status") @db.VarChar(40)
+  lastReadinessPercent      Int?      @map("last_readiness_percent")
   lastSyncedAt              DateTime? @map("last_synced_at") @db.Timestamptz
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                 DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
@@ -1078,6 +1079,7 @@ model AccuraOnboardingAuditEvent {
   action        String   @db.VarChar(80)
   result        String   @db.VarChar(50)
   errorCategory String?  @map("error_category") @db.VarChar(80)
+  correlationId String?  @map("correlation_id") @db.VarChar(80)
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
