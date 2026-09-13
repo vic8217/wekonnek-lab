@@ -848,6 +848,7 @@ export class AccuraOnboardingService {
       Number.isFinite(input.readinessPercent)
         ? Math.max(0, Math.min(100, Math.round(input.readinessPercent)))
         : null;
+    const productionEligible = String(input.accountStatus || '').toUpperCase() === 'ACTIVE';
     await this.prisma.accuraMerchantLink.upsert({
       where: { merchantId },
       create: {
@@ -856,12 +857,14 @@ export class AccuraOnboardingService {
         lastReviewStatus: input.reviewStatus || null,
         lastAccountStatus: input.accountStatus || null,
         lastReadinessPercent: percent,
+        lastProductionEligible: productionEligible,
         lastSyncedAt: new Date(),
       },
       update: {
         lastReviewStatus: input.reviewStatus || null,
         lastAccountStatus: input.accountStatus || null,
         lastReadinessPercent: percent,
+        lastProductionEligible: productionEligible,
         lastSyncedAt: new Date(),
       },
     });

@@ -134,7 +134,7 @@ describe('AccuraIssuanceAdminService', () => {
       service.retryFailed('job-1', undefined),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(service.retryFailed('job-1', 'admin-1')).rejects.toThrow(
-      'Only FAILED ACCURA issuance jobs can be retried',
+      'Only FAILED or PENDING_RECONCILIATION ACCURA issuance jobs can be retried',
     );
   });
 });

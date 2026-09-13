@@ -43,6 +43,16 @@ interface Order {
   created_at: string;
   time_ago: string;
   items: OrderItem[];
+  accura_electronic_invoice?: {
+    official_number: string;
+    issued_at: string;
+    verification_url?: string | null;
+  } | null;
+  accura_issuance?: {
+    status: string;
+    last_error_category?: string | null;
+    visibility?: string;
+  } | null;
 }
 
 interface OrderItem {
@@ -285,6 +295,8 @@ export default function MerchantOrdersPage() {
           payment_status: order.payment_status || order.paymentStatus,
           created_at: order.created_at,
           time_ago: timeAgo,
+          accura_electronic_invoice: order.accura_electronic_invoice || null,
+          accura_issuance: order.accura_issuance || null,
         };
       });
 
@@ -1270,6 +1282,45 @@ function OrderDetailsModal({
             <div className="rounded-xl bg-gray-50 p-3"><p className="text-[10px] font-bold uppercase text-gray-500">Order total</p><p className="mt-1 font-black">₱{Number(order.total_amount).toFixed(2)}</p></div>
           </div>
           {order.delivery_address && <div className="rounded-xl border border-blue-100 bg-blue-50 p-4"><p className="text-xs font-bold uppercase text-blue-700">Delivery address</p><p className="mt-1 text-sm text-blue-900">{order.delivery_address}</p></div>}
+          {(order.accura_electronic_invoice || order.accura_issuance) && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-1">
+              <p className="text-xs font-bold uppercase text-gray-500">ACCURA Electronic Invoice</p>
+              {order.accura_electronic_invoice ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-900">
+                    Official Number: {order.accura_electronic_invoice.official_number}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Issued At: {new Date(order.accura_electronic_invoice.issued_at).toLocaleString()}
+                  </p>
+                  {order.accura_electronic_invoice.verification_url && (
+                    <a
+                      href={order.accura_electronic_invoice.verification_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block text-sm font-semibold text-[#DB0002]"
+                    >
+                      Verification Link
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-gray-700">
+                  {order.accura_issuance?.visibility === 'INVOICE_SETUP_REQUIRED'
+                    ? 'ACCURA setup requires attention'
+                    : 'Electronic invoice pending'}
+                  {order.accura_issuance?.visibility === 'INVOICE_SETUP_REQUIRED' && (
+                    <>
+                      {' · '}
+                      <Link href="/merchant/settings/e-receipt" className="font-semibold text-[#DB0002]">
+                        Open ACCURA
+                      </Link>
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
           <section><h3 className="mb-3 font-black text-gray-900">Items ordered</h3>{order.items.length === 0 ? <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">No item details were returned for this order.</div> : <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200">{order.items.map(item => <label key={item.id} className={`flex items-center gap-4 p-4 transition-colors ${order.status === 'preparing' ? 'cursor-pointer' : ''} ${preparedItemIds.has(item.id) ? 'bg-green-50' : order.status === 'preparing' ? 'hover:bg-gray-50' : ''}`}>{order.status === 'preparing' && <input type="checkbox" checked={preparedItemIds.has(item.id)} onChange={() => togglePrepared(item.id)} className="size-5 shrink-0 accent-green-600" aria-label={`Mark ${item.product_name} as prepared`} />}<div className="min-w-0 flex-1"><p className={`font-semibold ${preparedItemIds.has(item.id) ? 'text-green-800 line-through' : 'text-gray-900'}`}>{item.product_name}</p><p className="mt-1 text-xs text-gray-500">₱{item.price.toFixed(2)} × {item.quantity}</p></div><p className="font-black text-gray-900">₱{item.subtotal.toFixed(2)}</p></label>)}</div>}</section>
           <div className="space-y-1 border-t border-gray-100 pt-3 text-sm"><div className="flex justify-between"><span>Items / Subtotal</span><b>₱{Math.max(0, Number(order.total_amount) - Number(order.delivery_fee ?? 0)).toFixed(2)}</b></div><div className="flex justify-between text-gray-600"><span>Delivery fee</span><span>₱{Number(order.delivery_fee ?? 0).toFixed(2)}</span></div><div className="flex justify-between border-t border-gray-200 pt-2 text-base font-black"><span>Total</span><span>₱{Number(order.total_amount).toFixed(2)}</span></div></div>
         </div>

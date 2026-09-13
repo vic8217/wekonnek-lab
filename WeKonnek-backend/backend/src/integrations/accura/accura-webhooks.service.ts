@@ -17,6 +17,7 @@ import {
 import {
   ACCURA_INVOICE_ISSUED_EVENT,
   ACCURA_INVOICE_ISSUED_STATUS,
+  ACCURA_MERCHANT_STATUS_EVENTS,
   ACCURA_SOURCE_SYSTEM,
   ACCURA_WEBHOOK_VERSION,
   DEFAULT_ACCURA_WEBHOOK_TOLERANCE_SECONDS,
@@ -102,6 +103,70 @@ function parseIssuedAt(value: unknown): Date {
   return issuedAt;
 }
 
+function mapMerchantStatusEvent(
+  eventType: string,
+  data: Record<string, unknown>,
+): {
+  reviewStatus: string | null;
+  accountStatus: string | null;
+  productionEligible: boolean;
+  auditResult: string;
+} {
+  const reviewFromPayload = optionalText(data.reviewStatus) ?? null;
+  const accountFromPayload = optionalText(data.accountStatus) ?? null;
+  switch (eventType) {
+    case 'merchant.onboarding.started':
+      return {
+        reviewStatus: reviewFromPayload || 'INCOMPLETE',
+        accountStatus: accountFromPayload || 'PENDING_REVIEW',
+        productionEligible: false,
+        auditResult: 'onboarding_started',
+      };
+    case 'merchant.compliance.needs_action':
+      return {
+        reviewStatus: reviewFromPayload || 'NEEDS_CORRECTION',
+        accountStatus: accountFromPayload || 'PENDING_REVIEW',
+        productionEligible: false,
+        auditResult: 'needs_action',
+      };
+    case 'merchant.compliance.verified':
+      return {
+        reviewStatus: reviewFromPayload || 'APPROVED',
+        accountStatus: accountFromPayload || 'PENDING_REVIEW',
+        productionEligible: false,
+        auditResult: 'compliance_verified',
+      };
+    case 'merchant.production.activated':
+      return {
+        reviewStatus: reviewFromPayload || 'APPROVED',
+        accountStatus: accountFromPayload || 'ACTIVE',
+        productionEligible: true,
+        auditResult: 'production_activated',
+      };
+    case 'merchant.production.suspended':
+      return {
+        reviewStatus: reviewFromPayload,
+        accountStatus: accountFromPayload || 'SUSPENDED',
+        productionEligible: false,
+        auditResult: 'production_suspended',
+      };
+    case 'merchant.disconnected':
+      return {
+        reviewStatus: reviewFromPayload,
+        accountStatus: accountFromPayload || 'DISCONNECTED',
+        productionEligible: false,
+        auditResult: 'disconnected',
+      };
+    default:
+      return {
+        reviewStatus: reviewFromPayload,
+        accountStatus: accountFromPayload,
+        productionEligible: false,
+        auditResult: 'status_updated',
+      };
+  }
+}
+
 /**
  * Unknown WkOrder.externalOrderId returns HTTP 404 and writes nothing.
  * ACCURA invoice.issued is emitted after a committed WeKonnek order, so a
@@ -173,21 +238,25 @@ export class AccuraWebhooksService {
       throw new BadRequestException('Unsupported ACCURA webhook version');
     }
 
-    if (envelope.eventType !== ACCURA_INVOICE_ISSUED_EVENT) {
-      this.audit({
-        result: 'ignored_unsupported_event_type',
-        eventId: envelope.eventId,
-        eventType: envelope.eventType,
-        timestamp,
-      });
-      return {
-        outcome: 'ignored',
-        eventId: envelope.eventId,
-        eventType: envelope.eventType,
-      };
+    if (envelope.eventType === ACCURA_INVOICE_ISSUED_EVENT) {
+      return this.processInvoiceIssued(envelope);
     }
 
-    return this.processInvoiceIssued(envelope);
+    if (ACCURA_MERCHANT_STATUS_EVENTS.has(envelope.eventType)) {
+      return this.processMerchantStatus(envelope);
+    }
+
+    this.audit({
+      result: 'ignored_unsupported_event_type',
+      eventId: envelope.eventId,
+      eventType: envelope.eventType,
+      timestamp,
+    });
+    return {
+      outcome: 'ignored',
+      eventId: envelope.eventId,
+      eventType: envelope.eventType,
+    };
   }
 
   private webhookSecret(): string {
@@ -271,6 +340,110 @@ export class AccuraWebhooksService {
       invoice.externalClientReference = externalClientReference;
     }
     return invoice;
+  }
+
+  private async processMerchantStatus(
+    envelope: AccuraWebhookEnvelope,
+  ): Promise<AccuraWebhookResult> {
+    const data = envelope.data;
+    const reference =
+      optionalText(data.externalClientReference) ||
+      optionalText(data.externalMerchantId);
+    if (!reference || !/^merchant-\d+$/.test(reference)) {
+      throw new BadRequestException(
+        'Invalid webhook payload: externalClientReference',
+      );
+    }
+    const merchantId = Number(reference.slice('merchant-'.length));
+    const mapped = mapMerchantStatusEvent(envelope.eventType, data);
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const existingEvent = await tx.accuraWebhookEvent.findUnique({
+          where: { eventId: envelope.eventId },
+        });
+        if (existingEvent) {
+          return {
+            outcome: 'duplicate' as const,
+            eventId: envelope.eventId,
+            eventType: envelope.eventType,
+          };
+        }
+
+        const link = await tx.accuraMerchantLink.findUnique({
+          where: { merchantId },
+        });
+        if (!link) {
+          const merchant = await tx.merchant.findUnique({
+            where: { id: merchantId },
+            select: { id: true },
+          });
+          if (!merchant) {
+            throw new NotFoundException('Merchant not found for ACCURA status');
+          }
+          await tx.accuraMerchantLink.create({
+            data: {
+              merchantId,
+              externalClientReference: reference,
+              lastReviewStatus: mapped.reviewStatus,
+              lastAccountStatus: mapped.accountStatus,
+              lastProductionEligible: mapped.productionEligible,
+              lastSyncedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.accuraMerchantLink.update({
+            where: { merchantId },
+            data: {
+              lastReviewStatus: mapped.reviewStatus ?? link.lastReviewStatus,
+              lastAccountStatus: mapped.accountStatus ?? link.lastAccountStatus,
+              lastProductionEligible: mapped.productionEligible,
+              lastSyncedAt: new Date(),
+            },
+          });
+        }
+
+        await tx.accuraWebhookEvent.create({
+          data: {
+            eventId: envelope.eventId,
+            eventType: envelope.eventType,
+            payloadVersion: envelope.version,
+            processedAt: new Date(),
+          },
+        });
+
+        await tx.accuraOnboardingAuditEvent.create({
+          data: {
+            merchantId,
+            action: 'STATUS_WEBHOOK',
+            result: mapped.auditResult,
+            errorCategory: envelope.eventType,
+            correlationId: envelope.eventId,
+          },
+        });
+
+        return {
+          outcome: 'processed' as const,
+          eventId: envelope.eventId,
+          eventType: envelope.eventType,
+        };
+      });
+      this.audit({
+        result: `merchant_status_${mapped.auditResult}`,
+        eventId: envelope.eventId,
+        eventType: envelope.eventType,
+      });
+      return result;
+    } catch (error) {
+      if (isUniqueConflict(error)) {
+        return {
+          outcome: 'duplicate',
+          eventId: envelope.eventId,
+          eventType: envelope.eventType,
+        };
+      }
+      throw error;
+    }
   }
 
   private async processInvoiceIssued(

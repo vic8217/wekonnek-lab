@@ -128,7 +128,7 @@ export default function SecuritySettingsPage() {
           <p className="text-sm text-gray-500">
             Manage two-factor authentication.{' '}
             <Link href="/merchant/settings/e-receipt" className="text-[#DB0002] hover:underline">
-              ACCURA E-Invoice
+              ACCURA Electronic Invoicing
             </Link>
           </p>
         </div>

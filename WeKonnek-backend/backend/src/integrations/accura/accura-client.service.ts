@@ -9,7 +9,9 @@ import {
 } from './accura-client.mapping';
 import {
   ACCURA_CLIENT_FETCH,
+  ACCURA_IDEMPOTENCY_CONFLICT_CODES,
   ACCURA_INVOICE_CREATE_PATH,
+  ACCURA_PERMANENT_ISSUANCE_CODES,
   DEFAULT_ACCURA_API_TIMEOUT_MS,
   accuraBasicAuthorization,
   accuraInvoiceIdempotencyKey,
@@ -17,6 +19,11 @@ import {
   type AccuraInvoiceIssueResponse,
   type AccuraIssuanceOutcome,
 } from './accura-client.types';
+import { getAccuraMerchantIssuanceEligibility } from './accura-eligibility';
+import {
+  assertAccuraEnvironmentBinding,
+  readAccuraEnv,
+} from './accura-env';
 
 type AccuraPlatformIssuanceConfig = {
   baseUrl: string;
@@ -110,16 +117,21 @@ export class AccuraClientService {
         result: 'rejected_branch_mapping',
         wkOrderId: order.id,
         orderCode: order.orderCode,
-        category: 'REJECTED',
+        category: 'BRANCH_NOT_MAPPED',
       });
       return {
         ok: false,
-        category: 'REJECTED',
+        category: 'BRANCH_NOT_MAPPED',
         retryable: false,
         wkOrderId: order.id,
         orderCode: order.orderCode,
         message: targets.message,
       };
+    }
+
+    const merchantGate = await this.evaluateMerchantEligibility(order);
+    if (merchantGate) {
+      return merchantGate;
     }
 
     const request = mapWkOrderToAccuraInvoiceRequest(order, {
@@ -138,6 +150,55 @@ export class AccuraClientService {
       };
     }
     return this.postIssuance(machine, order, request);
+  }
+
+  /** Returns a terminal outcome when cached ACCURA status blocks issuance; null when eligible to call ACCURA. */
+  private async evaluateMerchantEligibility(
+    order: AccuraOrderSnapshot,
+  ): Promise<Extract<AccuraIssuanceOutcome, { ok: false }> | null> {
+    const link = await this.prisma.accuraMerchantLink.findUnique({
+      where: { merchantId: order.merchantId },
+      select: {
+        lastAccountStatus: true,
+        lastReviewStatus: true,
+        lastProductionEligible: true,
+        lastSyncedAt: true,
+      },
+    });
+    const hasBranchMapping = Boolean(
+      order.shop?.accuraBranchMapping?.accuraBranchId,
+    );
+    const gate = getAccuraMerchantIssuanceEligibility({
+      link,
+      shopId: order.shopId,
+      hasBranchMapping,
+    });
+    if (gate.eligible) return null;
+
+    const category =
+      gate.reason === 'MERCHANT_SUSPENDED'
+        ? 'MERCHANT_SUSPENDED'
+        : gate.reason === 'MERCHANT_DISCONNECTED'
+          ? 'MERCHANT_DISCONNECTED'
+          : gate.reason === 'BRANCH_NOT_MAPPED'
+            ? 'BRANCH_NOT_MAPPED'
+            : gate.reason === 'MERCHANT_NOT_MAPPED'
+              ? 'NOT_ELIGIBLE'
+              : 'MERCHANT_NOT_ACTIVE';
+    this.audit({
+      result: 'eligibility_blocked',
+      wkOrderId: order.id,
+      orderCode: order.orderCode,
+      category,
+    });
+    return {
+      ok: false,
+      category,
+      retryable: false,
+      wkOrderId: order.id,
+      orderCode: order.orderCode,
+      message: gate.reason,
+    };
   }
 
   private async postIssuance(
@@ -237,10 +298,39 @@ export class AccuraClientService {
     let category: Extract<AccuraIssuanceOutcome, { ok: false }>['category'] =
       'REJECTED';
     let retryable = false;
-    if (status === 401 || status === 403 || code === 'UNAUTHORIZED_CLIENT') {
-      category = 'AUTH';
+
+    if (code && ACCURA_IDEMPOTENCY_CONFLICT_CODES.has(code)) {
+      category = 'PENDING_RECONCILIATION';
+      retryable = true;
     } else if (status === 409 || code === 'IDEMPOTENCY_KEY_REUSED') {
-      category = 'IDEMPOTENCY_CONFLICT';
+      category = 'PENDING_RECONCILIATION';
+      retryable = true;
+    } else if (code && ACCURA_PERMANENT_ISSUANCE_CODES.has(code)) {
+      category =
+        code === 'CLIENT_ACCOUNT_SUSPENDED' || code === 'MERCHANT_SUSPENDED'
+          ? 'MERCHANT_SUSPENDED'
+          : code === 'CLIENT_ACCOUNT_TERMINATED' ||
+              code === 'MERCHANT_DISCONNECTED' ||
+              code === 'DELEGATION_REVOKED' ||
+              code === 'PLATFORM_DELEGATION_REVOKED'
+            ? 'MERCHANT_DISCONNECTED'
+            : code === 'CLIENT_ACCOUNT_NOT_ACTIVE' ||
+                code === 'MERCHANT_NOT_ACTIVE' ||
+                code === 'COMPLIANCE_NOT_VERIFIED'
+              ? 'MERCHANT_NOT_ACTIVE'
+              : code === 'BRANCH_NOT_MAPPED' ||
+                  code === 'BRANCH_NOT_OWNED_BY_DELEGATED_CLIENT' ||
+                  code === 'BRANCH_NOT_ALLOWED'
+                ? 'BRANCH_NOT_MAPPED'
+                : code === 'UNAUTHORIZED_CLIENT' ||
+                    code === 'SCOPE_REQUIRED' ||
+                    code === 'PLATFORM_INVOICE_SCOPE_REQUIRED'
+                  ? 'AUTH'
+                  : 'CONFIGURATION';
+      retryable = false;
+    } else if (status === 401 || status === 403 || code === 'UNAUTHORIZED_CLIENT') {
+      category = 'AUTH';
+      retryable = false;
     } else if (status === 429 || code === 'RATE_LIMIT_EXCEEDED') {
       category = 'RATE_LIMITED';
       retryable = true;
@@ -248,6 +338,7 @@ export class AccuraClientService {
       category = 'SERVER';
       retryable = true;
     }
+
     this.audit({
       result: `http_${status}`,
       wkOrderId: order.id,
@@ -260,7 +351,7 @@ export class AccuraClientService {
       retryable,
       wkOrderId: order.id,
       orderCode: order.orderCode,
-      message: 'ACCURA issuance was not accepted',
+      message: code || 'ACCURA issuance was not accepted',
       httpStatus: status,
     };
   }
@@ -361,11 +452,29 @@ export class AccuraClientService {
       .get<string>('ACCURA_PLATFORM_CLIENT_SECRET')
       ?.trim();
     const seriesId = this.config.get<string>('ACCURA_SERIES_ID')?.trim();
+    const merchantAppUrl = this.config
+      .get<string>('ACCURA_MERCHANT_APP_URL')
+      ?.trim();
     const timeoutRaw = this.config.get<string | number>(
       'ACCURA_API_TIMEOUT_MS',
     );
     const timeoutMs = Number(timeoutRaw ?? DEFAULT_ACCURA_API_TIMEOUT_MS);
     if (!baseUrl || !clientId || !clientSecret || !seriesId) {
+      return null;
+    }
+    const env =
+      readAccuraEnv((key) => this.config.get<string>(key)) ??
+      (String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+        ? null
+        : 'UAT');
+    const bound = assertAccuraEnvironmentBinding({
+      env,
+      apiBaseUrl: baseUrl,
+      merchantAppUrl,
+      nodeEnv: process.env.NODE_ENV,
+    });
+    if (!bound.ok) {
+      this.logger.error(`accura_env_rejected reason=${bound.reason}`);
       return null;
     }
     return {

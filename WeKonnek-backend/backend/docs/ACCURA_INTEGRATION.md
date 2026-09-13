@@ -325,6 +325,20 @@ Documents are proxied to ACCURA as `multipart/form-data`. WeKonnek checks
 magic bytes and size, does not keep a duplicate file, and never returns
 `storageKey` to the browser.
 
+## Gap-fill notes (WeKonnek side)
+
+- Production eligibility is gated locally from cached ACCURA account status
+  before invoice HTTP. ACCURA remains final authority.
+- Idempotency conflicts enter `PENDING_RECONCILIATION` and wait for
+  `invoice.issued` webhook association (same stable idempotency key).
+- Merchant status webhooks (when published by ACCURA) update
+  `AccuraMerchantLink` caches. Pull refresh remains available.
+- `ACCURA_ENV` binds UAT vs PRODUCTION. Non-production defaults to UAT when unset.
+- Legacy taxpayer write APIs return HTTP 410 unless
+  `ACCURA_LEGACY_ONBOARDING_WRITE=true`.
+- `ACCURA_SERIES_ID` is still sent when ACCURA requires it; series ownership
+  remains with ACCURA. Do not add merchant-facing series UI in WeKonnek.
+
 ### UAT flow
 
 1. Create an ACCURA PLATFORM IntegrationClient with the platform-client

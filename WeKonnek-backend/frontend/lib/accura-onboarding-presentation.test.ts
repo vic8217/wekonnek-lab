@@ -268,7 +268,7 @@ test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
   assert.equal(incomplete.displayState, 'SETUP_INCOMPLETE');
   assert.equal(incomplete.title, 'Setup Incomplete');
   assert.equal(incomplete.progressPercent, 40);
-  assert.equal(incomplete.handoffLabel, 'Continue Setup in ACCURA');
+  assert.equal(incomplete.handoffLabel, 'Continue ACCURA Setup');
   assert.equal(incomplete.sections.some((row) => row.missing.includes('legalName')), false);
   assert.equal(
     incomplete.sections.some((row) =>
@@ -287,7 +287,14 @@ test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
   });
   assert.equal(active.displayState, 'ACTIVE');
   assert.equal(active.title, 'Active');
-  assert.equal(active.handoffLabel, 'Open ACCURA');
+  assert.equal(active.handoffLabel, 'Manage ACCURA');
+
+  const notConnected = accuraEInvoiceStatusPage({
+    unavailable: true,
+    notConfigured: true,
+  });
+  assert.equal(notConnected.displayState, 'NOT_CONNECTED');
+  assert.equal(notConnected.handoffLabel, 'Set Up ACCURA');
 
   const lastKnown = accuraEInvoiceStatusPage({
     unavailable: true,

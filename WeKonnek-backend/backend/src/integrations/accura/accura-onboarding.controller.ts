@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  GoneException,
   Param,
   Patch,
   Post,
@@ -11,6 +12,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -38,56 +40,95 @@ import { ACCURA_DOCUMENT_MAX_BYTES } from './accura-onboarding.types';
 @Roles(UserRole.merchant)
 @Controller('integrations/accura/onboarding')
 export class AccuraOnboardingController {
-  constructor(private readonly onboarding: AccuraOnboardingService) {}
+  constructor(
+    private readonly onboarding: AccuraOnboardingService,
+    private readonly config: ConfigService,
+  ) {}
+
+  private rejectLegacyWrite(operation: string): void {
+    const enabled =
+      this.config.get<string>('ACCURA_LEGACY_ONBOARDING_WRITE')?.trim() ===
+      'true';
+    if (!enabled) {
+      throw new GoneException(
+        `${operation} is deprecated. Complete taxpayer setup in ACCURA via handoff.`,
+      );
+    }
+  }
 
   @Get('profile')
-  @ApiOperation({ summary: 'ACCURA e-receipt registration profile for the signed-in merchant' })
-  getProfile(@Req() req: { user: { id: string; role?: string; portal?: string } }) {
+  @ApiOperation({
+    summary: 'ACCURA e-receipt registration profile for the signed-in merchant',
+  })
+  getProfile(
+    @Req() req: { user: { id: string; role?: string; portal?: string } },
+  ) {
     return this.onboarding.getSetup(req.user);
   }
 
   @Patch('profile')
-  @ApiOperation({ summary: 'Save ACCURA taxpayer profile draft' })
+  @ApiOperation({
+    summary:
+      '[Deprecated] Save ACCURA taxpayer profile draft — use ACCURA handoff',
+    deprecated: true,
+  })
   saveProfile(
     @Req() req: { user: { id: string; role?: string; portal?: string } },
     @Body() body: UpdateAccuraOnboardingProfileDto,
   ) {
+    this.rejectLegacyWrite('Taxpayer profile write');
     return this.onboarding.saveProfile(req.user, body);
   }
 
   @Get('readiness')
   @ApiOperation({ summary: 'ACCURA e-receipt setup completeness' })
-  getReadiness(@Req() req: { user: { id: string; role?: string; portal?: string } }) {
+  getReadiness(
+    @Req() req: { user: { id: string; role?: string; portal?: string } },
+  ) {
     return this.onboarding.getReadiness(req.user);
   }
 
   @Get('branches')
-  @ApiOperation({ summary: 'ACCURA registered branches for the signed-in merchant' })
-  listBranches(@Req() req: { user: { id: string; role?: string; portal?: string } }) {
+  @ApiOperation({
+    summary: 'ACCURA registered branches for the signed-in merchant',
+  })
+  listBranches(
+    @Req() req: { user: { id: string; role?: string; portal?: string } },
+  ) {
     return this.onboarding.listBranches(req.user);
   }
 
   @Post('branches')
-  @ApiOperation({ summary: 'Create an ACCURA registered taxpayer branch' })
+  @ApiOperation({
+    summary: '[Deprecated] Create ACCURA registered branch — use ACCURA handoff',
+    deprecated: true,
+  })
   createBranch(
     @Req() req: { user: { id: string; role?: string; portal?: string } },
     @Body() body: CreateAccuraOnboardingBranchDto,
   ) {
+    this.rejectLegacyWrite('ACCURA branch create');
     return this.onboarding.createBranch(req.user, body);
   }
 
   @Patch('branches/:branchId')
-  @ApiOperation({ summary: 'Update an ACCURA registered taxpayer branch' })
+  @ApiOperation({
+    summary: '[Deprecated] Update ACCURA registered branch — use ACCURA handoff',
+    deprecated: true,
+  })
   updateBranch(
     @Req() req: { user: { id: string; role?: string; portal?: string } },
     @Param('branchId') branchId: string,
     @Body() body: UpdateAccuraOnboardingBranchDto,
   ) {
+    this.rejectLegacyWrite('ACCURA branch update');
     return this.onboarding.updateBranch(req.user, branchId, body);
   }
 
   @Post('shop-mappings')
-  @ApiOperation({ summary: 'Map a WeKonnek shop to an ACCURA registered branch' })
+  @ApiOperation({
+    summary: 'Map a WeKonnek shop to an ACCURA registered branch',
+  })
   mapShop(
     @Req() req: { user: { id: string; role?: string; portal?: string } },
     @Body() body: MapAccuraShopBranchDto,
@@ -109,7 +150,10 @@ export class AccuraOnboardingController {
 
   @Post('documents')
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Upload a supporting tax registration document to ACCURA' })
+  @ApiOperation({
+    summary: '[Deprecated] Upload supporting document — use ACCURA handoff',
+    deprecated: true,
+  })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -125,7 +169,9 @@ export class AccuraOnboardingController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('documentType') documentType: string,
   ) {
-    if (!file) throw new BadRequestException('A registration document file is required');
+    this.rejectLegacyWrite('Document upload');
+    if (!file)
+      throw new BadRequestException('A registration document file is required');
     return this.onboarding.uploadDocument(
       req.user,
       {
@@ -139,8 +185,13 @@ export class AccuraOnboardingController {
   }
 
   @Post('submit')
-  @ApiOperation({ summary: 'Submit ACCURA e-receipt setup for review' })
+  @ApiOperation({
+    summary:
+      '[Deprecated] Submit ACCURA setup for review — use ACCURA handoff',
+    deprecated: true,
+  })
   submit(@Req() req: { user: { id: string; role?: string; portal?: string } }) {
+    this.rejectLegacyWrite('Compliance submit');
     return this.onboarding.submit(req.user);
   }
 

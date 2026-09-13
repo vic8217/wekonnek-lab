@@ -56,6 +56,17 @@ interface OrderRow {
   } | null;
   order_items: OrderItem[];
   service_requests?: Array<{ id: number; type: string; details?: string | null; status: string; assigned_staff_name?: string | null; created_at: string }>;
+  accura_electronic_invoice?: {
+    invoice_id: string;
+    official_number: string;
+    issued_at: string;
+    verification_url?: string | null;
+  } | null;
+  accura_issuance?: {
+    status: string;
+    last_error_category?: string | null;
+    visibility?: string;
+  } | null;
 }
 
 interface TimelineStep {
@@ -497,6 +508,40 @@ export default function CustomerOrderDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Official ACCURA electronic invoice (not local billing preview) */}
+      {(order.accura_electronic_invoice || order.accura_issuance) && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
+          <h2 className="font-bold text-gray-900">Electronic Invoice</h2>
+          {order.accura_electronic_invoice ? (
+            <>
+              <p className="text-sm text-gray-700">
+                Invoice No. {order.accura_electronic_invoice.official_number}
+              </p>
+              <p className="text-xs text-gray-500">
+                Issued:{' '}
+                {new Date(order.accura_electronic_invoice.issued_at).toLocaleString()}
+              </p>
+              {order.accura_electronic_invoice.verification_url && (
+                <a
+                  href={order.accura_electronic_invoice.verification_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex text-sm font-semibold text-[#DB0002] hover:underline"
+                >
+                  View / Verify Invoice
+                </a>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-600">
+              {order.accura_issuance?.visibility === 'INVOICE_SETUP_REQUIRED'
+                ? 'ACCURA setup requires attention for this merchant.'
+                : 'Electronic invoice pending'}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Timeline */}
       {order.order_type !== 'dine_in' && <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">

@@ -381,10 +381,21 @@ export function accuraEInvoiceStatusPage(input: AccuraEInvoiceStatusInput) {
     body: 'Your taxpayer registration and e-invoice compliance setup are managed securely in ACCURA.',
     progressPercent,
     lastKnown: Boolean(input.unavailable && input.lastKnown),
-    handoffLabel: input.issuanceActive ? 'Open ACCURA' : 'Continue Setup in ACCURA',
+    handoffLabel: handoffLabelFor(displayState, Boolean(input.issuanceActive)),
     handoffEnabled: !input.unavailable,
     sections,
   };
+}
+
+function handoffLabelFor(
+  state: AccuraIntegrationDisplayState,
+  issuanceActive: boolean,
+): string {
+  if (state === 'NOT_CONNECTED') return 'Set Up ACCURA';
+  if (state === 'ACTIVE' || issuanceActive) return 'Manage ACCURA';
+  if (state === 'SUSPENDED') return 'Open ACCURA';
+  if (state === 'CORRECTION_REQUIRED') return 'Continue Setup';
+  return 'Continue ACCURA Setup';
 }
 
 export function statusPageToneClass(state: AccuraIntegrationDisplayState) {

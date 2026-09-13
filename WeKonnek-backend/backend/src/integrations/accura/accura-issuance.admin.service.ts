@@ -61,25 +61,34 @@ export class AccuraIssuanceAdminService {
       include: { wkOrder: { select: { orderCode: true } } },
     });
     if (!existing) throw new NotFoundException('ACCURA issuance job not found');
-    if (existing.status !== AccuraIssuanceJobStatus.FAILED) {
+    const retryable: AccuraIssuanceJobStatus[] = [
+      AccuraIssuanceJobStatus.FAILED,
+      AccuraIssuanceJobStatus.PENDING_RECONCILIATION,
+    ];
+    if (!retryable.includes(existing.status)) {
       throw new ConflictException(
-        'Only FAILED ACCURA issuance jobs can be retried',
+        'Only FAILED or PENDING_RECONCILIATION ACCURA issuance jobs can be retried',
       );
     }
 
     const updated = await this.prisma.accuraIssuanceJob.updateMany({
-      where: { id: jobId, status: AccuraIssuanceJobStatus.FAILED },
+      where: {
+        id: jobId,
+        status: { in: retryable },
+      },
       data: {
         status: AccuraIssuanceJobStatus.PENDING,
         nextAttemptAt: new Date(),
         processingStartedAt: null,
         completedAt: null,
         attemptCount: 0,
+        lastErrorCategory: null,
+        lastHttpStatus: null,
       },
     });
     if (updated.count !== 1) {
       throw new ConflictException(
-        'Only FAILED ACCURA issuance jobs can be retried',
+        'Only FAILED or PENDING_RECONCILIATION ACCURA issuance jobs can be retried',
       );
     }
 

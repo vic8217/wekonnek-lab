@@ -198,7 +198,7 @@ export default function EReceiptTaxSetupPage() {
           </svg>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">ACCURA E-Invoice</h1>
+          <h1 className="text-2xl font-bold text-gray-900">ACCURA Electronic Invoicing</h1>
           <p className="text-sm text-gray-500">
             WeKonnek display name and shops stay here. Taxpayer registration is managed in ACCURA.
           </p>

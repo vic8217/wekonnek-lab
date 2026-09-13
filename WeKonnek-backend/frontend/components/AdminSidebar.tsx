@@ -116,6 +116,18 @@ export default function AdminSidebar({
             </Link>
 
             <Link
+              href="/admin/accura/merchants"
+              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                isActive('/admin/accura')
+                  ? 'bg-[#DB0002] text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <span className="flex w-5 justify-center text-lg">🧾</span>
+              <span className="font-medium">ACCURA Connections</span>
+            </Link>
+
+            <Link
               href="/admin/riders"
               className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                 isActive('/admin/riders')

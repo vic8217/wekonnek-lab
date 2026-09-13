@@ -10,6 +10,7 @@ import {
 import {
   ACCURA_ISSUANCE_CLAIMABLE,
   ACCURA_ISSUANCE_CLOCK,
+  ACCURA_RECONCILIATION_DELAY_MS,
   DEFAULT_ACCURA_ISSUANCE_BATCH_SIZE,
   DEFAULT_ACCURA_ISSUANCE_MAX_ATTEMPTS,
   DEFAULT_ACCURA_ISSUANCE_PROCESSING_LEASE_SECONDS,
@@ -173,6 +174,26 @@ export class AccuraIssuanceProcessorService {
       return;
     }
 
+    const prior = await this.prisma.accuraIssuanceJob.findUnique({
+      where: { id: job.id },
+      select: { lastErrorCategory: true },
+    });
+    const reconciling =
+      prior?.lastErrorCategory === 'PENDING_RECONCILIATION' ||
+      prior?.lastErrorCategory === 'IDEMPOTENCY_CONFLICT';
+
+    // Lost-success path: poll for webhook association only — never mint a new key.
+    if (reconciling) {
+      await this.scheduleReconciliation(job, now, {
+        ok: false,
+        category: 'PENDING_RECONCILIATION',
+        retryable: true,
+        wkOrderId: job.wkOrderId,
+        message: 'Waiting for ACCURA invoice association',
+      });
+      return;
+    }
+
     const idempotencyKey = accuraInvoiceIdempotencyKey(job.wkOrderId);
     this.logger.log(
       `accura_issuance_attempt jobId=${job.id} wkOrderId=${job.wkOrderId} attempt=${job.attemptCount} idempotencyKey=${idempotencyKey}`,
@@ -185,6 +206,13 @@ export class AccuraIssuanceProcessorService {
         httpStatus: outcome.httpStatus,
         orderCode: outcome.orderCode,
       });
+      return;
+    }
+    if (
+      outcome.category === 'PENDING_RECONCILIATION' ||
+      outcome.category === 'IDEMPOTENCY_CONFLICT'
+    ) {
+      await this.scheduleReconciliation(job, now, outcome);
       return;
     }
     if (outcome.retryable && job.attemptCount < this.maxAttempts()) {
@@ -222,6 +250,42 @@ export class AccuraIssuanceProcessorService {
     });
     this.logger.log(
       `accura_issuance_succeeded jobId=${job.id} wkOrderId=${job.wkOrderId} result=${input.result}`,
+    );
+  }
+
+  private async scheduleReconciliation(
+    job: { id: string; wkOrderId: number; attemptCount: number },
+    now: Date,
+    outcome: Extract<AccuraIssuanceOutcome, { ok: false }>,
+  ): Promise<void> {
+    if (job.attemptCount >= this.maxAttempts()) {
+      await this.failJob(job, now, {
+        ...outcome,
+        category: 'PENDING_RECONCILIATION',
+        retryable: false,
+      });
+      return;
+    }
+    const nextAttemptAt = new Date(
+      now.getTime() + ACCURA_RECONCILIATION_DELAY_MS,
+    );
+    await this.prisma.accuraIssuanceJob.update({
+      where: { id: job.id },
+      data: {
+        status: AccuraIssuanceJobStatus.PENDING_RECONCILIATION,
+        nextAttemptAt,
+        processingStartedAt: null,
+        lastErrorCategory: 'PENDING_RECONCILIATION',
+        lastHttpStatus: outcome.httpStatus ?? null,
+      },
+    });
+    await this.audit(job, {
+      result: 'PENDING_RECONCILIATION',
+      errorCategory: 'PENDING_RECONCILIATION',
+      orderCode: outcome.orderCode,
+    });
+    this.logger.warn(
+      `accura_issuance_reconcile jobId=${job.id} wkOrderId=${job.wkOrderId} nextAttemptAt=${nextAttemptAt.toISOString()}`,
     );
   }
 

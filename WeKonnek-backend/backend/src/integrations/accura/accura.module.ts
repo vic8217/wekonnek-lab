@@ -4,6 +4,8 @@ import { AccuraIssuanceAdminController } from './accura-issuance.admin.controlle
 import { AccuraIssuanceAdminService } from './accura-issuance.admin.service';
 import { AccuraIssuanceJobsService } from './accura-issuance-jobs.service';
 import { AccuraIssuanceProcessorService } from './accura-issuance.processor';
+import { AccuraMerchantAdminController } from './accura-merchant-admin.controller';
+import { AccuraMerchantAdminService } from './accura-merchant-admin.service';
 import { AccuraOnboardingController } from './accura-onboarding.controller';
 import { AccuraOnboardingService } from './accura-onboarding.service';
 import { AccuraWebhooksController } from './accura-webhooks.controller';
@@ -14,6 +16,7 @@ import { ACCURA_ISSUANCE_CLOCK } from './accura-issuance.types';
   controllers: [
     AccuraWebhooksController,
     AccuraIssuanceAdminController,
+    AccuraMerchantAdminController,
     AccuraOnboardingController,
   ],
   providers: [
@@ -21,6 +24,7 @@ import { ACCURA_ISSUANCE_CLOCK } from './accura-issuance.types';
     AccuraWebhooksService,
     AccuraIssuanceJobsService,
     AccuraIssuanceAdminService,
+    AccuraMerchantAdminService,
     AccuraIssuanceProcessorService,
     AccuraOnboardingService,
     { provide: ACCURA_ISSUANCE_CLOCK, useValue: () => new Date() },

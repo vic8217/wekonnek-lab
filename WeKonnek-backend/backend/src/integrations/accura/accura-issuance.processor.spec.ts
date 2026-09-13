@@ -178,6 +178,14 @@ function createStore(options?: {
         );
       }),
     },
+    accuraMerchantLink: {
+      findUnique: jest.fn(async () => ({
+        lastAccountStatus: 'ACTIVE',
+        lastReviewStatus: 'APPROVED',
+        lastProductionEligible: true,
+        lastSyncedAt: new Date('2026-09-01T00:00:00.000Z'),
+      })),
+    },
     wkOrder: {
       findUnique: jest.fn(async ({ where }: any) => {
         if (where.id !== order.id) return null;
@@ -211,6 +219,8 @@ function configFor(values: Record<string, string> = {}) {
     ACCURA_BRANCH_ID: 'accura-branch-1',
     ACCURA_SERIES_ID: 'accura-series-1',
     ACCURA_API_TIMEOUT_MS: '10000',
+    ACCURA_ENV: 'UAT',
+    ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
   };
   return {
     get: (key: string) => ({ ...defaults, ...values })[key],

@@ -126,6 +126,14 @@ class Store {
           return data;
         },
       },
+      accuraMerchantLink: {
+        findUnique: async () => ({
+          lastAccountStatus: 'ACTIVE',
+          lastReviewStatus: 'APPROVED',
+          lastProductionEligible: true,
+          lastSyncedAt: new Date('2026-09-01T00:00:00.000Z'),
+        }),
+      },
     };
   }
 
@@ -175,6 +183,8 @@ function config() {
         ACCURA_WEBHOOK_TOLERANCE_SECONDS: '300',
         ACCURA_BRANCH_ID: 'branch-1',
         ACCURA_SERIES_ID: 'series-1',
+        ACCURA_ENV: 'UAT',
+        ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
       };
       return values[key];
     },
@@ -309,8 +319,8 @@ describe('ACCURA sandbox round-trip', () => {
     const result = await client.issueInvoiceForOrder(ORDER_ID);
     expect(result).toMatchObject({
       ok: false,
-      category: 'IDEMPOTENCY_CONFLICT',
-      retryable: false,
+      category: 'PENDING_RECONCILIATION',
+      retryable: true,
     });
     expect(store.invoices.get(ORDER_ID)?.accuraInvoiceId).toBe('accura-inv-A');
   });

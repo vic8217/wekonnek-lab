@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await */
 import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
@@ -89,6 +90,13 @@ describe('AccuraOnboardingController HTTP', () => {
             submit,
             uploadDocument,
             createHandoff,
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) =>
+              key === 'ACCURA_LEGACY_ONBOARDING_WRITE' ? 'true' : undefined,
           },
         },
       ],

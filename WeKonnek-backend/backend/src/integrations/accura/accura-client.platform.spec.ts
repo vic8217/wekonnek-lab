@@ -98,6 +98,14 @@ function createService(
       findUnique: jest.fn(async () => null),
       create: jest.fn(),
     },
+    accuraMerchantLink: {
+      findUnique: jest.fn(async () => ({
+        lastAccountStatus: 'ACTIVE',
+        lastReviewStatus: 'APPROVED',
+        lastProductionEligible: true,
+        lastSyncedAt: new Date('2026-09-01T00:00:00.000Z'),
+      })),
+    },
   };
   const config = {
     get: (key: string) =>
@@ -110,6 +118,8 @@ function createService(
         ACCURA_SERIES_ID: 'accura-series-1',
         ACCURA_BRANCH_ID: 'legacy-default-branch',
         ACCURA_API_TIMEOUT_MS: '10000',
+        ACCURA_ENV: 'UAT',
+        ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
         ...extraEnv,
       })[key],
   } as unknown as ConfigService;
@@ -217,7 +227,7 @@ describe('ACCURA delegated marketplace issuance', () => {
     const result = await service.issueInvoiceForOrder(42);
     expect(result).toMatchObject({
       ok: false,
-      category: 'REJECTED',
+      category: 'BRANCH_NOT_MAPPED',
       retryable: false,
     });
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -243,7 +253,7 @@ describe('ACCURA delegated marketplace issuance', () => {
     );
     await expect(crossShop.issueInvoiceForOrder(42)).resolves.toMatchObject({
       ok: false,
-      category: 'REJECTED',
+      category: 'BRANCH_NOT_MAPPED',
       retryable: false,
     });
     const staleOwner = createService(
@@ -263,7 +273,7 @@ describe('ACCURA delegated marketplace issuance', () => {
     );
     await expect(staleOwner.issueInvoiceForOrder(42)).resolves.toMatchObject({
       ok: false,
-      category: 'REJECTED',
+      category: 'BRANCH_NOT_MAPPED',
       retryable: false,
     });
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -271,10 +281,10 @@ describe('ACCURA delegated marketplace issuance', () => {
 
   it('classifies suspended, revoked, and missing delegation as permanent', async () => {
     const cases = [
-      [403, 'CLIENT_ACCOUNT_SUSPENDED', 'AUTH'],
-      [403, 'PLATFORM_DELEGATION_REVOKED', 'AUTH'],
-      [404, 'PLATFORM_DELEGATION_NOT_FOUND', 'REJECTED'],
-      [403, 'BRANCH_NOT_OWNED_BY_DELEGATED_CLIENT', 'AUTH'],
+      [403, 'CLIENT_ACCOUNT_SUSPENDED', 'MERCHANT_SUSPENDED'],
+      [403, 'PLATFORM_DELEGATION_REVOKED', 'MERCHANT_DISCONNECTED'],
+      [404, 'PLATFORM_DELEGATION_NOT_FOUND', 'CONFIGURATION'],
+      [403, 'BRANCH_NOT_OWNED_BY_DELEGATED_CLIENT', 'BRANCH_NOT_MAPPED'],
     ] as const;
     for (const [status, error, category] of cases) {
       const fetchImpl = jest.fn(async () => jsonResponse(status, { error }));

@@ -19,12 +19,20 @@ export const ACCURA_ISSUANCE_RETRY_DELAYS_MS = [
 export type AccuraIssuanceClock = () => Date;
 
 export type AccuraInvoiceVisibility =
-  'INVOICE_PENDING' | 'INVOICE_ISSUED' | 'INVOICE_FAILED';
+  | 'INVOICE_PENDING'
+  | 'INVOICE_ISSUED'
+  | 'INVOICE_FAILED'
+  | 'INVOICE_RECONCILING'
+  | 'INVOICE_SETUP_REQUIRED';
 
 export const ACCURA_ISSUANCE_CLAIMABLE: AccuraIssuanceJobStatus[] = [
   AccuraIssuanceJobStatus.PENDING,
   AccuraIssuanceJobStatus.RETRY_SCHEDULED,
+  AccuraIssuanceJobStatus.PENDING_RECONCILIATION,
 ];
+
+/** Delay between reconciliation polls after lost-success / idempotency conflict. */
+export const ACCURA_RECONCILIATION_DELAY_MS = 60_000;
 
 export function nextAccuraIssuanceRetryAt(
   now: Date,
@@ -41,6 +49,7 @@ export function nextAccuraIssuanceRetryAt(
 export function accuraInvoiceVisibility(input: {
   jobStatus: AccuraIssuanceJobStatus;
   hasInvoice: boolean;
+  lastErrorCategory?: string | null;
 }): AccuraInvoiceVisibility {
   if (
     input.hasInvoice ||
@@ -48,7 +57,24 @@ export function accuraInvoiceVisibility(input: {
   ) {
     return 'INVOICE_ISSUED';
   }
+  if (input.jobStatus === AccuraIssuanceJobStatus.PENDING_RECONCILIATION) {
+    return 'INVOICE_RECONCILING';
+  }
   if (input.jobStatus === AccuraIssuanceJobStatus.FAILED) {
+    const cat = String(input.lastErrorCategory || '');
+    if (
+      [
+        'MERCHANT_NOT_ACTIVE',
+        'MERCHANT_SUSPENDED',
+        'MERCHANT_DISCONNECTED',
+        'BRANCH_NOT_MAPPED',
+        'CONFIGURATION',
+        'NOT_ELIGIBLE',
+        'AUTH',
+      ].includes(cat)
+    ) {
+      return 'INVOICE_SETUP_REQUIRED';
+    }
     return 'INVOICE_FAILED';
   }
   return 'INVOICE_PENDING';

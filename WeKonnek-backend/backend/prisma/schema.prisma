@@ -995,6 +995,7 @@ enum AccuraIssuanceJobStatus {
   PENDING
   PROCESSING
   RETRY_SCHEDULED
+  PENDING_RECONCILIATION
   SUCCEEDED
   FAILED
 }
@@ -1048,6 +1049,7 @@ model AccuraMerchantLink {
   lastReviewStatus          String?   @map("last_review_status") @db.VarChar(40)
   lastAccountStatus         String?   @map("last_account_status") @db.VarChar(40)
   lastReadinessPercent      Int?      @map("last_readiness_percent")
+  lastProductionEligible    Boolean?  @map("last_production_eligible")
   lastSyncedAt              DateTime? @map("last_synced_at") @db.Timestamptz
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                 DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz

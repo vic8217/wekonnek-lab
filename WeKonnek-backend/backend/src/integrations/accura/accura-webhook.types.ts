@@ -4,6 +4,15 @@ export const ACCURA_SOURCE_SYSTEM = 'WEKONNEK';
 export const ACCURA_INVOICE_ISSUED_STATUS = 'ISSUED';
 export const DEFAULT_ACCURA_WEBHOOK_TOLERANCE_SECONDS = 300;
 
+export const ACCURA_MERCHANT_STATUS_EVENTS = new Set([
+  'merchant.onboarding.started',
+  'merchant.compliance.needs_action',
+  'merchant.compliance.verified',
+  'merchant.production.activated',
+  'merchant.production.suspended',
+  'merchant.disconnected',
+]);
+
 export const ACCURA_EVENT_ID_HEADER = 'x-accura-event-id';
 export const ACCURA_TIMESTAMP_HEADER = 'x-accura-timestamp';
 export const ACCURA_SIGNATURE_HEADER = 'x-accura-signature';

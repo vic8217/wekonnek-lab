@@ -77,6 +77,14 @@ function createService(fetchImpl: jest.Mock, order = orderRow()) {
     },
     invoice: { create: invoiceCreate },
     wkOrderAccuraInvoice: { create: accuraInvoiceCreate },
+    accuraMerchantLink: {
+      findUnique: jest.fn(async () => ({
+        lastAccountStatus: 'ACTIVE',
+        lastReviewStatus: 'APPROVED',
+        lastProductionEligible: true,
+        lastSyncedAt: new Date('2026-09-01T00:00:00.000Z'),
+      })),
+    },
   };
   const config = {
     get: (key: string) => {
@@ -90,6 +98,8 @@ function createService(fetchImpl: jest.Mock, order = orderRow()) {
         ACCURA_API_TIMEOUT_MS: '10000',
         ACCURA_BRANCH_ID: 'accura-branch-legacy-must-not-be-used',
         ACCURA_SERIES_ID: 'accura-series-1',
+        ACCURA_ENV: 'UAT',
+        ACCURA_MERCHANT_APP_URL: 'https://merchant.example.test',
       };
       return values[key];
     },
@@ -214,14 +224,14 @@ describe('AccuraClientService', () => {
   });
 
   it('classifies auth, idempotency, 429, 5xx, and timeout', async () => {
-    const cases: Array<[number | 'timeout', string]> = [
-      [401, 'AUTH'],
-      [409, 'IDEMPOTENCY_CONFLICT'],
-      [429, 'RATE_LIMITED'],
-      [500, 'SERVER'],
-      ['timeout', 'TIMEOUT'],
+    const cases: Array<[number | 'timeout', string, boolean]> = [
+      [401, 'AUTH', false],
+      [409, 'PENDING_RECONCILIATION', true],
+      [429, 'RATE_LIMITED', true],
+      [500, 'SERVER', true],
+      ['timeout', 'TIMEOUT', true],
     ];
-    for (const [status, category] of cases) {
+    for (const [status, category, retryable] of cases) {
       const fetchImpl = jest.fn(async () => {
         if (status === 'timeout') {
           const error = new Error('aborted');
@@ -241,13 +251,45 @@ describe('AccuraClientService', () => {
       const result = await service.issueInvoiceForOrder(42);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.category).toBe(category);
-      expect(result.retryable).toBe(
-        category === 'RATE_LIMITED' ||
-          category === 'SERVER' ||
-          category === 'TIMEOUT',
-      );
+      expect(result.retryable).toBe(retryable);
       expect(wkOrderUpdate).not.toHaveBeenCalled();
     }
+  });
+
+  it('blocks inactive merchants without calling ACCURA HTTP', async () => {
+    const fetchImpl = jest.fn(async () => jsonResponse(201, issuedBody()));
+    const { service, prisma } = createService(fetchImpl);
+    (prisma.accuraMerchantLink.findUnique as jest.Mock).mockResolvedValue({
+      lastAccountStatus: 'PENDING_REVIEW',
+      lastReviewStatus: 'UNDER_REVIEW',
+      lastProductionEligible: false,
+      lastSyncedAt: new Date(),
+    });
+    const result = await service.issueInvoiceForOrder(42);
+    expect(result).toMatchObject({
+      ok: false,
+      category: 'MERCHANT_NOT_ACTIVE',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('blocks suspended merchants without calling ACCURA HTTP', async () => {
+    const fetchImpl = jest.fn(async () => jsonResponse(201, issuedBody()));
+    const { service, prisma } = createService(fetchImpl);
+    (prisma.accuraMerchantLink.findUnique as jest.Mock).mockResolvedValue({
+      lastAccountStatus: 'SUSPENDED',
+      lastReviewStatus: 'APPROVED',
+      lastProductionEligible: false,
+      lastSyncedAt: new Date(),
+    });
+    const result = await service.issueInvoiceForOrder(42);
+    expect(result).toMatchObject({
+      ok: false,
+      category: 'MERCHANT_SUSPENDED',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('does not log machine or webhook secrets', async () => {

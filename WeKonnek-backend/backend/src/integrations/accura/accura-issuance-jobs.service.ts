@@ -106,13 +106,18 @@ export class AccuraIssuanceJobsService {
     const invoiceVisibility = accuraInvoiceVisibility({
       jobStatus: job.status,
       hasInvoice,
+      lastErrorCategory: job.lastErrorCategory,
     });
     const visibilityLabel =
       invoiceVisibility === 'INVOICE_ISSUED'
         ? 'INVOICE ISSUED'
         : invoiceVisibility === 'INVOICE_FAILED'
           ? 'INVOICE FAILED'
-          : 'INVOICE PENDING';
+          : invoiceVisibility === 'INVOICE_SETUP_REQUIRED'
+            ? 'SETUP REQUIRED'
+            : invoiceVisibility === 'INVOICE_RECONCILING'
+              ? 'RECONCILING'
+              : 'INVOICE PENDING';
     return {
       id: job.id,
       wkOrderId: job.wkOrderId,

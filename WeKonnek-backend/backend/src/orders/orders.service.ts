@@ -25,6 +25,7 @@ import { merchantOrderNotificationUrl } from '../modules/notifications/notificat
 import { TrustTradeService } from '../trust-trade/trust-trade.service';
 import { calculateTransactionFee, isMerchantVatRegistered, transactionFeeSnapshot } from './transaction-fee';
 import { AccuraIssuanceJobsService } from '../integrations/accura/accura-issuance-jobs.service';
+import { accuraInvoiceVisibility } from '../integrations/accura/accura-issuance.types';
 
 interface OrderItemInput {
   product_id?: number;
@@ -202,6 +203,47 @@ function serializeOrder(order: any) {
           email: order.user.email,
         }
       : undefined,
+    // Official ACCURA electronic invoice (not the legacy local invoice stack).
+    accura_electronic_invoice: order.accuraInvoice
+      ? {
+          invoice_id: order.accuraInvoice.accuraInvoiceId,
+          official_number: order.accuraInvoice.accuraInvoiceNumber,
+          issued_at: order.accuraInvoice.accuraIssuedAt,
+          verification_url: order.accuraInvoice.accuraVerificationUrl ?? null,
+          document_hash: order.accuraInvoice.accuraDocumentHash,
+        }
+      : null,
+    accuraElectronicInvoice: order.accuraInvoice
+      ? {
+          invoiceId: order.accuraInvoice.accuraInvoiceId,
+          officialNumber: order.accuraInvoice.accuraInvoiceNumber,
+          issuedAt: order.accuraInvoice.accuraIssuedAt,
+          verificationUrl: order.accuraInvoice.accuraVerificationUrl ?? null,
+          documentHash: order.accuraInvoice.accuraDocumentHash,
+        }
+      : null,
+    accura_issuance: order.accuraIssuanceJob
+      ? {
+          status: order.accuraIssuanceJob.status,
+          last_error_category: order.accuraIssuanceJob.lastErrorCategory,
+          visibility: accuraInvoiceVisibility({
+            jobStatus: order.accuraIssuanceJob.status,
+            hasInvoice: Boolean(order.accuraInvoice),
+            lastErrorCategory: order.accuraIssuanceJob.lastErrorCategory,
+          }),
+        }
+      : null,
+    accuraIssuance: order.accuraIssuanceJob
+      ? {
+          status: order.accuraIssuanceJob.status,
+          lastErrorCategory: order.accuraIssuanceJob.lastErrorCategory,
+          visibility: accuraInvoiceVisibility({
+            jobStatus: order.accuraIssuanceJob.status,
+            hasInvoice: Boolean(order.accuraInvoice),
+            lastErrorCategory: order.accuraIssuanceJob.lastErrorCategory,
+          }),
+        }
+      : null,
   };
 }
 
@@ -792,6 +834,8 @@ export class OrdersService {
           orderBy: { createdAt: 'desc' },
         },
         merchant: { include: { category: true } },
+        accuraInvoice: true,
+        accuraIssuanceJob: true,
         // customer info is useful for merchant/admin views
         ...(opts.merchantId || opts.isAdmin ? {} : {}),
       },
@@ -840,6 +884,8 @@ export class OrdersService {
           orderBy: { createdAt: 'desc' },
         },
         merchant: { include: { category: true } },
+        accuraInvoice: true,
+        accuraIssuanceJob: true,
       },
     });
     if (!order) throw new NotFoundException('Order not found');
@@ -997,11 +1043,11 @@ export class OrdersService {
 
     // When a COD order is completed/delivered, mark it as paid.
     const data: any = { status };
-    if (
+    const markCashPaid =
       ['completed', 'delivered'].includes(status) &&
-      ['cod', 'cash'].includes(existing.paymentMethod) &&
-      existing.paymentStatus !== 'paid'
-    ) {
+      ['cod', 'cash', 'manual'].includes(existing.paymentMethod) &&
+      existing.paymentStatus !== 'paid';
+    if (markCashPaid) {
       data.paymentStatus = 'paid';
     }
 
@@ -1011,8 +1057,18 @@ export class OrdersService {
       include: {
         orderItems: true,
         merchant: { include: { category: true } },
+        accuraInvoice: true,
+        accuraIssuanceJob: true,
       },
     });
+    if (
+      this.accuraIssuance &&
+      (markCashPaid ||
+        (['completed', 'delivered'].includes(status) &&
+          order.paymentStatus === 'paid'))
+    ) {
+      await this.accuraIssuance.enqueueForSettledOrder(this.prisma, order.id);
+    }
     if (!wasFinalized && willFinalize) {
       await this.coordinatorApplications.creditOrderCommission(order.id);
     }
