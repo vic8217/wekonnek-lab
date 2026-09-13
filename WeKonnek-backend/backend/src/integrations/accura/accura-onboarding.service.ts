@@ -443,7 +443,7 @@ export class AccuraOnboardingService {
         accountStatus: String(
           readiness.companyAccountStatus || profile.companyAccountStatus || '',
         ),
-        readinessPercent: this.readinessView(readiness).percent,
+        readinessPercent: this.readinessView(readiness).percent ?? undefined,
       });
       const registeredAddress = asRecord(profile.registeredAddress);
       const taxProfile = asRecord(profile.taxProfile);
@@ -603,6 +603,7 @@ export class AccuraOnboardingService {
       companyAccountStatus: accountStatus,
       companyAccountStatusLabel: accountStatusLabel(accountStatus),
       issuanceActive: accountStatus === 'ACTIVE',
+      productionEligible: accountStatus === 'ACTIVE',
       suspended: accountStatus === 'SUSPENDED',
       correctionRequired,
       correctionNotes:
@@ -612,6 +613,7 @@ export class AccuraOnboardingService {
             ? profile.correctionNotes
             : null,
       approvedForAccuraSetup: reviewStatus === 'APPROVED',
+      lastSyncedAt: new Date().toISOString(),
     };
   }
 
@@ -632,19 +634,11 @@ export class AccuraOnboardingService {
           : [],
       };
     });
+    // Only surface ACCURA-authored progress. Do not invent a WeKonnek checklist %.
     const accuraPercent = Number(readiness.percent);
-    const fromSections = namedSections.length
-      ? Math.round(
-          (namedSections.filter((section) => section.complete).length /
-            namedSections.length) *
-            100,
-        )
-      : complete
-        ? 100
-        : 0;
     const percent = Number.isFinite(accuraPercent)
       ? Math.max(0, Math.min(100, Math.round(accuraPercent)))
-      : fromSections;
+      : null;
     return {
       complete,
       percent,
@@ -721,20 +715,28 @@ export class AccuraOnboardingService {
           'ACCURA status temporarily unavailable',
         companyAccountStatus: link?.lastAccountStatus || null,
         companyAccountStatusLabel: accountStatusLabel(link?.lastAccountStatus),
-        issuanceActive: false,
+        issuanceActive: link?.lastAccountStatus === 'ACTIVE',
+        productionEligible:
+          link?.lastProductionEligible === true ||
+          link?.lastAccountStatus === 'ACTIVE',
         suspended: link?.lastAccountStatus === 'SUSPENDED',
         correctionRequired: false,
         correctionNotes: null,
-        approvedForAccuraSetup: false,
-        lastKnown: Boolean(link?.lastReviewStatus),
+        approvedForAccuraSetup: link?.lastReviewStatus === 'APPROVED',
+        lastKnown: Boolean(
+          link?.lastReviewStatus || link?.lastAccountStatus,
+        ),
         lastKnownPercent: link?.lastReadinessPercent ?? null,
+        lastSyncedAt: link?.lastSyncedAt
+          ? link.lastSyncedAt.toISOString()
+          : null,
       },
       readiness: {
         complete: false,
         percent:
           typeof link?.lastReadinessPercent === 'number'
             ? link.lastReadinessPercent
-            : 0,
+            : null,
         missing: [],
         sections: [],
         canSubmit: false,

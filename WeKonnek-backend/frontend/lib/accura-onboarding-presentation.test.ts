@@ -246,10 +246,12 @@ test('Correction Requested enables Edit again', () => {
   assert.equal(editing.fieldsDisabled, false);
 });
 
-test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
+test('Pass 2 status page uses merchant-friendly labels without compliance checklist', () => {
   const incomplete = accuraEInvoiceStatusPage({
     reviewStatus: 'INCOMPLETE',
     readinessPercent: 40,
+    shopCount: 2,
+    mappedShopCount: 1,
     sections: [
       {
         key: 'taxpayerIdentity',
@@ -257,52 +259,65 @@ test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
         complete: false,
         missing: ['legalName'],
       },
-      {
-        key: 'invoiceSetup',
-        label: 'Invoice numbering (ACCURA)',
-        complete: false,
-        missing: ['activeNumberSeries'],
-      },
     ],
   });
   assert.equal(incomplete.displayState, 'SETUP_INCOMPLETE');
-  assert.equal(incomplete.title, 'Setup Incomplete');
+  assert.equal(incomplete.title, 'Setup In Progress');
   assert.equal(incomplete.progressPercent, 40);
   assert.equal(incomplete.handoffLabel, 'Continue ACCURA Setup');
-  assert.equal(incomplete.sections.some((row) => row.missing.includes('legalName')), false);
-  assert.equal(
-    incomplete.sections.some((row) =>
-      row.missing.includes('Invoice numbering is pending ACCURA activation'),
-    ),
-    true,
-  );
+  assert.equal(incomplete.sections.length, 0);
+  assert.equal(incomplete.connection.shopMappingLabel, '1 shop requires mapping');
+  assert.equal(incomplete.productionLabel, 'Not Active');
+
+  const pending = accuraEInvoiceStatusPage({
+    reviewStatus: 'UNDER_REVIEW',
+    readinessPercent: 80,
+  });
+  assert.equal(pending.title, 'Pending Review');
+  assert.equal(pending.handoffLabel, 'Open ACCURA');
+  assert.match(pending.body, /No action is required in WeKonnek/);
+
+  const action = accuraEInvoiceStatusPage({
+    reviewStatus: 'NEEDS_CORRECTION',
+    correctionRequired: true,
+  });
+  assert.equal(action.title, 'Action Required');
+  assert.equal(action.handoffLabel, 'Continue ACCURA Setup');
 
   const active = accuraEInvoiceStatusPage({
     reviewStatus: 'APPROVED',
+    productionEligible: true,
     issuanceActive: true,
     approvedForAccuraSetup: true,
     readinessPercent: 100,
     readinessComplete: true,
-    sections: [],
+    shopCount: 2,
+    mappedShopCount: 2,
   });
   assert.equal(active.displayState, 'ACTIVE');
   assert.equal(active.title, 'Active');
   assert.equal(active.handoffLabel, 'Manage ACCURA');
+  assert.equal(active.connection.shopMappingLabel, '2 of 2 mapped');
 
   const notConnected = accuraEInvoiceStatusPage({
     unavailable: true,
     notConfigured: true,
   });
   assert.equal(notConnected.displayState, 'NOT_CONNECTED');
+  assert.equal(notConnected.title, 'Not Set Up');
   assert.equal(notConnected.handoffLabel, 'Set Up ACCURA');
+  assert.equal(notConnected.handoffEnabled, true);
 
   const lastKnown = accuraEInvoiceStatusPage({
     unavailable: true,
     lastKnown: true,
     lastKnownPercent: 40,
     reviewStatus: 'UNDER_REVIEW',
+    lastSyncedAt: '2026-09-13T12:30:00.000Z',
   });
   assert.equal(lastKnown.displayState, 'UNAVAILABLE');
+  assert.equal(lastKnown.title, 'Status temporarily unavailable');
+  assert.equal(lastKnown.lastKnownTitle, 'Pending Review');
   assert.equal(lastKnown.progressPercent, 40);
   assert.equal(lastKnown.handoffEnabled, false);
 
@@ -313,4 +328,10 @@ test('Pass 2 status page maps ACCURA enums and hides raw missing keys', () => {
     reviewStatus: 'UNDER_REVIEW',
   });
   assert.equal(vanished.progressPercent, null);
+
+  const noLocalPercent = accuraEInvoiceStatusPage({
+    reviewStatus: 'INCOMPLETE',
+    readinessPercent: null,
+  });
+  assert.equal(noLocalPercent.progressPercent, null);
 });

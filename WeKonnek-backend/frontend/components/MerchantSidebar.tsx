@@ -72,7 +72,7 @@ export default function MerchantSidebar({
     { href: "/merchant/settings/security", label: "Settings", icon: "shield" },
     {
       href: "/merchant/settings/e-receipt",
-      label: "ACCURA Electronic Invoicing",
+      label: "ACCURA E-Invoicing",
       icon: "receipt",
     },
   ];
@@ -91,7 +91,7 @@ export default function MerchantSidebar({
     "Inventory",
     "Profile",
     "Settings",
-    "ACCURA Electronic Invoicing",
+    "ACCURA E-Invoicing",
   ]);
   const menuItems = merchantMenuItems
     .filter((item) =>

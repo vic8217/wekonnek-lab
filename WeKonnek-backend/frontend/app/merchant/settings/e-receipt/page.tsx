@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getToken, useAuth } from '@/hooks/use-auth';
 import {
   accuraEInvoiceStatusPage,
+  formatAccuraStatusTime,
   statusPageToneClass,
 } from '@/lib/accura-onboarding-presentation';
 
@@ -21,16 +22,18 @@ type SetupResponse = {
     companyAccountStatus: string | null;
     companyAccountStatusLabel: string;
     issuanceActive: boolean;
+    productionEligible?: boolean;
     suspended: boolean;
     correctionRequired: boolean;
     correctionNotes: string | null;
     approvedForAccuraSetup: boolean;
     lastKnown?: boolean;
     lastKnownPercent?: number | null;
+    lastSyncedAt?: string | null;
   };
   readiness: {
     complete: boolean;
-    percent: number;
+    percent: number | null;
     missing: string[];
     canSubmit: boolean;
     sections: Array<{
@@ -62,10 +65,20 @@ function apiMessage(data: unknown, fallback: string) {
   return fallback;
 }
 
+function branchName(
+  branches: SetupResponse['registeredBranches'],
+  branchId: string | null,
+): string | null {
+  if (!branchId) return null;
+  const match = branches.find((branch) => branch.id === branchId);
+  return match ? match.name : null;
+}
+
 export default function EReceiptTaxSetupPage() {
   const { user } = useAuth();
   const [setup, setSetup] = useState<SetupResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -81,7 +94,7 @@ export default function EReceiptTaxSetupPage() {
       headers: authHeaders(),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(apiMessage(data, 'Unable to load E-Receipt setup.'));
+    if (!res.ok) throw new Error(apiMessage(data, 'Unable to load ACCURA status.'));
     setSetup(data as SetupResponse);
   }, [authHeaders]);
 
@@ -91,7 +104,9 @@ export default function EReceiptTaxSetupPage() {
       try {
         await load();
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load E-Receipt setup.');
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to load ACCURA status.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,6 +116,26 @@ export default function EReceiptTaxSetupPage() {
     };
   }, [load]);
 
+  const refreshStatus = async () => {
+    if (refreshing || busy) return;
+    setRefreshing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await load();
+      setSuccess('Status refreshed.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to refresh ACCURA status.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const mappedShopCount = useMemo(
+    () => setup?.shops.filter((shop) => Boolean(shop.accuraBranchId)).length ?? 0,
+    [setup],
+  );
+
   const page = useMemo(
     () =>
       setup
@@ -108,24 +143,27 @@ export default function EReceiptTaxSetupPage() {
             unavailable: setup.unavailable,
             lastKnown: setup.status.lastKnown,
             lastKnownPercent: setup.status.lastKnownPercent,
+            lastSyncedAt: setup.status.lastSyncedAt,
             notConfigured: /not configured/i.test(setup.unavailableMessage || ''),
             suspended: setup.status.suspended,
             correctionRequired: setup.status.correctionRequired,
             reviewStatus: setup.status.reviewStatus,
+            productionEligible: setup.status.productionEligible,
             issuanceActive: setup.status.issuanceActive,
             approvedForAccuraSetup: setup.status.approvedForAccuraSetup,
             readinessComplete: setup.readiness.complete,
             readinessPercent: setup.readiness.percent,
-            sections: setup.readiness.sections,
+            shopCount: setup.shops.length,
+            mappedShopCount,
           })
         : null,
-    [setup],
+    [setup, mappedShopCount],
   );
 
   if (user && user.role !== 'merchant') {
     return (
       <div className="max-w-3xl mx-auto p-6 text-sm text-gray-600">
-        ACCURA E-Invoice setup is available to Merchant Admin only.
+        ACCURA Electronic Invoicing setup is available to Merchant Admin only.
       </div>
     );
   }
@@ -155,7 +193,7 @@ export default function EReceiptTaxSetupPage() {
   };
 
   const startHandoff = async () => {
-    if (busy || setup?.unavailable) return;
+    if (busy || !page?.handoffEnabled) return;
     setBusy('handoff');
     setError(null);
     setSuccess(null);
@@ -189,101 +227,253 @@ export default function EReceiptTaxSetupPage() {
     }
   };
 
+  const isActive = page?.displayState === 'ACTIVE';
+  const syncedLabel = formatAccuraStatusTime(page?.lastSyncedAt);
+
   return (
-    <div className="max-w-3xl mx-auto space-y-6 pb-16">
-      <div className="flex items-center gap-3">
-        <Link href="/merchant/settings/security" className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+    <div className="max-w-3xl mx-auto w-full space-y-6 px-4 sm:px-0 pb-16">
+      <div className="flex items-start gap-3">
+        <Link
+          href="/merchant"
+          className="p-2 -ml-2 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+          aria-label="Back to Dashboard"
+        >
           <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">ACCURA Electronic Invoicing</h1>
-          <p className="text-sm text-gray-500">
-            WeKonnek display name and shops stay here. Taxpayer registration is managed in ACCURA.
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">
+            ACCURA Electronic Invoicing
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Electronic invoicing for your WeKonnek transactions is managed through ACCURA.
           </p>
         </div>
       </div>
 
-      {loading && <div className="bg-white border border-gray-200 rounded-xl p-6 text-sm text-gray-500">Loading ACCURA status…</div>}
-      {success && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">{success}</div>}
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
+      {loading && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 text-sm text-gray-500 w-full">
+          Loading ACCURA status…
+        </div>
+      )}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
+          {success}
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
 
       {setup && page && (
         <>
-          <section className={`rounded-xl border p-6 space-y-3 ${statusPageToneClass(page.displayState)}`}>
-            <p className="text-xs uppercase tracking-wide font-semibold">Status</p>
-            <h2 className="text-xl font-bold">{page.title}</h2>
-            {page.progressPercent != null && (
-              <p className="text-sm">Progress: {page.progressPercent}%</p>
+          <section
+            className={`rounded-xl border p-5 sm:p-6 space-y-4 w-full ${statusPageToneClass(page.displayState)}`}
+          >
+            <div className="space-y-1">
+              <p className="text-xs uppercase tracking-wide font-semibold opacity-80">
+                ACCURA Electronic Invoicing
+              </p>
+              <h2 className="text-xl sm:text-2xl font-bold leading-tight">{page.title}</h2>
+              <p className="text-sm leading-relaxed">{page.body}</p>
+            </div>
+
+            {page.displayState === 'UNAVAILABLE' && page.lastKnown && page.lastKnownTitle && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide opacity-70">Last known status</dt>
+                  <dd className="font-medium mt-0.5">{page.lastKnownTitle}</dd>
+                </div>
+                {syncedLabel && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide opacity-70">Last updated</dt>
+                    <dd className="font-medium mt-0.5">{syncedLabel}</dd>
+                  </div>
+                )}
+              </dl>
             )}
-            <p className="text-sm">{page.body}</p>
-            {setup.wekonnekDisplayName && (
-              <p className="text-sm">WeKonnek display name: {setup.wekonnekDisplayName}</p>
+
+            {page.displayState !== 'UNAVAILABLE' && !isActive && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="min-w-0">
+                  <dt className="text-xs uppercase tracking-wide opacity-70">ACCURA Status</dt>
+                  <dd className="font-medium mt-0.5 truncate">{page.accuraStatusLabel}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-xs uppercase tracking-wide opacity-70">Production</dt>
+                  <dd className="font-medium mt-0.5">{page.productionLabel}</dd>
+                </div>
+              </dl>
             )}
-            {!setup.unavailable && setup.status.companyAccountStatusLabel && (
-              <p className="text-sm">Account status: {setup.status.companyAccountStatusLabel}</p>
+
+            {isActive && (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide opacity-70">Production</dt>
+                  <dd className="font-medium mt-0.5">Active</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide opacity-70">Shops</dt>
+                  <dd className="font-medium mt-0.5">{page.connection.shopMappingLabel}</dd>
+                </div>
+              </dl>
             )}
-            {page.lastKnown && (
-              <p className="text-xs">Last known ACCURA status is shown until the service is available again.</p>
-            )}
-            {setup.unavailable && (
-              <p className="text-sm">{setup.unavailableMessage || setup.notice}</p>
-            )}
+
+            {page.progressPercent != null &&
+              page.displayState !== 'ACTIVE' &&
+              page.displayState !== 'SUSPENDED' && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span>Setup progress</span>
+                    <span>{page.progressPercent}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-black/10 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-current opacity-70"
+                      style={{ width: `${Math.max(0, Math.min(100, page.progressPercent))}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
             {page.displayState === 'CORRECTION_REQUIRED' && setup.status.correctionNotes && (
-              <p className="text-sm whitespace-pre-wrap">{setup.status.correctionNotes}</p>
+              <p className="text-sm whitespace-pre-wrap border-t border-current/10 pt-3">
+                {setup.status.correctionNotes}
+              </p>
             )}
-            <button
-              type="button"
-              onClick={() => void startHandoff()}
-              disabled={!page.handoffEnabled || Boolean(busy)}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
-            >
-              {busy === 'handoff' ? 'Opening ACCURA…' : page.handoffLabel}
-            </button>
+
+            <div className="flex flex-col gap-2 pt-1">
+              {page.displayState === 'UNAVAILABLE' ? (
+                <button
+                  type="button"
+                  onClick={() => void refreshStatus()}
+                  disabled={refreshing || Boolean(busy)}
+                  className="w-full sm:w-auto bg-gray-900 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {refreshing ? 'Refreshing…' : 'Refresh Status'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void startHandoff()}
+                  disabled={!page.handoffEnabled || Boolean(busy)}
+                  className="w-full sm:w-auto bg-red-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50"
+                >
+                  {busy === 'handoff' ? 'Opening ACCURA…' : page.handoffLabel}
+                </button>
+              )}
+              {page.displayState !== 'UNAVAILABLE' && (
+                <button
+                  type="button"
+                  onClick={() => void refreshStatus()}
+                  disabled={refreshing || Boolean(busy)}
+                  className="w-full sm:w-auto text-sm text-current/80 underline-offset-2 hover:underline disabled:opacity-50 self-start"
+                >
+                  {refreshing ? 'Refreshing…' : 'Refresh status'}
+                </button>
+              )}
+            </div>
           </section>
 
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-3">
-            <h2 className="text-lg font-semibold text-gray-900">Setup Status</h2>
-            <ul className="space-y-2 text-sm">
-              {page.sections.map((section) => (
-                <li key={section.key} className="flex gap-2">
-                  <span>{section.complete ? '✓' : '!'}</span>
-                  <span>
-                    {section.label}
-                    {section.missing.length > 0 ? ` — ${section.missing.join('; ')}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {!isActive && (
+            <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6 space-y-3 w-full">
+              <h2 className="text-lg font-semibold text-gray-900">Connection Status</h2>
+              <dl className="space-y-3 text-sm">
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-4">
+                  <dt className="text-gray-500">ACCURA Connection</dt>
+                  <dd className="font-medium text-gray-900 sm:text-right">
+                    {page.connection.connectionLabel}
+                  </dd>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-4">
+                  <dt className="text-gray-500">Electronic Invoicing</dt>
+                  <dd className="font-medium text-gray-900 sm:text-right">
+                    {page.connection.invoicingLabel}
+                  </dd>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-4">
+                  <dt className="text-gray-500">Production</dt>
+                  <dd className="font-medium text-gray-900 sm:text-right">
+                    {page.connection.productionLabel}
+                  </dd>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-4">
+                  <dt className="text-gray-500">Shop Mapping</dt>
+                  <dd className="font-medium text-gray-900 sm:text-right">
+                    {page.connection.shopMappingLabel}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )}
 
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900">WeKonnek shops</h2>
-            <p className="text-sm text-gray-500">
-              Map each WeKonnek shop to an ACCURA registered branch. Branch details are managed in ACCURA.
-            </p>
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 sm:p-6 space-y-4 w-full">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Shop &amp; Branch Mapping</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Connect each WeKonnek shop to its corresponding ACCURA branch.
+              </p>
+            </div>
             {setup.shops.length === 0 && (
               <p className="text-sm text-gray-500">No WeKonnek shops yet.</p>
             )}
-            {setup.shops.map((shop) => (
-              <label key={shop.shopId} className="flex flex-col sm:flex-row sm:items-center gap-2 text-sm">
-                <span className="sm:w-40 font-medium text-gray-700">{shop.name}</span>
-                <select
-                  className="flex-1 border rounded-lg px-3 py-2"
-                  value={shop.accuraBranchId || ''}
-                  disabled={setup.unavailable || Boolean(busy)}
-                  onChange={(e) => void mapShop(shop.shopId, e.target.value)}
+            {setup.shops.map((shop) => {
+              const mappedName = branchName(setup.registeredBranches, shop.accuraBranchId);
+              const mapped = Boolean(shop.accuraBranchId);
+              return (
+                <div
+                  key={shop.shopId}
+                  className="border border-gray-200 rounded-lg p-4 space-y-3"
                 >
-                  <option value="">Select ACCURA branch</option>
-                  {setup.registeredBranches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name} ({branch.code})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                    <h3 className="font-semibold text-gray-900 break-words">{shop.name}</h3>
+                    <span
+                      className={`text-xs font-semibold uppercase tracking-wide shrink-0 ${
+                        mapped ? 'text-green-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {mapped ? 'Mapped' : 'Not mapped'}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor={`accura-branch-${shop.shopId}`}
+                      className="text-xs uppercase tracking-wide text-gray-500 font-medium"
+                    >
+                      ACCURA Branch
+                    </label>
+                    {mapped && mappedName && (
+                      <p className="text-sm font-medium text-gray-900 break-words">{mappedName}</p>
+                    )}
+                    {!mapped && (
+                      <p className="text-sm text-gray-500">
+                        Map this shop before electronic invoices can be issued for its
+                        transactions.
+                      </p>
+                    )}
+                    <select
+                      id={`accura-branch-${shop.shopId}`}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white max-w-full"
+                      value={shop.accuraBranchId || ''}
+                      disabled={setup.unavailable || Boolean(busy)}
+                      onChange={(e) => void mapShop(shop.shopId, e.target.value)}
+                    >
+                      <option value="">
+                        {mapped ? 'Change Branch' : 'Select ACCURA Branch'}
+                      </option>
+                      {setup.registeredBranches.map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
             {setup.registeredBranches.length === 0 && setup.shops.length > 0 && (
               <p className="text-sm text-gray-500">
                 No ACCURA branches are available yet. Continue setup in ACCURA first.

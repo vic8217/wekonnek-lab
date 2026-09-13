@@ -289,19 +289,32 @@ export type AccuraEInvoiceStatusInput = {
   unavailable?: boolean;
   lastKnown?: boolean;
   lastKnownPercent?: number | null;
+  lastSyncedAt?: string | null;
   notConfigured?: boolean;
   suspended?: boolean;
   correctionRequired?: boolean;
   reviewStatus?: string | null;
+  /** Prefer ACCURA-derived production eligibility when present. */
+  productionEligible?: boolean | null;
   issuanceActive?: boolean;
   approvedForAccuraSetup?: boolean;
   readinessComplete?: boolean;
-  readinessPercent?: number;
+  readinessPercent?: number | null;
+  shopCount?: number;
+  mappedShopCount?: number;
+  /** @deprecated Checklist sections are not shown on the merchant status page. */
   sections?: Array<{ key: string; label: string; complete: boolean; missing: string[] }>;
 };
 
 export function friendlyMissingLabel(key: string) {
   return ACCURA_MISSING_KEY_LABELS[key] || 'Additional information is still needed in ACCURA';
+}
+
+function isProductionEligible(input: AccuraEInvoiceStatusInput): boolean {
+  if (typeof input.productionEligible === 'boolean') {
+    return input.productionEligible;
+  }
+  return Boolean(input.issuanceActive);
 }
 
 export function accuraIntegrationDisplayState(
@@ -315,7 +328,7 @@ export function accuraIntegrationDisplayState(
   if (input.correctionRequired || input.reviewStatus === 'NEEDS_CORRECTION') {
     return 'CORRECTION_REQUIRED';
   }
-  if (input.issuanceActive) return 'ACTIVE';
+  if (isProductionEligible(input)) return 'ACTIVE';
   if (input.approvedForAccuraSetup || input.reviewStatus === 'APPROVED') {
     return 'READY_FOR_ACTIVATION';
   }
@@ -325,89 +338,201 @@ export function accuraIntegrationDisplayState(
   return 'SETUP_INCOMPLETE';
 }
 
+/** Merchant-facing primary status titles (not raw ACCURA enums). */
 const DISPLAY_TITLES: Record<AccuraIntegrationDisplayState, string> = {
-  NOT_CONNECTED: 'Not connected',
-  SETUP_INCOMPLETE: 'Setup Incomplete',
-  UNDER_REVIEW: 'Under Review',
-  CORRECTION_REQUIRED: 'Correction Required',
-  READY_FOR_ACTIVATION: 'Ready for activation',
+  NOT_CONNECTED: 'Not Set Up',
+  SETUP_INCOMPLETE: 'Setup In Progress',
+  UNDER_REVIEW: 'Pending Review',
+  CORRECTION_REQUIRED: 'Action Required',
+  READY_FOR_ACTIVATION: 'Ready for Activation',
   ACTIVE: 'Active',
   SUSPENDED: 'Suspended',
-  UNAVAILABLE: 'Temporarily unavailable',
+  UNAVAILABLE: 'Status temporarily unavailable',
 };
+
+const DISPLAY_BODIES: Record<AccuraIntegrationDisplayState, string> = {
+  NOT_CONNECTED:
+    'Connect ACCURA to manage electronic invoicing for your WeKonnek transactions.',
+  SETUP_INCOMPLETE:
+    'Your ACCURA setup requires additional information before electronic invoicing can be activated.',
+  UNDER_REVIEW:
+    'Your ACCURA setup has been submitted and is currently being reviewed. No action is required in WeKonnek.',
+  CORRECTION_REQUIRED:
+    'ACCURA requires additional information before electronic invoicing can be activated.',
+  READY_FOR_ACTIVATION:
+    'Your ACCURA setup is ready. Open ACCURA to complete production activation.',
+  ACTIVE: 'Electronic invoicing is active for your WeKonnek transactions.',
+  SUSPENDED:
+    'Electronic invoice issuance is currently unavailable. Open ACCURA for details.',
+  UNAVAILABLE:
+    'We could not refresh ACCURA status right now. Last known status is shown below when available.',
+};
+
+export type AccuraConnectionSummary = {
+  connectionLabel: string;
+  invoicingLabel: string;
+  productionLabel: string;
+  shopMappingLabel: string;
+};
+
+export function accuraConnectionSummary(
+  input: AccuraEInvoiceStatusInput & { displayState?: AccuraIntegrationDisplayState },
+): AccuraConnectionSummary {
+  const state = input.displayState || accuraIntegrationDisplayState(input);
+  const shopCount = Number(input.shopCount) || 0;
+  const mapped = Number(input.mappedShopCount) || 0;
+  const unmapped = Math.max(0, shopCount - mapped);
+
+  let shopMappingLabel = 'No shops yet';
+  if (shopCount > 0) {
+    shopMappingLabel =
+      unmapped === 0
+        ? `${mapped} of ${shopCount} mapped`
+        : unmapped === 1
+          ? '1 shop requires mapping'
+          : `${unmapped} shops require mapping`;
+  }
+
+  return {
+    connectionLabel:
+      state === 'NOT_CONNECTED' ? 'Not Connected' : 'Connected',
+    invoicingLabel: DISPLAY_TITLES[state],
+    productionLabel: isProductionEligible(input) ? 'Active' : 'Not Active',
+    shopMappingLabel,
+  };
+}
+
+function authoritativeProgressPercent(
+  input: AccuraEInvoiceStatusInput,
+): number | null {
+  if (input.unavailable) {
+    if (!input.lastKnown) return null;
+    return typeof input.lastKnownPercent === 'number' &&
+      Number.isFinite(input.lastKnownPercent)
+      ? input.lastKnownPercent
+      : null;
+  }
+  return typeof input.readinessPercent === 'number' &&
+    Number.isFinite(input.readinessPercent)
+    ? input.readinessPercent
+    : null;
+}
 
 export function accuraEInvoiceStatusPage(input: AccuraEInvoiceStatusInput) {
   const displayState = accuraIntegrationDisplayState(input);
-  const livePercent = Number.isFinite(Number(input.readinessPercent))
-    ? Number(input.readinessPercent)
+  const productionEligible = isProductionEligible(input);
+  const progressPercent = authoritativeProgressPercent(input);
+  const connection = accuraConnectionSummary({ ...input, displayState });
+  const lastKnownTitle = input.lastKnown
+    ? lastKnownMerchantTitle(input)
     : null;
-  const cachedPercent =
-    input.lastKnownPercent == null ? null : Number(input.lastKnownPercent);
-  const progressPercent = input.unavailable
-    ? input.lastKnown
-      ? cachedPercent
-      : null
-    : livePercent;
-  const reviewComplete = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(
-    String(input.reviewStatus || ''),
-  );
-  const sections = [
-    ...(input.sections || []).map((section) => ({
-      key: section.key,
-      label: ACCURA_SECTION_LABELS[section.key] || section.label,
-      complete: section.complete,
-      missing: (section.missing || [])
-        .map((item) => friendlyMissingLabel(item))
-        .filter((label, index, all) => all.indexOf(label) === index),
-    })),
-    {
-      key: 'review',
-      label: ACCURA_SECTION_LABELS.review,
-      complete: reviewComplete,
-      missing: reviewComplete ? [] : ['ACCURA review has not been submitted'],
-    },
-    {
-      key: 'activation',
-      label: ACCURA_SECTION_LABELS.activation,
-      complete: Boolean(input.issuanceActive),
-      missing: input.issuanceActive
-        ? []
-        : [friendlyMissingLabel('activeNumberSeries')],
-    },
-  ];
+
   return {
     displayState,
     title: DISPLAY_TITLES[displayState],
-    body: 'Your taxpayer registration and e-invoice compliance setup are managed securely in ACCURA.',
+    body: DISPLAY_BODIES[displayState],
+    /** Secondary ACCURA lifecycle label (e.g. Pending Review while overall is Setup In Progress). */
+    accuraStatusLabel: secondaryAccuraStatusLabel(input, displayState),
+    productionLabel: connection.productionLabel,
+    productionEligible,
     progressPercent,
     lastKnown: Boolean(input.unavailable && input.lastKnown),
-    handoffLabel: handoffLabelFor(displayState, Boolean(input.issuanceActive)),
-    handoffEnabled: !input.unavailable,
-    sections,
+    lastKnownTitle,
+    lastSyncedAt: input.lastSyncedAt || null,
+    connection,
+    handoffLabel: handoffLabelFor(displayState, productionEligible),
+    // Not Set Up still offers secure handoff; temporary outages disable it.
+    handoffEnabled: displayState !== 'UNAVAILABLE',
+    showRefresh: true,
+    /** Checklist intentionally omitted — compliance steps live in ACCURA. */
+    sections: [] as Array<{
+      key: string;
+      label: string;
+      complete: boolean;
+      missing: string[];
+    }>,
   };
+}
+
+function lastKnownMerchantTitle(input: AccuraEInvoiceStatusInput): string {
+  if (input.suspended || input.reviewStatus === 'SUSPENDED') return 'Suspended';
+  if (isProductionEligible(input)) return 'Active';
+  if (input.approvedForAccuraSetup || input.reviewStatus === 'APPROVED') {
+    return 'Ready for Activation';
+  }
+  if (input.correctionRequired || input.reviewStatus === 'NEEDS_CORRECTION') {
+    return 'Action Required';
+  }
+  if (
+    input.reviewStatus === 'SUBMITTED' ||
+    input.reviewStatus === 'UNDER_REVIEW'
+  ) {
+    return 'Pending Review';
+  }
+  if (input.reviewStatus) return 'Setup In Progress';
+  return 'Unknown';
+}
+
+function secondaryAccuraStatusLabel(
+  input: AccuraEInvoiceStatusInput,
+  state: AccuraIntegrationDisplayState,
+): string {
+  if (state === 'UNAVAILABLE' && input.lastKnown) {
+    return lastKnownMerchantTitle(input);
+  }
+  if (state === 'ACTIVE') return 'Active';
+  if (state === 'SUSPENDED') return 'Suspended';
+  if (state === 'CORRECTION_REQUIRED') return 'Action Required';
+  if (state === 'UNDER_REVIEW') return 'Pending Review';
+  if (state === 'READY_FOR_ACTIVATION') return 'Ready for Activation';
+  if (state === 'NOT_CONNECTED') return 'Not Set Up';
+  return 'Setup In Progress';
 }
 
 function handoffLabelFor(
   state: AccuraIntegrationDisplayState,
-  issuanceActive: boolean,
+  productionEligible: boolean,
 ): string {
   if (state === 'NOT_CONNECTED') return 'Set Up ACCURA';
-  if (state === 'ACTIVE' || issuanceActive) return 'Manage ACCURA';
+  if (state === 'ACTIVE' || productionEligible) return 'Manage ACCURA';
   if (state === 'SUSPENDED') return 'Open ACCURA';
-  if (state === 'CORRECTION_REQUIRED') return 'Continue Setup';
+  if (state === 'UNDER_REVIEW' || state === 'READY_FOR_ACTIVATION') {
+    return 'Open ACCURA';
+  }
+  if (state === 'CORRECTION_REQUIRED' || state === 'SETUP_INCOMPLETE') {
+    return 'Continue ACCURA Setup';
+  }
   return 'Continue ACCURA Setup';
 }
 
 export function statusPageToneClass(state: AccuraIntegrationDisplayState) {
-  if (state === 'SUSPENDED' || state === 'CORRECTION_REQUIRED') {
+  if (state === 'SUSPENDED') {
     return 'bg-red-50 border-red-200 text-red-800';
   }
-  if (state === 'ACTIVE' || state === 'READY_FOR_ACTIVATION') {
-    return 'bg-green-50 border-green-200 text-green-800';
-  }
-  if (state === 'UNDER_REVIEW') return 'bg-blue-50 border-blue-200 text-blue-800';
-  if (state === 'UNAVAILABLE' || state === 'NOT_CONNECTED') {
+  if (state === 'CORRECTION_REQUIRED') {
     return 'bg-amber-50 border-amber-200 text-amber-900';
   }
+  if (state === 'ACTIVE') {
+    return 'bg-green-50 border-green-200 text-green-800';
+  }
+  if (state === 'READY_FOR_ACTIVATION' || state === 'UNDER_REVIEW') {
+    return 'bg-blue-50 border-blue-200 text-blue-800';
+  }
+  if (state === 'UNAVAILABLE' || state === 'NOT_CONNECTED') {
+    return 'bg-gray-50 border-gray-200 text-gray-700';
+  }
   return 'bg-gray-50 border-gray-200 text-gray-800';
+}
+
+export function formatAccuraStatusTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
