@@ -19,6 +19,7 @@ import {
   NotificationType,
   PlatformPaymentSourceType,
   PlatformPaymentStatus,
+  MerchantPaymentStatus,
 } from '@prisma/client';
 import { CoordinatorApplicationsService } from '../coordinator-applications/coordinator-applications.service';
 import { merchantOrderNotificationUrl } from '../modules/notifications/notification-routes';
@@ -28,6 +29,8 @@ import { AccuraIssuanceJobsService } from '../integrations/accura/accura-issuanc
 import { accuraInvoiceVisibility } from '../integrations/accura/accura-issuance.types';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { evaluateLegacyCodPaidOnCommerceComplete } from '../fulfillment/payment-fulfillment-separation';
+import { PaymentAllocationService } from '../payment-ownership/payment-allocation.service';
+import { PaymentRoutingService } from '../payment-ownership/payment-routing.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 
@@ -303,7 +306,19 @@ export class OrdersService {
     @Optional() private readonly domainEvents?: OrderDomainEventService,
     @Optional() private readonly fulfillments?: FulfillmentService,
     @Optional() private readonly fulfillmentTransitions?: FulfillmentTransitionService,
+    @Optional() private readonly paymentAllocations?: PaymentAllocationService,
+    @Optional() private readonly paymentRouting?: PaymentRoutingService,
   ) {}
+
+  private assertMerchantOrderGatewayForbidden(orderId: number, merchantId: number) {
+    // Direct service construction in legacy unit tests does not use Nest DI;
+    // retain the same fail-closed routing decision in that context too.
+    (this.paymentRouting ?? new PaymentRoutingService()).assertWekonnekGatewayAllowed({
+      kind: 'wk_order',
+      orderId,
+      merchantId,
+    });
+  }
 
   private generateOrderCode(): string {
     const ts = Date.now().toString(36).toUpperCase();
@@ -484,6 +499,9 @@ export class OrdersService {
 
     const paymentMethod = (input.payment_method || 'cod').toLowerCase();
     const isOnline = ONLINE_METHODS.has(paymentMethod);
+    if (isOnline) {
+      this.assertMerchantOrderGatewayForbidden(0, Number(merchantId));
+    }
     const orderType = input.order_type ?? input.orderType ?? 'delivery';
     // Subscription and VAT configuration are management-owned.  Checkout and
     // merchants never supply the rate, basis, fee, or final amount.
@@ -558,6 +576,14 @@ export class OrdersService {
           notes: input.notes ?? null,
           paymentMethod,
           paymentStatus: 'pending',
+          merchantPaymentStatus:
+            paymentMethod === 'cod' ||
+            paymentMethod === 'cash' ||
+            paymentMethod === 'manual'
+              ? MerchantPaymentStatus.AWAITING_PAYMENT
+              : paymentMethod === 'pending_selection'
+                ? MerchantPaymentStatus.AWAITING_PAYMENT
+                : MerchantPaymentStatus.NOT_REQUIRED,
           discountAmount: acceptedQuotation?.discount ?? 0,
           orderItems: {
             create: items.map((it) => ({
@@ -663,8 +689,33 @@ export class OrdersService {
     };
     const created = existingTx
       ? await createOrderCore(existingTx)
-      : await this.prisma.$transaction(createOrderCore);
-    if (existingTx) return created;
+      : await this.prisma.$transaction(async (tx) => {
+          const order = await createOrderCore(tx);
+          if (this.paymentAllocations) {
+            await this.paymentAllocations.persistForOrder(tx, {
+              id: order.id,
+              merchantId: order.merchantId,
+              totalAmount: order.totalAmount,
+              deliveryFee: order.deliveryFee,
+              transactionFeeAmount: order.transactionFeeAmount,
+              discountAmount: order.discountAmount,
+            });
+          }
+          return order;
+        });
+    if (existingTx) {
+      if (this.paymentAllocations) {
+        await this.paymentAllocations.persistForOrder(existingTx, {
+          id: created.id,
+          merchantId: created.merchantId,
+          totalAmount: created.totalAmount,
+          deliveryFee: created.deliveryFee,
+          transactionFeeAmount: created.transactionFeeAmount,
+          discountAmount: created.discountAmount,
+        });
+      }
+      return created;
+    }
     await this.runOrderCreatedPostCommitEffects(created);
 
     // Online payment → create a gateway checkout and attach the redirect URL.
@@ -1508,6 +1559,7 @@ export class OrdersService {
     }
     if (!['gcash', 'maya', 'card'].includes(method))
       throw new BadRequestException('Unsupported payment method');
+    this.assertMerchantOrderGatewayForbidden(existing.id, existing.merchantId);
     const gateway = this.resolveGateway(undefined, method);
     const appUrl = process.env.APP_BASE_URL || 'http://localhost:3001';
     const result = await this.paymentGateway.createPayment({
@@ -1553,6 +1605,7 @@ export class OrdersService {
       );
     if (!['gcash', 'maya', 'card'].includes(method))
       throw new BadRequestException('Unsupported payment method');
+    this.assertMerchantOrderGatewayForbidden(existing.id, existing.merchantId);
     const result = await this.paymentGateway.createPayment({
       gateway: this.resolveGateway(undefined, method),
       amount: Number(existing.totalAmount),

@@ -2,6 +2,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import {
 import { OrderPayCoolsService } from './order-paycools.service';
 import { CUSTOMER_ORDER_PAYMENT_PURPOSE } from './paycools-order-source';
 import { PaymentLifecycleService } from './payment-lifecycle.service';
+import { PaymentRoutingService } from '../payment-ownership/payment-routing.service';
 import type { VerifiedWebhookPayment } from './payment-provider';
 
 jest.mock('qrcode', () => ({
@@ -243,6 +245,8 @@ function createStore(
     lifecycle,
     paymentPartners as never,
     paycools as never,
+    new PaymentRoutingService(),
+    { record: jest.fn(async () => undefined) } as never,
   );
 
   return {
@@ -262,102 +266,66 @@ function createStore(
 }
 
 describe('OrderPayCoolsService', () => {
-  it('hides PayCools when the provider is unavailable', async () => {
-    const { service } = createStore({ operational: false });
-    await expect(
-      service.getAvailability({ merchantId: 9, orderType: 'delivery' }),
-    ).resolves.toMatchObject({ available: false, method: null });
-  });
-
-  it('shows PayCools when the restaurant source is operational', async () => {
-    const { service, paymentPartners } = createStore({
-      commerceDomain: CommerceDomain.FOOD,
-    });
+  it('refuses PayCools availability for merchant commerce contexts', async () => {
+    const { service } = createStore({ operational: true });
     await expect(
       service.getAvailability({ merchantId: 9, orderType: 'delivery' }),
     ).resolves.toMatchObject({
-      available: true,
-      method: 'qrph',
-      sourceType: PlatformPaymentSourceType.RESTAURANT_ORDER,
+      available: false,
+      method: null,
+      wekonnekPayCoolsAllowed: false,
+      beneficiary: 'MERCHANT',
+      purpose: 'MERCHANT_ORDER',
     });
-    expect(paymentPartners.isSourceOperational).toHaveBeenCalledWith(
-      PlatformPaymentSourceType.RESTAURANT_ORDER,
-    );
   });
 
-  it('sends exactly WkOrder.totalAmount to PayCools', async () => {
-    const { service, paycools, platformPayments, order } = createStore({
+  it('refuses PayCools availability for a concrete merchant order', async () => {
+    const { service } = createStore();
+    await expect(
+      service.getAvailability({ orderId: 88, userId: USER_ID }),
+    ).resolves.toMatchObject({
+      available: false,
+      wekonnekPayCoolsAllowed: false,
+      beneficiary: 'MERCHANT',
+    });
+  });
+
+  it('rejects WeKonnek PayCools initiation for merchant orders (Stage 1A guard)', async () => {
+    const { service, paycools, platformPayments } = createStore({
       orderType: 'delivery',
       commerceDomain: CommerceDomain.FOOD,
       totalAmount: 188.5,
     });
-    const created = await service.createForOrder(88, USER_ID);
-    expect(platformPayments.createPending).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceType: PlatformPaymentSourceType.RESTAURANT_ORDER,
-        amount: 188.5,
-        sourceId: '88',
-        payerUserId: USER_ID,
-      }),
-    );
-    expect(paycools.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amountMinor: 18850,
-        customerName: 'Ana Cruz',
-        email: 'ana@example.test',
-      }),
-    );
-    expect(created.status).toBe(PlatformPaymentStatus.PENDING);
-    expect(created.qrcodeContent).toBe('000201QRPH');
-    expect(created.qrImageDataUrl).toContain('000201QRPH');
-    expect(order.paymentMethod).toBe('qrph');
-  });
-
-  it('creates a retail PayCools payment', async () => {
-    const { service, platformPayments } = createStore({
-      orderType: 'delivery',
-      commerceDomain: CommerceDomain.NON_FOOD,
-    });
-    await service.createForOrder(88, USER_ID);
-    expect(platformPayments.createPending).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceType: PlatformPaymentSourceType.RETAIL_ORDER,
-      }),
-    );
-  });
-
-  it('creates a pickup/take-out PayCools payment', async () => {
-    const { service, platformPayments } = createStore({
-      orderType: 'pickup',
-      commerceDomain: CommerceDomain.FOOD,
-    });
-    await service.createForOrder(88, USER_ID);
-    expect(platformPayments.createPending).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceType: PlatformPaymentSourceType.TAKE_OUT,
-      }),
-    );
-  });
-
-  it('creates a dine-in bill-out PayCools payment only after bill-out is confirmed', async () => {
-    const { service, dineInSync } = createStore({
-      orderType: 'dine_in',
-      orderStatus: 'ready',
-    });
     await expect(service.createForOrder(88, USER_ID)).rejects.toBeInstanceOf(
-      BadRequestException,
+      ForbiddenException,
     );
-    const ready = createStore({
-      orderType: 'dine_in',
-      orderStatus: 'payment_pending',
-      paymentMethod: 'pending_selection',
-    });
-    await ready.service.createForOrder(88, USER_ID);
-    expect(ready.dineInSync.recordOrder).toHaveBeenCalledWith(
-      88,
-      'PAYMENT_METHOD_SELECTED',
-    );
-    expect(dineInSync.recordOrder).not.toHaveBeenCalled();
+    expect(platformPayments.createPending).not.toHaveBeenCalled();
+    expect(paycools.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('rejects retail and pickup merchant PayCools initiation', async () => {
+    await expect(
+      createStore({
+        orderType: 'delivery',
+        commerceDomain: CommerceDomain.NON_FOOD,
+      }).service.createForOrder(88, USER_ID),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      createStore({
+        orderType: 'pickup',
+        commerceDomain: CommerceDomain.FOOD,
+      }).service.createForOrder(88, USER_ID),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects dine-in merchant PayCools initiation', async () => {
+    await expect(
+      createStore({
+        orderType: 'dine_in',
+        orderStatus: 'payment_pending',
+        paymentMethod: 'pending_selection',
+      }).service.createForOrder(88, USER_ID),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('rejects creation when the caller does not own the order', async () => {
@@ -368,7 +336,7 @@ describe('OrderPayCoolsService', () => {
     expect(paycools.createPayment).not.toHaveBeenCalled();
   });
 
-  it('rejects already-paid and terminal orders', async () => {
+  it('rejects already-paid and terminal orders before PayCools guard path completes ownership load', async () => {
     await expect(
       createStore({ paymentStatus: 'paid' }).service.createForOrder(
         88,
@@ -399,21 +367,10 @@ describe('OrderPayCoolsService', () => {
     expect(empty.paycools.createPayment).not.toHaveBeenCalled();
   });
 
-  it('records QR generation failure against the same canonical payment', async () => {
-    const { service, paycools, payment, lifecycleEvents, platformPayments } = createStore();
-    paycools.createPayment.mockRejectedValue(new Error('provider unavailable'));
-    await expect(service.createForOrder(88, USER_ID)).rejects.toThrow('provider unavailable');
-    expect(payment.status).toBe(PlatformPaymentStatus.FAILED);
-    expect(platformPayments.createPending).toHaveBeenCalledTimes(1);
-    expect(lifecycleEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({ eventType: 'QR_GENERATION_FAILED', resultingStatus: PlatformPaymentStatus.FAILED }),
-    ]));
-  });
-
-  it('rejects a second active PayCools initiation for the same order', async () => {
+  it('does not create provider payment when a second active initiation is attempted (guard first)', async () => {
     const { service, paycools } = createStore({ existingActive: true });
     await expect(service.createForOrder(88, USER_ID)).rejects.toBeInstanceOf(
-      ConflictException,
+      ForbiddenException,
     );
     expect(paycools.createPayment).not.toHaveBeenCalled();
   });

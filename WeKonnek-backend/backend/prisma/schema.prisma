@@ -173,6 +173,7 @@ model Merchant {
   accuraShopBranchMappings ShopAccuraBranchMapping[]
   accuraOnboardingAudits   AccuraOnboardingAuditEvent[]
   fulfillments             OrderFulfillment[]
+  paymentMethods           MerchantPaymentMethod[]
 
   @@index([userId])
   @@index([categoryId])
@@ -967,11 +968,16 @@ model WkOrder {
   accuraWebhookEvents   AccuraWebhookEvent[]
   fulfillment           OrderFulfillment?
   domainEvents          OrderDomainEvent[]
+  paymentAllocations    OrderPaymentAllocation[]
+  merchantPaymentEvidences MerchantPaymentEvidence[]
+  /// Stage 1A merchant-direct payment lifecycle (separate from fulfillment).
+  merchantPaymentStatus MerchantPaymentStatus @default(NOT_REQUIRED) @map("merchant_payment_status")
 
   @@index([userId])
   @@index([merchantId])
   @@index([shopId])
   @@index([status])
+  @@index([merchantPaymentStatus])
   @@map("orders")
 }
 
@@ -2321,6 +2327,7 @@ model Branch {
   quotations                 MerchantQuotation[]
   accuraBranchMapping        ShopAccuraBranchMapping?
   fulfillments               OrderFulfillment[]
+  paymentMethods             MerchantPaymentMethod[]
 
   @@map("branches")
 }
@@ -2842,4 +2849,122 @@ model OrderDomainEvent {
   @@index([orderV2Id, createdAt])
   @@index([correlationId])
   @@map("order_domain_events")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 1A — Payment ownership (merchant vs platform)
+// ═══════════════════════════════════════════════════════
+
+/// Who owns / is the beneficiary of funds for a charge.
+enum PaymentBeneficiaryType {
+  MERCHANT
+  PLATFORM
+}
+
+/// Why the payment exists (orthogonal to beneficiary).
+enum PaymentPurpose {
+  MERCHANT_ORDER
+  PLATFORM_SUBSCRIPTION
+  PLATFORM_LISTING_FEE
+  PLATFORM_PROPERTY_FEE
+  PLATFORM_WALLET_RELOAD
+  PLATFORM_OTHER
+}
+
+enum PaymentAllocationComponent {
+  MERCHANDISE
+  PLATFORM_FEE
+  DELIVERY_FEE
+}
+
+enum MerchantPaymentMethodKind {
+  CASH
+  MERCHANT_QR
+  BANK_TRANSFER
+}
+
+/// Merchant-direct payment lifecycle for a commerce order (not fulfillment).
+enum MerchantPaymentStatus {
+  NOT_REQUIRED
+  AWAITING_PAYMENT
+  PROOF_SUBMITTED
+  VERIFIED
+  REJECTED
+  CANCELLED
+}
+
+/// Merchant/shop-owned payment acceptance configuration (not WeKonnek PayCools).
+model MerchantPaymentMethod {
+  id               String                   @id @default(uuid()) @db.Uuid
+  merchantId       Int                      @map("merchant_id")
+  shopId           Int?                     @map("shop_id")
+  kind             MerchantPaymentMethodKind
+  displayName      String                   @map("display_name") @db.VarChar(120)
+  accountName      String?                  @map("account_name") @db.VarChar(120)
+  accountReference String?                  @map("account_reference") @db.VarChar(120)
+  instructions     String?                  @db.Text
+  /// Public QR image/asset URL or opaque reference — never provider secrets.
+  qrAssetUrl       String?                  @map("qr_asset_url") @db.VarChar(1000)
+  enabled          Boolean                  @default(true)
+  sortOrder        Int                      @default(0) @map("sort_order")
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant Merchant                   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  shop     Branch?                    @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  evidences MerchantPaymentEvidence[]
+
+  @@index([merchantId, enabled, sortOrder])
+  @@index([shopId, enabled])
+  @@map("merchant_payment_methods")
+}
+
+/// Issuance-time ownership snapshot for monetary components of a WkOrder.
+model OrderPaymentAllocation {
+  id              String                     @id @default(uuid()) @db.Uuid
+  wkOrderId       Int                        @map("wk_order_id")
+  component       PaymentAllocationComponent
+  beneficiaryType PaymentBeneficiaryType     @map("beneficiary_type")
+  /// Merchant id as string, or "WEKONNEK" for platform.
+  beneficiaryId   String                     @map("beneficiary_id") @db.VarChar(64)
+  amount          Decimal                    @db.Decimal(14, 2)
+  currency        String                     @default("PHP") @db.VarChar(3)
+  /// e.g. legacy_bundled_unsettled for delivery fee semantics
+  settlementNote  String?                    @map("settlement_note") @db.VarChar(120)
+  createdAt       DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+
+  wkOrder WkOrder @relation(fields: [wkOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([wkOrderId, component])
+  @@index([beneficiaryType, beneficiaryId])
+  @@map("order_payment_allocations")
+}
+
+/// Customer-declared merchant payment evidence (not authoritative until verified).
+model MerchantPaymentEvidence {
+  id                     String                @id @default(uuid()) @db.Uuid
+  wkOrderId              Int                   @map("wk_order_id")
+  merchantPaymentMethodId String               @map("merchant_payment_method_id") @db.Uuid
+  /// Customer-declared amount — does not rewrite order totals.
+  declaredAmount         Decimal               @map("declared_amount") @db.Decimal(14, 2)
+  customerReference      String?               @map("customer_reference") @db.VarChar(120)
+  proofAssetUrl          String?               @map("proof_asset_url") @db.VarChar(1000)
+  status                 MerchantPaymentStatus @default(PROOF_SUBMITTED)
+  submittedAt            DateTime              @default(now()) @map("submitted_at") @db.Timestamptz
+  submittedBy            String                @map("submitted_by") @db.Uuid
+  verifiedAt             DateTime?             @map("verified_at") @db.Timestamptz
+  verifiedBy             String?               @map("verified_by") @db.Uuid
+  rejectionReason        String?               @map("rejection_reason") @db.VarChar(255)
+  /// Optimistic concurrency for verify/reject races.
+  version                Int                   @default(0)
+  idempotencyKey         String?               @unique @map("idempotency_key") @db.VarChar(64)
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder WkOrder               @relation(fields: [wkOrderId], references: [id], onDelete: Cascade)
+  method  MerchantPaymentMethod @relation(fields: [merchantPaymentMethodId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId, status])
+  @@index([merchantPaymentMethodId])
+  @@map("merchant_payment_evidences")
 }

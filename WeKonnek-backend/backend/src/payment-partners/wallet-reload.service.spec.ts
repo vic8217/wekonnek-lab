@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { WalletReloadService } from './wallet-reload.service';
 import type { VerifiedWebhookPayment } from './payment-provider';
+import { PaymentRoutingService } from '../payment-ownership/payment-routing.service';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_USER = '22222222-2222-2222-2222-222222222222';
@@ -214,6 +215,7 @@ function createStore(
     platformPayments as never,
     paymentPartners as never,
     paycools as never,
+    new PaymentRoutingService(),
   );
 
   return {

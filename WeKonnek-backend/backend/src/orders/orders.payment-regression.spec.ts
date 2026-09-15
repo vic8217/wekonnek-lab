@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 
 function createOrdersService() {
@@ -40,26 +40,22 @@ function createOrdersService() {
 }
 
 describe('OrdersService existing payment regressions', () => {
-  it('starts GCash bill-out through PaymentGatewayService, not PayCools', async () => {
+  it('blocks GCash bill-out through WeKonnek-owned gateway credentials', async () => {
     const { service, paymentGateway } = createOrdersService();
-    await service.checkoutPayment(10, 'user-1', 'gcash');
-    expect(paymentGateway.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ paymentMethod: 'gcash' }),
-    );
+    await expect(service.checkoutPayment(10, 'user-1', 'gcash')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
   });
 
-  it('starts Maya bill-out through PaymentGatewayService', async () => {
+  it('blocks Maya bill-out through WeKonnek-owned gateway credentials', async () => {
     const { service, paymentGateway } = createOrdersService();
-    await service.checkoutPayment(10, 'user-1', 'maya');
-    expect(paymentGateway.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ gateway: 'maya' }),
-    );
+    await expect(service.checkoutPayment(10, 'user-1', 'maya')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
   });
 
-  it('starts card bill-out through PaymentGatewayService', async () => {
+  it('blocks Card bill-out through WeKonnek-owned gateway credentials', async () => {
     const { service, paymentGateway } = createOrdersService();
-    await service.checkoutPayment(10, 'user-1', 'card');
-    expect(paymentGateway.createPayment).toHaveBeenCalled();
+    await expect(service.checkoutPayment(10, 'user-1', 'card')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
   });
 
   it('keeps manual/COD dine-in payment as cash without a gateway', async () => {
@@ -80,8 +76,8 @@ describe('OrdersService existing payment regressions', () => {
     rfq.order.orderType = 'delivery';
     rfq.order.status = 'pending';
     rfq.order.paymentMethod = 'pending_selection';
-    await rfq.service.selectPaymentMethod(10, 'user-1', 'gcash');
-    expect(rfq.paymentGateway.createPayment).toHaveBeenCalled();
+    await expect(rfq.service.selectPaymentMethod(10, 'user-1', 'gcash')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(rfq.paymentGateway.createPayment).not.toHaveBeenCalled();
     await expect(
       rfq.service.selectPaymentMethod(10, 'user-1', 'qrph' as 'gcash'),
     ).rejects.toBeInstanceOf(BadRequestException);

@@ -1,6 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { DineInCrewModule } from '../dine-in-crew/dine-in-crew.module';
 import { MarketplaceOrdersModule } from '../orders/orders.module';
+import { FulfillmentModule } from '../fulfillment/fulfillment.module';
+import { PaymentOwnershipModule } from '../payment-ownership/payment-ownership.module';
 import { PayCoolsCallbackController } from './paycools-callback.controller';
 import { PayCoolsCustomerController } from './paycools-customer.controller';
 import { PaymentPartnersController } from './payment-partners.controller';
@@ -12,7 +14,12 @@ import { PaymentLifecycleService } from './payment-lifecycle.service';
 import { WalletReloadService } from './wallet-reload.service';
 
 @Module({
-  imports: [DineInCrewModule, forwardRef(() => MarketplaceOrdersModule)],
+  imports: [
+    DineInCrewModule,
+    forwardRef(() => MarketplaceOrdersModule),
+    FulfillmentModule,
+    PaymentOwnershipModule,
+  ],
   controllers: [
     PaymentPartnersController,
     PayCoolsCallbackController,

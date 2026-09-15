@@ -19,6 +19,7 @@ import { PayCoolsProvider } from './paycools.provider';
 import { PlatformPaymentService } from './platform-payment.service';
 import type { VerifiedWebhookPayment } from './payment-provider';
 import { moneyDecimal, moneyNumber } from '../modules/wallet/wallet-money';
+import { PaymentRoutingService } from '../payment-ownership/payment-routing.service';
 
 const RELOAD_PURPOSE = 'merchant_wallet_reload';
 const RELOAD_SOURCE = PlatformPaymentSourceType.MERCHANT_SUBSCRIPTION;
@@ -32,6 +33,7 @@ export class WalletReloadService {
     private readonly platformPayments: PlatformPaymentService,
     private readonly paymentPartners: PaymentPartnerConfigService,
     private readonly paycools: PayCoolsProvider,
+    private readonly paymentRouting: PaymentRoutingService,
   ) {}
 
   async createPayCoolsReload(userId: string, amount: number) {
@@ -46,6 +48,13 @@ export class WalletReloadService {
       throw new ForbiddenException(
         'Only an active merchant owner can reload this wallet',
       );
+    const decision = this.paymentRouting.assertWekonnekPayCoolsAllowed({
+      kind: 'platform_wallet_reload',
+      merchantId: merchant.id,
+    });
+    this.logger.log(
+      `platform_paycools_allowed purpose=${decision.purpose} merchantId=${merchant.id}`,
+    );
     const wallet = await this.prisma.wallet.upsert({
       where: { userId },
       update: {},

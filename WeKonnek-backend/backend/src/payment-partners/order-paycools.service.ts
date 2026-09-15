@@ -29,6 +29,8 @@ import {
   resolvePayCoolsOrderSourceType,
 } from './paycools-order-source';
 import type { VerifiedWebhookPayment } from './payment-provider';
+import { PaymentRoutingService } from '../payment-ownership/payment-routing.service';
+import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 
 const TERMINAL_ORDER_STATUSES = ['cancelled', 'completed', 'delivered'];
 
@@ -61,6 +63,8 @@ export class OrderPayCoolsService {
     private readonly lifecycle: PaymentLifecycleService,
     private readonly paymentPartners: PaymentPartnerConfigService,
     private readonly paycools: PayCoolsProvider,
+    private readonly paymentRouting: PaymentRoutingService,
+    private readonly domainEvents: OrderDomainEventService,
   ) {}
 
   async getAvailability(input: {
@@ -69,6 +73,49 @@ export class OrderPayCoolsService {
     orderId?: number;
     userId?: string;
   }) {
+    if (input.orderId != null) {
+      const order = await this.prisma.wkOrder.findUnique({
+        where: { id: input.orderId },
+        select: { id: true, merchantId: true, userId: true },
+      });
+      if (order && (!input.userId || order.userId === input.userId)) {
+        const decision = this.paymentRouting.decide({
+          kind: 'wk_order',
+          orderId: order.id,
+          merchantId: order.merchantId,
+        });
+        return {
+          available: false,
+          method: null,
+          label: null,
+          description:
+            'WeKonnek PayCools is not available for merchant commerce. Use merchant payment options.',
+          sourceType: null,
+          beneficiary: decision.beneficiary,
+          purpose: decision.purpose,
+          wekonnekPayCoolsAllowed: false,
+        };
+      }
+    }
+    // Without a concrete order, still refuse advertising PayCools for merchant commerce contexts.
+    if (input.merchantId != null) {
+      const decision = this.paymentRouting.decide({
+        kind: 'wk_order',
+        orderId: 0,
+        merchantId: input.merchantId,
+      });
+      return {
+        available: false,
+        method: null,
+        label: null,
+        description:
+          'WeKonnek PayCools is not available for merchant commerce. Use merchant payment options.',
+        sourceType: null,
+        beneficiary: decision.beneficiary,
+        purpose: decision.purpose,
+        wekonnekPayCoolsAllowed: false,
+      };
+    }
     const resolved = await this.resolveSource(input);
     const available = await this.paymentPartners.isSourceOperational(
       resolved.sourceType,
@@ -86,120 +133,33 @@ export class OrderPayCoolsService {
 
   async createForOrder(orderId: number, userId: string) {
     const order = await this.loadOwnedPayableOrder(orderId, userId);
-    const sourceType = resolvePayCoolsOrderSourceType(
-      order.orderType,
-      order.merchant.commerceDomain,
-    );
-    const active = await this.paymentPartners.getActiveProvider(sourceType);
-    const existing = await this.findActiveOrderPayment(order.id);
-    if (existing) {
-      throw new ConflictException(
-        'A PayCools payment is already in progress for this order',
-      );
-    }
-
-    const amount = moneyNumber(order.totalAmount);
-    const pending = await this.platformPayments.createPending({
-      destination: PlatformPaymentDestination.MERCHANT_ACCOUNT,
-      sourceType,
-      sourceId: String(order.id),
-      amount,
-      merchantId: order.merchantId,
-      payerUserId: userId,
-      metadata: {
-        purpose: CUSTOMER_ORDER_PAYMENT_PURPOSE,
-        orderId: order.id,
-        orderCode: order.orderCode,
-        orderType: order.orderType,
-        customerUserId: userId,
-        merchantId: order.merchantId,
-        sourceType,
-      },
-    });
-    await this.lifecycle.event(this.prisma, pending, {
-      eventType: PaymentLifecycleEvent.INITIATED,
-      actorType: 'CUSTOMER',
-      actorId: userId,
-      resultingStatus: PlatformPaymentStatus.PENDING,
-      safeMessage: 'QRPH payment initiated',
-    });
-
-    const customerName = [order.user?.firstName, order.user?.lastName]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
+    // Stage 1A critical guard — derive ownership server-side; never start WeKonnek PayCools for merchant orders.
     try {
-      const created = await this.paycools.createPayment({
-        reference: pending.reference,
-        amountMinor: pending.providerAmountMinor,
-        currency: pending.currency,
-        notifyUrl: this.paymentPartners.paymentCallbackUrl(),
-        expiresInSeconds: active.defaultQrExpirySeconds,
-        customerName: customerName || undefined,
-        email: order.user?.email || undefined,
-        remark: `WeKonnek order ${order.orderCode}`,
+      this.paymentRouting.assertWekonnekPayCoolsAllowed({
+        kind: 'wk_order',
+        orderId: order.id,
+        merchantId: order.merchantId,
       });
-      await this.platformPayments.attachProviderIdentifiers(pending.id, {
-        qrCodeId: created.providerQrCodeId,
-        transactionId: created.providerTransactionId,
-      });
-      const expiresAt = created.expiresAt?.toISOString() || null;
-      await this.prisma.platformPaymentTransaction.update({
-        where: { id: pending.id },
-        data: {
-          metadata: {
-            purpose: CUSTOMER_ORDER_PAYMENT_PURPOSE,
-            orderId: order.id,
-            orderCode: order.orderCode,
-            orderType: order.orderType,
-            customerUserId: userId,
-            merchantId: order.merchantId,
-            sourceType,
-            qrData: created.qrData || null,
-            qrLink: created.paymentUrl || null,
-            expiresAt,
-          },
+    } catch (err) {
+      await this.domainEvents.record({
+        aggregateType: 'WK_ORDER',
+        aggregateId: String(order.id),
+        wkOrderId: order.id,
+        actorId: userId,
+        actorType: 'CUSTOMER',
+        action: 'FORBIDDEN_MERCHANT_ORDER_PAYCOOLS_ATTEMPT',
+        reason: 'WEKONNEK_PAYCOOLS_FORBIDDEN_FOR_MERCHANT_ORDER',
+        metadata: {
+          merchantId: order.merchantId,
+          purpose: 'MERCHANT_ORDER',
         },
       });
-      await this.lifecycle.event(this.prisma, pending, {
-        eventType: PaymentLifecycleEvent.QR_GENERATED,
-        actorType: 'SYSTEM',
-        resultingStatus: PlatformPaymentStatus.PENDING,
-        safeMessage: 'QR code generated',
-      });
-      await this.prisma.wkOrder.update({
-        where: { id: order.id },
-        data: {
-          paymentMethod: 'qrph',
-          paymentRef: pending.reference,
-          paymentUrl: created.paymentUrl || undefined,
-        },
-      });
-      if (order.orderType === 'dine_in') {
-        await this.dineInSync.recordOrder(order.id, 'PAYMENT_METHOD_SELECTED');
-      }
-      this.logger.log(
-        `order_paycools_created orderId=${order.id} reference=${pending.reference} source=${sourceType}`,
-      );
-      return this.toDto(pending.id, {
-        qrcodeContent: created.qrData || null,
-        qrLink: created.paymentUrl || null,
-        expiresAt,
-      });
-    } catch (error) {
-      await this.prisma.platformPaymentTransaction.update({
-        where: { id: pending.id },
-        data: { status: PlatformPaymentStatus.FAILED },
-      });
-      await this.lifecycle.event(this.prisma, pending, {
-        eventType: 'QR_GENERATION_FAILED',
-        actorType: 'SYSTEM',
-        previousStatus: PlatformPaymentStatus.PENDING,
-        resultingStatus: PlatformPaymentStatus.FAILED,
-        safeMessage: 'PayCools QR generation failed',
-      });
-      throw error;
+      throw err;
     }
+    // Unreachable for MERCHANT_ORDER: assert always rejects. Kept as fail-closed belt.
+    throw new BadRequestException(
+      'WeKonnek PayCools cannot initiate merchant commerce payments',
+    );
   }
 
   async getForOrder(orderId: number, userId: string) {
