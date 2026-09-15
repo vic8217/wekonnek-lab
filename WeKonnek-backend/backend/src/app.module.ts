@@ -61,6 +61,7 @@ import { AccuraModule } from './integrations/accura/accura.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { FulfillmentModule } from './fulfillment/fulfillment.module';
 import { PaymentOwnershipModule } from './payment-ownership/payment-ownership.module';
+import { AgreementsModule } from './agreements/agreements.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { PaymentOwnershipModule } from './payment-ownership/payment-ownership.mo
     ScheduleModule.forRoot(),
     FulfillmentModule,
     PaymentOwnershipModule,
+    AgreementsModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

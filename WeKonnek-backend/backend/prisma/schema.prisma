@@ -972,6 +972,9 @@ model WkOrder {
   merchantPaymentEvidences MerchantPaymentEvidence[]
   /// Stage 1A merchant-direct payment lifecycle (separate from fulfillment).
   merchantPaymentStatus MerchantPaymentStatus @default(NOT_REQUIRED) @map("merchant_payment_status")
+  agreements            Agreement[]
+  agreementEvidences    AgreementEvidence[]
+  custodyEvents         CustodyEvent[]
 
   @@index([userId])
   @@index([merchantId])
@@ -2628,12 +2631,15 @@ model TrustTradeTransaction {
   sourceType        String   @map("source_type") @db.VarChar(30)
   status            String   @default("ORDER_CONFIRMED") @db.VarChar(40)
   agreementSnapshot Json     @map("agreement_snapshot")
+  /// Stage 2A link to authoritative agreement framework (nullable for legacy rows).
+  agreementId       String?  @unique @map("agreement_id") @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  wkOrder  WkOrder? @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
-  orderV2  Order?   @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  wkOrder   WkOrder?   @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  orderV2   Order?     @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
+  merchant  Merchant   @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  agreement Agreement? @relation(fields: [agreementId], references: [id], onDelete: SetNull)
 
   @@index([buyerId, createdAt])
   @@index([merchantId, status])
@@ -2750,6 +2756,7 @@ enum OrderDomainAggregateType {
   WK_ORDER
   ORDER_FULFILLMENT
   ORDER_V2
+  AGREEMENT
 }
 
 enum OrderDomainActorType {
@@ -2791,6 +2798,8 @@ model OrderFulfillment {
   shop         Branch?            @relation(fields: [shopId], references: [id], onDelete: SetNull)
   assignments  RiderAssignment[]
   domainEvents OrderDomainEvent[]
+  custodyEvents CustodyEvent[]
+  agreements   Agreement[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -2963,8 +2972,251 @@ model MerchantPaymentEvidence {
 
   wkOrder WkOrder               @relation(fields: [wkOrderId], references: [id], onDelete: Cascade)
   method  MerchantPaymentMethod @relation(fields: [merchantPaymentMethodId], references: [id], onDelete: Restrict)
+  /// Optional Stage 2A agreement evidence link (payment lifecycle remains authoritative here).
+  agreementEvidence AgreementEvidence?
 
   @@index([wkOrderId, status])
   @@index([merchantPaymentMethodId])
   @@map("merchant_payment_evidences")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 2A — Agreement / Authorization / Evidence / Custody
+// ═══════════════════════════════════════════════════════
+
+enum AgreementType {
+  MERCHANT_TRADE
+  /// Schema capability only in Stage 2A — not operationally activated.
+  RIDER_ADVANCE
+}
+
+enum AgreementStatus {
+  DRAFT
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  SUPERSEDED
+  CANCELLED
+}
+
+enum AgreementVersionStatus {
+  DRAFT
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  SUPERSEDED
+  CANCELLED
+}
+
+enum AgreementPartyRole {
+  CUSTOMER
+  MERCHANT
+  RIDER
+  PLATFORM
+}
+
+enum AgreementAcceptanceMethod {
+  WEB_CONFIRMATION
+  MOBILE_CONFIRMATION
+  QR_CONFIRMATION
+  OTP_CONFIRMATION
+  SYSTEM_MIGRATION
+}
+
+enum AgreementProvenance {
+  LEGACY_SNAPSHOT
+  EXPLICIT_ACCEPTANCE
+}
+
+enum AgreementEvidenceType {
+  PAYMENT_REFERENCE
+  PAYMENT_PROOF
+  MERCHANT_ACKNOWLEDGMENT
+  RIDER_ACKNOWLEDGMENT
+  CUSTODY_HANDOFF
+  DELIVERY_CONFIRMATION
+  PHOTO
+  DOCUMENT
+  NOTE
+  SYSTEM_EVENT
+}
+
+enum CustodyEventType {
+  GOODS_PREPARED
+  MERCHANT_RELEASED
+  RIDER_RECEIVED
+  IN_TRANSIT
+  CUSTOMER_RECEIVED
+  RETURN_INITIATED
+  RETURN_RECEIVED
+}
+
+model Agreement {
+  id                       String              @id @default(uuid()) @db.Uuid
+  agreementType            AgreementType       @map("agreement_type")
+  status                   AgreementStatus     @default(DRAFT)
+  provenance               AgreementProvenance @default(EXPLICIT_ACCEPTANCE)
+  wkOrderId                Int?                @map("wk_order_id")
+  fulfillmentId            String?             @map("fulfillment_id") @db.Uuid
+  /// JSON array of AgreementPartyRole values required for full ACCEPTED status.
+  requiredPartyRoles       Json                @map("required_party_roles")
+  currentVersionId         String?             @unique @map("current_version_id") @db.Uuid
+  cancelledAt              DateTime?           @map("cancelled_at") @db.Timestamptz
+  cancelledBy              String?             @map("cancelled_by") @db.Uuid
+  cancellationReason       String?             @map("cancellation_reason") @db.VarChar(255)
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder            WkOrder?              @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment        OrderFulfillment?     @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+  currentVersion     AgreementVersion?     @relation("AgreementCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions           AgreementVersion[]    @relation("AgreementVersions")
+  parties            AgreementParty[]
+  evidences          AgreementEvidence[]
+  custodyEvents      CustodyEvent[]
+  trustTrade         TrustTradeTransaction?
+
+  @@index([agreementType, status])
+  @@index([wkOrderId, createdAt])
+  @@index([fulfillmentId])
+  @@map("agreements")
+}
+
+model AgreementVersion {
+  id                   String                 @id @default(uuid()) @db.Uuid
+  agreementId          String                 @map("agreement_id") @db.Uuid
+  versionNumber        Int                    @map("version_number")
+  status               AgreementVersionStatus @default(DRAFT)
+  canonicalSchema      String                 @map("canonical_schema") @db.VarChar(64)
+  termsSnapshot        Json                   @map("terms_snapshot")
+  termsHash            String                 @map("terms_hash") @db.VarChar(64)
+  expiresAt            DateTime?              @map("expires_at") @db.Timestamptz
+  supersedesVersionId  String?                @map("supersedes_version_id") @db.Uuid
+  amendmentReason      String?                @map("amendment_reason") @db.VarChar(255)
+  amendedByUserId      String?                @map("amended_by_user_id") @db.Uuid
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz
+
+  agreement          Agreement             @relation("AgreementVersions", fields: [agreementId], references: [id], onDelete: Cascade)
+  supersedesVersion  AgreementVersion?     @relation("AgreementVersionLineage", fields: [supersedesVersionId], references: [id], onDelete: SetNull)
+  supersededBy       AgreementVersion[]    @relation("AgreementVersionLineage")
+  currentFor         Agreement?            @relation("AgreementCurrentVersion")
+  acceptances        AgreementAcceptance[]
+  evidences          AgreementEvidence[]
+
+  @@unique([agreementId, versionNumber])
+  @@index([termsHash])
+  @@index([status, expiresAt])
+  @@map("agreement_versions")
+}
+
+model AgreementParty {
+  id               String             @id @default(uuid()) @db.Uuid
+  agreementId      String             @map("agreement_id") @db.Uuid
+  role             AgreementPartyRole
+  userId           String?            @map("user_id") @db.Uuid
+  merchantId       Int?               @map("merchant_id")
+  /// Historical display label captured at offer time (not mutable identity).
+  historicalLabel  String?            @map("historical_label") @db.VarChar(200)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  agreement Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+
+  @@unique([agreementId, role])
+  @@index([userId])
+  @@index([merchantId])
+  @@map("agreement_parties")
+}
+
+model AgreementAcceptance {
+  id                 String                     @id @default(uuid()) @db.Uuid
+  agreementVersionId String                     @map("agreement_version_id") @db.Uuid
+  actorUserId        String                     @map("actor_user_id") @db.Uuid
+  partyRole          AgreementPartyRole         @map("party_role")
+  acceptedAt         DateTime                   @default(now()) @map("accepted_at") @db.Timestamptz
+  acceptanceMethod   AgreementAcceptanceMethod  @map("acceptance_method")
+  termsHash          String                     @map("terms_hash") @db.VarChar(64)
+  correlationId      String?                    @map("correlation_id") @db.VarChar(64)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+
+  agreementVersion AgreementVersion @relation(fields: [agreementVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([agreementVersionId, actorUserId, partyRole])
+  @@index([correlationId])
+  @@map("agreement_acceptances")
+}
+
+model AgreementEvidence {
+  id                        String                @id @default(uuid()) @db.Uuid
+  agreementId               String                @map("agreement_id") @db.Uuid
+  agreementVersionId        String?               @map("agreement_version_id") @db.Uuid
+  wkOrderId                 Int?                  @map("wk_order_id")
+  evidenceType              AgreementEvidenceType @map("evidence_type")
+  contentHash               String?               @map("content_hash") @db.VarChar(64)
+  contentType               String?               @map("content_type") @db.VarChar(120)
+  sizeBytes                 Int?                  @map("size_bytes")
+  storageReference          String?               @map("storage_reference") @db.VarChar(1000)
+  capturedAt                DateTime?             @map("captured_at") @db.Timestamptz
+  submittedBy               String                @map("submitted_by") @db.Uuid
+  metadata                  Json?
+  finalized                 Boolean               @default(true)
+  supersededById            String?               @unique @map("superseded_by_id") @db.Uuid
+  idempotencyKey            String?               @unique @map("idempotency_key") @db.VarChar(64)
+  /// Optional link to Stage 1 merchant payment evidence (payment lifecycle remains authoritative there).
+  merchantPaymentEvidenceId String?               @unique @map("merchant_payment_evidence_id") @db.Uuid
+  createdAt                 DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  agreement               Agreement              @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  agreementVersion        AgreementVersion?      @relation(fields: [agreementVersionId], references: [id], onDelete: SetNull)
+  wkOrder                 WkOrder?               @relation(fields: [wkOrderId], references: [id], onDelete: SetNull)
+  merchantPaymentEvidence MerchantPaymentEvidence? @relation(fields: [merchantPaymentEvidenceId], references: [id], onDelete: SetNull)
+  supersededBy            AgreementEvidence?     @relation("EvidenceSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes              AgreementEvidence?     @relation("EvidenceSupersession")
+  custodyLinks            CustodyEventEvidence[]
+
+  @@index([agreementId, createdAt])
+  @@index([wkOrderId, createdAt])
+  @@index([evidenceType])
+  @@map("agreement_evidences")
+}
+
+model CustodyEvent {
+  id             String           @id @default(uuid()) @db.Uuid
+  wkOrderId      Int?             @map("wk_order_id")
+  fulfillmentId  String?          @map("fulfillment_id") @db.Uuid
+  agreementId    String?          @map("agreement_id") @db.Uuid
+  eventType      CustodyEventType @map("event_type")
+  fromPartyRole  AgreementPartyRole? @map("from_party_role")
+  toPartyRole    AgreementPartyRole? @map("to_party_role")
+  fromUserId     String?          @map("from_user_id") @db.Uuid
+  toUserId       String?          @map("to_user_id") @db.Uuid
+  actorUserId    String           @map("actor_user_id") @db.Uuid
+  occurredAt     DateTime         @default(now()) @map("occurred_at") @db.Timestamptz
+  correlationId  String?          @map("correlation_id") @db.VarChar(64)
+  metadata       Json?
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  wkOrder     WkOrder?               @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment OrderFulfillment?      @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+  agreement   Agreement?             @relation(fields: [agreementId], references: [id], onDelete: SetNull)
+  evidences   CustodyEventEvidence[]
+
+  @@index([wkOrderId, occurredAt])
+  @@index([fulfillmentId, occurredAt])
+  @@index([agreementId, occurredAt])
+  @@index([correlationId])
+  @@map("custody_events")
+}
+
+model CustodyEventEvidence {
+  id             String @id @default(uuid()) @db.Uuid
+  custodyEventId String @map("custody_event_id") @db.Uuid
+  evidenceId     String @map("evidence_id") @db.Uuid
+
+  custodyEvent CustodyEvent      @relation(fields: [custodyEventId], references: [id], onDelete: Cascade)
+  evidence     AgreementEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([custodyEventId, evidenceId])
+  @@map("custody_event_evidences")
 }

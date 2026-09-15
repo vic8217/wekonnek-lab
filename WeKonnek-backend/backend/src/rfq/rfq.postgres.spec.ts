@@ -530,13 +530,16 @@ describe('RfqService PostgreSQL acceptance gate', () => {
       where: { id: fixture.product.id },
       data: { price: 1400, sellingPrice: 1400 },
     });
-    await orders.selectPaymentMethod(order.id, fixture.buyer.id, 'gcash');
-    expect(paymentGateway.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: Number(order.totalAmount) }),
-    );
-    expect(paymentGateway.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 1000 }),
-    );
+    // Stage 1: WeKonnek-owned gateways remain forbidden for merchant orders.
+    await expect(
+      orders.selectPaymentMethod(order.id, fixture.buyer.id, 'gcash'),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'WEKONNEK_GATEWAY_FORBIDDEN_FOR_MERCHANT_ORDER',
+      }),
+    });
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
+    expect(Number(order.totalAmount)).toBe(1000);
   });
 
   it('blocks a different merchant from reading or quoting another merchant RFQ', async () => {
@@ -609,16 +612,34 @@ describe('RfqService PostgreSQL acceptance gate', () => {
     expect(effects.calls).toBe(0);
   });
 
-  it('creates a normal direct order at the live price and charges its persisted amount', async () => {
+  it('creates a normal direct order at the live price and forbids WeKonnek gateway for merchant orders', async () => {
     fixture = await createFixture();
     await prisma.product.update({
       where: { id: fixture.product.id },
       data: { price: 1234.56, sellingPrice: 1234.56 },
     });
+    // Stage 1 payment ownership: online WeKonnek gateways cannot charge merchant orders.
+    await expect(
+      orders.create(fixture.buyer.id, {
+        merchantId: fixture.merchant.id,
+        shopId: fixture.shop.id,
+        payment_method: 'gcash',
+        items: [{ productId: fixture.product.id, quantity: 1, price: 0 }],
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'WEKONNEK_GATEWAY_FORBIDDEN_FOR_MERCHANT_ORDER',
+      }),
+    });
+    expect(
+      await prisma.wkOrder.count({ where: { userId: fixture.buyer.id } }),
+    ).toBe(0);
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
+
     await orders.create(fixture.buyer.id, {
       merchantId: fixture.merchant.id,
       shopId: fixture.shop.id,
-      payment_method: 'gcash',
+      payment_method: 'cod',
       items: [{ productId: fixture.product.id, quantity: 1, price: 0 }],
     });
     const order = await prisma.wkOrder.findFirstOrThrow({
@@ -636,9 +657,7 @@ describe('RfqService PostgreSQL acceptance gate', () => {
       ).reservedQuantity,
     ).toBe(1);
     expect(effects.calls).toBe(1);
-    expect(paymentGateway.createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 1234.56 }),
-    );
+    expect(paymentGateway.createPayment).not.toHaveBeenCalled();
   });
 
   it('executes two real concurrent accepts with one persisted order and reservation', async () => {

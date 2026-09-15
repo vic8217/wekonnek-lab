@@ -532,13 +532,22 @@ export class OrdersService {
     });
     // The fee base is discounted merchandise only: delivery and this fee are
     // expressly excluded, so customer charges cannot compound.
-    const totalAmount = Number(
-      transactionFee.merchandiseAfterDiscount
-        .plus(deliveryFee)
-        .plus(transactionFee.amount)
-        .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
-        .toString(),
-    );
+    // Accepted RFQ quotations are frozen server-side totals (tax/otherCharges
+    // included). Do not rebuild those from live catalogue merchandise alone.
+    const totalAmount = acceptedQuotation
+      ? Number(
+          new Prisma.Decimal(acceptedQuotation.total)
+            .plus(transactionFee.amount)
+            .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+            .toString(),
+        )
+      : Number(
+          transactionFee.merchandiseAfterDiscount
+            .plus(deliveryFee)
+            .plus(transactionFee.amount)
+            .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+            .toString(),
+        );
     const requestedPickupReadyMinutes =
       input.pickup_ready_minutes ?? input.pickupReadyMinutes;
     const pickupReadyMinutes =
