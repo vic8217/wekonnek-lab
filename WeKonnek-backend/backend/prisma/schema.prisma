@@ -174,6 +174,7 @@ model Merchant {
   accuraOnboardingAudits   AccuraOnboardingAuditEvent[]
   fulfillments             OrderFulfillment[]
   paymentMethods           MerchantPaymentMethod[]
+  pickupHandoffTokens      PickupHandoffToken[]
 
   @@index([userId])
   @@index([categoryId])
@@ -975,6 +976,7 @@ model WkOrder {
   agreements            Agreement[]
   agreementEvidences    AgreementEvidence[]
   custodyEvents         CustodyEvent[]
+  pickupHandoffTokens   PickupHandoffToken[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1289,6 +1291,7 @@ model User {
   riderWalletLoads         PlatformPaymentTransaction[] @relation("PlatformPaymentRider")
   activeFulfillments       OrderFulfillment[]           @relation("FulfillmentActiveRider")
   riderAssignments         RiderAssignment[]            @relation("RiderAssignmentRider")
+  pickupHandoffTokensAsRider PickupHandoffToken[]       @relation("PickupHandoffRider")
 
   @@map("users")
 }
@@ -2800,6 +2803,7 @@ model OrderFulfillment {
   domainEvents OrderDomainEvent[]
   custodyEvents CustodyEvent[]
   agreements   Agreement[]
+  pickupHandoffTokens PickupHandoffToken[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3219,4 +3223,58 @@ model CustodyEventEvidence {
 
   @@unique([custodyEventId, evidenceId])
   @@map("custody_event_evidences")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 3A — Secure Merchant–Rider Pickup Handoff
+// ═══════════════════════════════════════════════════════
+
+enum PickupHandoffPurpose {
+  MERCHANT_PICKUP_HANDOFF
+}
+
+enum PickupHandoffTokenStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+/// Short-lived, single-use, assignment-bound pickup capability.
+/// Raw bearer secret is never persisted — only tokenHash.
+model PickupHandoffToken {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  tokenHash               String                   @unique @map("token_hash") @db.VarChar(64)
+  purpose                 PickupHandoffPurpose     @default(MERCHANT_PICKUP_HANDOFF)
+  status                  PickupHandoffTokenStatus @default(ACTIVE)
+  wkOrderId               Int                      @map("wk_order_id")
+  fulfillmentId           String                   @map("fulfillment_id") @db.Uuid
+  merchantId              Int                      @map("merchant_id")
+  riderId                 String                   @map("rider_id") @db.Uuid
+  riderAssignmentId       String                   @map("rider_assignment_id") @db.Uuid
+  assignmentVersion       Int                      @map("assignment_version")
+  expiresAt               DateTime                 @map("expires_at") @db.Timestamptz
+  consumedAt              DateTime?                @map("consumed_at") @db.Timestamptz
+  consumedByUserId        String?                  @map("consumed_by_user_id") @db.Uuid
+  createdAt               DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  createdByUserId         String                   @map("created_by_user_id") @db.Uuid
+  merchantConfirmedAt     DateTime?                @map("merchant_confirmed_at") @db.Timestamptz
+  merchantConfirmedByUserId String?                @map("merchant_confirmed_by_user_id") @db.Uuid
+  custodyEventId          String?                  @unique @map("custody_event_id") @db.Uuid
+  correlationId           String?                  @map("correlation_id") @db.VarChar(64)
+  revokedAt               DateTime?                @map("revoked_at") @db.Timestamptz
+  revokeReason            String?                  @map("revoke_reason") @db.VarChar(255)
+
+  wkOrder     WkOrder          @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  merchant    Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  rider       User             @relation("PickupHandoffRider", fields: [riderId], references: [id], onDelete: Restrict)
+
+  @@index([fulfillmentId, status])
+  @@index([wkOrderId, status])
+  @@index([riderId, status])
+  @@index([merchantId, status])
+  @@index([status, expiresAt])
+  @@index([riderAssignmentId, assignmentVersion])
+  @@map("pickup_handoff_tokens")
 }

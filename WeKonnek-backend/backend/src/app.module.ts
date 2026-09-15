@@ -62,6 +62,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { FulfillmentModule } from './fulfillment/fulfillment.module';
 import { PaymentOwnershipModule } from './payment-ownership/payment-ownership.module';
 import { AgreementsModule } from './agreements/agreements.module';
+import { PickupHandoffModule } from './pickup-handoff/pickup-handoff.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { AgreementsModule } from './agreements/agreements.module';
     FulfillmentModule,
     PaymentOwnershipModule,
     AgreementsModule,
+    PickupHandoffModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

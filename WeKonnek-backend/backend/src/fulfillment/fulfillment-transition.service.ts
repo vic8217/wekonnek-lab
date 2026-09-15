@@ -83,12 +83,24 @@ export class FulfillmentTransitionService {
     }
 
     return this.prisma.$transaction(
-      async (tx) => this.transitionInTx(tx, input, target),
+      async (tx) => this.runTransitionInTx(tx, input, target),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 
-  private async transitionInTx(
+  /**
+   * Transition helper for callers that already hold a Serializable transaction
+   * (e.g. Stage 3A pickup handoff atomic confirm).
+   */
+  async transitionInTx(
+    tx: Prisma.TransactionClient,
+    input: TransitionInput,
+    target: FulfillmentLifecycleStatus,
+  ) {
+    return this.runTransitionInTx(tx, input, target);
+  }
+
+  private async runTransitionInTx(
     tx: Prisma.TransactionClient,
     input: TransitionInput,
     target: FulfillmentLifecycleStatus,

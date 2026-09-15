@@ -38,7 +38,10 @@ export class CustodyEventService {
     correlationId?: string;
     metadata?: Prisma.InputJsonValue;
     occurredAt?: Date;
+    /** Optional outer transaction (Stage 3A atomic handoff). */
+    tx?: Prisma.TransactionClient;
   }) {
+    const db = input.tx ?? this.prisma;
     if (!input.wkOrderId && !input.fulfillmentId) {
       throw new BadRequestException(
         'wkOrderId or fulfillmentId is required for custody events',
@@ -52,7 +55,7 @@ export class CustodyEventService {
     let activeRiderId: string | null = null;
 
     if (fulfillmentId) {
-      const fulfillment = await this.prisma.orderFulfillment.findUnique({
+      const fulfillment = await db.orderFulfillment.findUnique({
         where: { id: fulfillmentId },
       });
       if (!fulfillment) throw new NotFoundException('Fulfillment not found');
@@ -61,13 +64,13 @@ export class CustodyEventService {
       customerId = fulfillment.customerId;
       activeRiderId = fulfillment.activeRiderId;
     } else if (wkOrderId != null) {
-      const order = await this.prisma.wkOrder.findUnique({
+      const order = await db.wkOrder.findUnique({
         where: { id: wkOrderId },
       });
       if (!order) throw new NotFoundException('Order not found');
       merchantId = order.merchantId;
       customerId = order.userId;
-      const fulfillment = await this.prisma.orderFulfillment.findUnique({
+      const fulfillment = await db.orderFulfillment.findUnique({
         where: { wkOrderId },
       });
       if (fulfillment) {
@@ -82,13 +85,14 @@ export class CustodyEventService {
       customerId,
       activeRiderId,
       eventType: input.eventType,
+      db,
     });
 
     // Party labels are descriptive only. Any supplied user identity must be a
     // persisted party for this order, even when the client omits/mislabels role.
     const merchantUsers = merchantId == null
-      ? []
-      : await this.prisma.merchant.findUnique({
+      ? null
+      : await db.merchant.findUnique({
           where: { id: merchantId },
           select: {
             userId: true,
@@ -112,7 +116,7 @@ export class CustodyEventService {
     }
 
     if (input.agreementId) {
-      const agreement = await this.prisma.agreement.findUnique({
+      const agreement = await db.agreement.findUnique({
         where: { id: input.agreementId },
         select: { wkOrderId: true },
       });
@@ -123,7 +127,7 @@ export class CustodyEventService {
       }
     }
     if (input.evidenceIds?.length) {
-      const evidence = await this.prisma.agreementEvidence.findMany({
+      const evidence = await db.agreementEvidence.findMany({
         where: { id: { in: input.evidenceIds } },
         select: { id: true, wkOrderId: true, agreementId: true },
       });
@@ -155,7 +159,7 @@ export class CustodyEventService {
       }
     }
 
-    const event = await this.prisma.custodyEvent.create({
+    const event = await db.custodyEvent.create({
       data: {
         id: randomUUID(),
         wkOrderId: wkOrderId ?? undefined,
@@ -188,6 +192,7 @@ export class CustodyEventService {
     });
 
     await this.events.record({
+      tx: input.tx,
       aggregateType: 'AGREEMENT',
       aggregateId: input.agreementId ?? event.id,
       wkOrderId: wkOrderId ?? undefined,
@@ -237,7 +242,9 @@ export class CustodyEventService {
     activeRiderId: string | null;
     eventType: CustodyEventType;
     readOnly?: boolean;
+    db?: Prisma.TransactionClient | PrismaService;
   }) {
+    const db = input.db ?? this.prisma;
     if (input.customerId === input.actorUserId) {
       if (input.readOnly) return;
       const allowed: CustodyEventType[] = [
@@ -269,7 +276,7 @@ export class CustodyEventService {
     }
 
     if (input.merchantId != null) {
-      const op = await this.prisma.merchant.findFirst({
+      const op = await db.merchant.findFirst({
         where: {
           id: input.merchantId,
           OR: [

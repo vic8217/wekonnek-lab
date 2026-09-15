@@ -54,6 +54,7 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/docs/adr/
 !backend/docs/adr/*.md
 !backend/.env.stage2.test.example
+!backend/.env.stage3.test.example
 !backend/benchmark-fixtures/
 !backend/benchmark-fixtures/vertex-poc-v1/
 !backend/benchmark-fixtures/vertex-poc-v1/dataset.json
