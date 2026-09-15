@@ -1,18 +1,19 @@
 import {
-  Controller, Get, Post, Put,
+  Controller, Get, Post, Put, ForbiddenException,
   Body, Param, Query, UseGuards, Req,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 import { OrderStatus, OrderType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthActorService } from '../../fulfillment/auth-actor.service';
 
 @ApiTags('Delivery Orders')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('delivery-orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(private readonly ordersService: OrdersService, private readonly actors: AuthActorService) {}
 
   @Post()
   create(@Req() req: any, @Body() data: any) {
@@ -22,11 +23,16 @@ export class OrdersController {
   @Get()
   @ApiQuery({ name: 'type', required: false, enum: OrderType })
   @ApiQuery({ name: 'status', required: false, enum: OrderStatus })
-  findAll(
+  async findAll(
+    @Req() req: any,
     @Query('type') type?: OrderType,
     @Query('status') status?: OrderStatus,
   ) {
-    return this.ordersService.findAll({ type, status });
+    const actor = await this.actors.resolve(req.user);
+    if (actor.type === 'SYSTEM_ADMIN') return this.ordersService.findAll({ type, status });
+    if (actor.type === 'CUSTOMER') return this.ordersService.findByCustomer(req.user.id);
+    if (actor.type === 'RIDER') return this.ordersService.findByRider(req.user.id);
+    return [];
   }
 
   @Get('my-orders')
@@ -72,31 +78,38 @@ export class OrdersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.ordersService.findById(id);
+  async findOne(@Req() req: any, @Param('id') id: string) {
+    const actor = await this.actors.resolve(req.user); const order = await this.ordersService.findById(id);
+    if (actor.type === 'SYSTEM_ADMIN' || (actor.type === 'CUSTOMER' && order.customerId === req.user.id) || (actor.type === 'RIDER' && order.riderId === req.user.id)) return order;
+    throw new ForbiddenException('Order access denied');
   }
 
   @Put(':id/status')
-  updateStatus(
+  async updateStatus(
+    @Req() req: any,
     @Param('id') id: string,
     @Body() body: { status: OrderStatus },
   ) {
-    return this.ordersService.updateStatus(id, body.status);
+    return this.ordersService.updateStatus(id, body.status, await this.actors.resolve(req.user));
   }
 
   @Put(':id/assign-rider')
-  assignRider(
+  async assignRider(
+    @Req() req: any,
     @Param('id') id: string,
     @Body() body: { riderId: string },
   ) {
-    return this.ordersService.assignRider(id, body.riderId);
+    return this.ordersService.assignRider(id, body.riderId, await this.actors.resolve(req.user));
   }
 
   @Put(':id/rate')
-  rateOrder(
+  async rateOrder(
+    @Req() req: any,
     @Param('id') id: string,
     @Body() body: { rating: number; review?: string },
   ) {
+    const order = await this.ordersService.findById(id);
+    if (order.customerId !== req.user.id) throw new ForbiddenException('Only the order customer may rate');
     return this.ordersService.rateOrder(id, body.rating, body.review);
   }
 
@@ -105,10 +118,7 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() body: { paymentStatus: string; paymentRef?: string },
   ) {
-    return this.ordersService.updatePaymentStatus(
-      id,
-      body.paymentStatus as any,
-      body.paymentRef,
-    );
+    // Payment truth is provider/internal-only; no JWT caller may assert it.
+    throw new ForbiddenException('Payment status is provider-managed');
   }
 }

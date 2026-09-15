@@ -7,6 +7,7 @@ import { ZonesModule } from '../zones/zones.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { VouchersModule } from '../vouchers/vouchers.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
+import { FulfillmentModule } from '../../fulfillment/fulfillment.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
     InvoicesModule,
     VouchersModule,
     LoyaltyModule,
+    FulfillmentModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

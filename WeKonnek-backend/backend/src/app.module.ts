@@ -59,6 +59,7 @@ import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.mo
 import { RfqModule } from './rfq/rfq.module';
 import { AccuraModule } from './integrations/accura/accura.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { FulfillmentModule } from './fulfillment/fulfillment.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 
     PrismaModule,
     ScheduleModule.forRoot(),
+    FulfillmentModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

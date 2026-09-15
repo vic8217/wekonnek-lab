@@ -11,6 +11,7 @@ import { CoordinatorApplicationsModule } from '../coordinator-applications/coord
 import { TrustTradeModule } from '../trust-trade/trust-trade.module';
 import { PaymentPartnersModule } from '../payment-partners/payment-partners.module';
 import { AccuraModule } from '../integrations/accura/accura.module';
+import { FulfillmentModule } from '../fulfillment/fulfillment.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AccuraModule } from '../integrations/accura/accura.module';
     TrustTradeModule,
     forwardRef(() => PaymentPartnersModule),
     AccuraModule,
+    FulfillmentModule,
   ],
   controllers: [OrdersController, PaymentsWebhookController],
   providers: [OrdersService, PaymentGatewayService],

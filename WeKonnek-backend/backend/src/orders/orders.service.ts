@@ -26,6 +26,10 @@ import { TrustTradeService } from '../trust-trade/trust-trade.service';
 import { calculateTransactionFee, isMerchantVatRegistered, transactionFeeSnapshot } from './transaction-fee';
 import { AccuraIssuanceJobsService } from '../integrations/accura/accura-issuance-jobs.service';
 import { accuraInvoiceVisibility } from '../integrations/accura/accura-issuance.types';
+import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
+import { evaluateLegacyCodPaidOnCommerceComplete } from '../fulfillment/payment-fulfillment-separation';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 
 interface OrderItemInput {
   product_id?: number;
@@ -296,6 +300,9 @@ export class OrdersService {
     private readonly coordinatorApplications: CoordinatorApplicationsService,
     private readonly trustTrade: TrustTradeService,
     @Optional() private readonly accuraIssuance?: AccuraIssuanceJobsService,
+    @Optional() private readonly domainEvents?: OrderDomainEventService,
+    @Optional() private readonly fulfillments?: FulfillmentService,
+    @Optional() private readonly fulfillmentTransitions?: FulfillmentTransitionService,
   ) {}
 
   private generateOrderCode(): string {
@@ -1041,12 +1048,16 @@ export class OrdersService {
       });
     }
 
-    // When a COD order is completed/delivered, mark it as paid.
+    // Stage 0A: payment status is separate from fulfillment.
+    // Legacy COD/cash/manual still marks paid on commerce complete for
+    // backward compatibility (Accura / ledger). Isolated + audited.
     const data: any = { status };
-    const markCashPaid =
-      ['completed', 'delivered'].includes(status) &&
-      ['cod', 'cash', 'manual'].includes(existing.paymentMethod) &&
-      existing.paymentStatus !== 'paid';
+    const legacyCod = evaluateLegacyCodPaidOnCommerceComplete({
+      nextCommerceStatus: status,
+      paymentMethod: existing.paymentMethod,
+      currentPaymentStatus: existing.paymentStatus,
+    });
+    const markCashPaid = legacyCod.shouldMarkPaid;
     if (markCashPaid) {
       data.paymentStatus = 'paid';
     }
@@ -1061,7 +1072,44 @@ export class OrdersService {
         accuraIssuanceJob: true,
       },
     });
-    if (
+    // Stage 0B bridge: delivery commerce reaching ready creates and advances the
+    // canonical fulfillment aggregate through the same transition service.
+    if (status === 'ready' && existing.orderType === 'delivery' && this.fulfillments && this.fulfillmentTransitions) {
+      const fulfillment = await this.fulfillments.ensureForWkOrder(order.id, { actorId: actor?.id });
+      const fulfillmentActor = {
+        id: actor?.id,
+        type: ['admin', 'staff'].includes(String(actor?.role)) ? 'SYSTEM_ADMIN' as const : 'MERCHANT_OWNER' as const,
+      };
+      for (const target of ['confirmed', 'preparing', 'ready_for_pickup'] as const) {
+        const current = await this.prisma.orderFulfillment.findUniqueOrThrow({ where: { id: fulfillment.id } });
+        if (current.status !== target) await this.fulfillmentTransitions.transition({
+          fulfillmentId: fulfillment.id, targetStatus: target, actor: fulfillmentActor,
+          actorMerchantIds: [order.merchantId], merchantOwnerUserId: actor?.id,
+          reason: 'commerce_ready_for_pickup_bridge',
+        });
+      }
+    }
+    if (markCashPaid && this.domainEvents) {
+      await this.domainEvents.record({
+        aggregateType: 'WK_ORDER',
+        aggregateId: String(order.id),
+        wkOrderId: order.id,
+        actorId: actor?.id,
+        actorType: ['admin', 'staff'].includes(String(actor?.role))
+          ? 'SYSTEM_ADMIN'
+          : 'MERCHANT_OWNER',
+        action: 'LEGACY_COD_MARK_PAID_ON_COMPLETE',
+        previousState: existing.paymentStatus,
+        newState: 'paid',
+        reason: legacyCod.reason,
+        metadata: {
+          commerceStatus: status,
+          paymentMethod: existing.paymentMethod,
+          legacy: true,
+          note: 'Fulfillment/delivery is not authoritative payment proof; this path is Stage 0A compatibility only',
+        },
+      });
+    }    if (
       this.accuraIssuance &&
       (markCashPaid ||
         (['completed', 'delivered'].includes(status) &&

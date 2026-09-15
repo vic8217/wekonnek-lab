@@ -12,6 +12,10 @@ import { ZonesService } from '../zones/zones.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { VouchersService } from '../vouchers/vouchers.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
+import { FulfillmentTransitionService } from '../../fulfillment/fulfillment-transition.service';
+import { RiderAssignmentService } from '../../fulfillment/rider-assignment.service';
+import { fromOrderStatus } from '../../fulfillment/fulfillment-state-machine';
+import type { AuthActor } from '../../fulfillment/fulfillment-authorization';
 
 @Injectable()
 export class OrdersService {
@@ -23,6 +27,8 @@ export class OrdersService {
     private readonly invoicesService: InvoicesService,
     private readonly vouchersService: VouchersService,
     private readonly loyaltyService: LoyaltyService,
+    private readonly fulfillmentTransitions: FulfillmentTransitionService,
+    private readonly riderAssignments: RiderAssignmentService,
   ) {}
 
   async create(
@@ -174,44 +180,23 @@ export class OrdersService {
     });
   }
 
-  async updateStatus(id: string, status: OrderStatus): Promise<Order> {
-    const order = await this.findById(id);
+  async updateStatus(id: string, status: OrderStatus, actor: AuthActor & { actorMerchantIds?: number[]; merchantOwnerUserId?: string | null }): Promise<Order> {
+    await this.findById(id);
 
-    const validTransitions: Record<OrderStatus, OrderStatus[]> = {
-      [OrderStatus.pending]: [OrderStatus.confirmed, OrderStatus.cancelled],
-      [OrderStatus.confirmed]: [OrderStatus.preparing, OrderStatus.cancelled],
-      [OrderStatus.preparing]: [
-        OrderStatus.ready_for_pickup,
-        OrderStatus.cancelled,
-      ],
-      [OrderStatus.ready_for_pickup]: [
-        OrderStatus.rider_assigned,
-        OrderStatus.cancelled,
-      ],
-      [OrderStatus.rider_assigned]: [
-        OrderStatus.picked_up,
-        OrderStatus.cancelled,
-      ],
-      [OrderStatus.picked_up]: [OrderStatus.in_transit],
-      [OrderStatus.in_transit]: [OrderStatus.delivered],
-      [OrderStatus.delivered]: [],
-      [OrderStatus.cancelled]: [],
-    };
-
-    if (!validTransitions[order.status]?.includes(status)) {
-      throw new BadRequestException(
-        `Cannot transition from ${order.status} to ${status}`,
-      );
-    }
-
-    const savedOrder = await this.prisma.order.update({
-      where: { id },
-      data: { status },
-      include: { customer: true, rider: true, store: true },
+    // Authoritative transition path (Stage 0A). Controllers/WS must not fork rules.
+    const result = await this.fulfillmentTransitions.transition({
+      orderV2Id: id,
+      targetStatus: fromOrderStatus(status),
+      actor,
+      actorMerchantIds: actor.actorMerchantIds,
+      merchantOwnerUserId: actor.merchantOwnerUserId,
+      reason: 'delivery-orders.updateStatus',
     });
 
+    const savedOrder = await this.findById(id);
+
     // ─── AUTO-ASSIGN RIDER on READY_FOR_PICKUP ─────
-    if (status === OrderStatus.ready_for_pickup) {
+    if (status === OrderStatus.ready_for_pickup && !result.idempotent) {
       try {
         const assigned = await this.autoAssignRider(id);
         if (assigned) {
@@ -228,7 +213,8 @@ export class OrdersService {
     }
 
     // ─── AUTO-GENERATE BIR E-INVOICE on DELIVERED ───
-    if (status === OrderStatus.delivered) {
+    // Payment status is intentionally NOT changed here (payment ≠ fulfillment).
+    if (status === OrderStatus.delivered && !result.idempotent) {
       try {
         await this.invoicesService.generateFromOrder(savedOrder);
         this.logger.log(
@@ -240,7 +226,6 @@ export class OrdersService {
         );
       }
 
-      // ─── AWARD LOYALTY POINTS ────────────────────
       try {
         await this.loyaltyService.earnPoints(
           savedOrder.customerId,
@@ -257,13 +242,18 @@ export class OrdersService {
     return savedOrder;
   }
 
-  async assignRider(orderId: string, riderId: string): Promise<Order> {
+  async assignRider(orderId: string, riderId: string, actor: AuthActor & { actorMerchantIds?: number[]; merchantOwnerUserId?: string | null }): Promise<Order> {
     await this.findById(orderId);
-    return this.prisma.order.update({
-      where: { id: orderId },
-      data: { riderId, status: OrderStatus.rider_assigned },
-      include: { customer: true, rider: true, store: true },
+    await this.riderAssignments.assign({
+      orderV2Id: orderId,
+      riderId,
+      actor,
+      actorMerchantIds: actor.actorMerchantIds,
+      merchantOwnerUserId: actor.merchantOwnerUserId,
+      allowReassignment: true,
+      reason: 'delivery-orders.assignRider',
     });
+    return this.findById(orderId);
   }
 
   async rateOrder(
@@ -370,7 +360,8 @@ export class OrdersService {
       }
     }
 
-    return this.assignRider(orderId, bestRider.id);
+    // Scheduler-like automatic matching is a trusted internal operation, not a request actor.
+    return this.assignRider(orderId, bestRider.id, { type: 'INTERNAL_SERVICE' });
   }
 
   private haversineDistance(

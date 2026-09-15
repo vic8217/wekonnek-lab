@@ -172,6 +172,7 @@ model Merchant {
   accuraOnboardingLink     AccuraMerchantLink?
   accuraShopBranchMappings ShopAccuraBranchMapping[]
   accuraOnboardingAudits   AccuraOnboardingAuditEvent[]
+  fulfillments             OrderFulfillment[]
 
   @@index([userId])
   @@index([categoryId])
@@ -964,6 +965,8 @@ model WkOrder {
   accuraInvoice         WkOrderAccuraInvoice?
   accuraIssuanceJob     AccuraIssuanceJob?
   accuraWebhookEvents   AccuraWebhookEvent[]
+  fulfillment           OrderFulfillment?
+  domainEvents          OrderDomainEvent[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1275,6 +1278,8 @@ model User {
   pushDevices              PushDevice[]
   paymentsMade             PlatformPaymentTransaction[] @relation("PlatformPaymentPayer")
   riderWalletLoads         PlatformPaymentTransaction[] @relation("PlatformPaymentRider")
+  activeFulfillments       OrderFulfillment[]           @relation("FulfillmentActiveRider")
+  riderAssignments         RiderAssignment[]            @relation("RiderAssignmentRider")
 
   @@map("users")
 }
@@ -1782,6 +1787,8 @@ model Order {
   customerNotes         String?       @map("customer_notes")
   customerRating        Int?          @map("customer_rating")
   customerReview        String?       @map("customer_review")
+  /// Optimistic concurrency token for rider assignment / status races (Stage 0A).
+  assignmentVersion     Int           @default(0) @map("assignment_version")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @default(now()) @updatedAt @map("updated_at")
 
@@ -1789,6 +1796,8 @@ model Order {
   rider                  User?                   @relation("OrderRider", fields: [riderId], references: [id])
   store                  Store?                  @relation(fields: [storeId], references: [id])
   trustTradeTransactions TrustTradeTransaction[]
+  fulfillment            OrderFulfillment?
+  domainEvents           OrderDomainEvent[]
 
   @@map("orders_v2")
 }
@@ -2311,6 +2320,7 @@ model Branch {
   rfqs                       RequestForQuotation[]
   quotations                 MerchantQuotation[]
   accuraBranchMapping        ShopAccuraBranchMapping?
+  fulfillments               OrderFulfillment[]
 
   @@map("branches")
 }
@@ -2705,4 +2715,131 @@ model DeliveryProviderAuditLog {
 
   @@index([providerId, createdAt])
   @@map("delivery_provider_audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 0A — Commerce / Fulfillment foundation
+// ═══════════════════════════════════════════════════════
+
+enum FulfillmentStatus {
+  pending
+  confirmed
+  preparing
+  ready_for_pickup
+  rider_assigned
+  picked_up
+  in_transit
+  delivered
+  cancelled
+}
+
+enum RiderAssignmentStatus {
+  ACTIVE
+  SUPERSEDED
+  UNASSIGNED
+}
+
+enum OrderDomainAggregateType {
+  WK_ORDER
+  ORDER_FULFILLMENT
+  ORDER_V2
+}
+
+enum OrderDomainActorType {
+  CUSTOMER
+  MERCHANT_OWNER
+  MERCHANT_ADMIN
+  MERCHANT_STAFF
+  RIDER
+  SYSTEM_ADMIN
+  PAYMENT_PROVIDER
+  INTERNAL_SERVICE
+  SYSTEM
+  UNKNOWN
+}
+
+/// Canonical marketplace fulfillment aggregate (Option B). Links to WkOrder.
+/// Optionally wraps a legacy orders_v2 row without deleting it.
+model OrderFulfillment {
+  id                 String            @id @default(uuid()) @db.Uuid
+  wkOrderId          Int?              @unique @map("wk_order_id")
+  orderV2Id          String?           @unique @map("order_v2_id") @db.Uuid
+  status             FulfillmentStatus @default(pending)
+  activeRiderId      String?           @map("active_rider_id") @db.Uuid
+  assignmentVersion  Int               @default(0) @map("assignment_version")
+  deliveryPin        String?           @map("delivery_pin") @db.VarChar(12)
+  deliveryProofPhoto String?           @map("delivery_proof_photo")
+  merchantId         Int?              @map("merchant_id")
+  shopId             Int?              @map("shop_id")
+  customerId         String?           @map("customer_id") @db.Uuid
+  cancelledAt        DateTime?         @map("cancelled_at") @db.Timestamptz
+  deliveredAt        DateTime?         @map("delivered_at") @db.Timestamptz
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder      WkOrder?           @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  orderV2      Order?             @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
+  activeRider  User?              @relation("FulfillmentActiveRider", fields: [activeRiderId], references: [id], onDelete: SetNull)
+  merchant     Merchant?          @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  shop         Branch?            @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  assignments  RiderAssignment[]
+  domainEvents OrderDomainEvent[]
+
+  @@index([status, createdAt])
+  @@index([activeRiderId, status])
+  @@index([merchantId, shopId])
+  @@map("order_fulfillments")
+}
+
+model RiderAssignment {
+  id                String                @id @default(uuid()) @db.Uuid
+  fulfillmentId     String                @map("fulfillment_id") @db.Uuid
+  orderV2Id         String?               @map("order_v2_id") @db.Uuid
+  riderId           String                @map("rider_id") @db.Uuid
+  status            RiderAssignmentStatus @default(ACTIVE)
+  assignmentVersion Int                   @map("assignment_version")
+  assignedAt        DateTime              @default(now()) @map("assigned_at") @db.Timestamptz
+  assignedBy        String?               @map("assigned_by") @db.Uuid
+  assignedByType    OrderDomainActorType  @default(SYSTEM) @map("assigned_by_type")
+  unassignedAt      DateTime?             @map("unassigned_at") @db.Timestamptz
+  reason            String?               @db.VarChar(255)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  fulfillment OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+  rider       User             @relation("RiderAssignmentRider", fields: [riderId], references: [id], onDelete: Restrict)
+
+  @@index([fulfillmentId, status])
+  @@index([orderV2Id, status])
+  @@index([riderId, status])
+  @@map("rider_assignments")
+}
+
+model OrderDomainEvent {
+  id            String                   @id @default(uuid()) @db.Uuid
+  eventId       String                   @unique @map("event_id") @db.VarChar(64)
+  aggregateType OrderDomainAggregateType @map("aggregate_type")
+  aggregateId   String                   @map("aggregate_id") @db.VarChar(64)
+  wkOrderId     Int?                     @map("wk_order_id")
+  fulfillmentId String?                  @map("fulfillment_id") @db.Uuid
+  orderV2Id     String?                  @map("order_v2_id") @db.Uuid
+  actorId       String?                  @map("actor_id") @db.Uuid
+  actorType     OrderDomainActorType     @default(UNKNOWN) @map("actor_type")
+  action        String                   @db.VarChar(80)
+  previousState String?                  @map("previous_state") @db.VarChar(50)
+  newState      String?                  @map("new_state") @db.VarChar(50)
+  reason        String?                  @db.VarChar(255)
+  correlationId String?                  @map("correlation_id") @db.VarChar(64)
+  metadata      Json?
+  createdAt     DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+
+  wkOrder     WkOrder?          @relation(fields: [wkOrderId], references: [id], onDelete: SetNull)
+  fulfillment OrderFulfillment? @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+  orderV2     Order?            @relation(fields: [orderV2Id], references: [id], onDelete: SetNull)
+
+  @@index([aggregateType, aggregateId, createdAt])
+  @@index([wkOrderId, createdAt])
+  @@index([fulfillmentId, createdAt])
+  @@index([orderV2Id, createdAt])
+  @@index([correlationId])
+  @@map("order_domain_events")
 }
