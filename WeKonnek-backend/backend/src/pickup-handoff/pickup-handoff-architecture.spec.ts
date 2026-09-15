@@ -49,7 +49,7 @@ describe('Stage 3A pickup token crypto + payload', () => {
 });
 
 describe('Stage 3A architectural separations', () => {
-  it('keeps Rider Advance inactive for pickup handoff', () => {
+  it('keeps pickup from activating Rider Advance; Stage 4A adds vendor-ack gate', () => {
     const svc = Object.create(PickupHandoffService.prototype) as PickupHandoffService;
     expect(() => svc.assertRiderAdvanceInactive()).not.toThrow();
     expect(AgreementType.RIDER_ADVANCE).toBe('RIDER_ADVANCE');
@@ -64,6 +64,8 @@ describe('Stage 3A architectural separations', () => {
       custodyNotFulfillment: true,
       pickupNotPayment: true,
       pickupNotRiderAdvance: true,
+      stage4VendorAckGateForRaOrders: true,
+      nonRaOrdersUnaffected: true,
       usesFulfillmentTransitionService: true,
       rawSecretNotPersisted: true,
     };

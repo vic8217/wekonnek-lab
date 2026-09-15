@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -20,6 +22,7 @@ import { CustodyEventService } from '../agreements/custody-event.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
 import {
   DEFAULT_PICKUP_HANDOFF_TTL_SECONDS,
   encodePickupQrPayload,
@@ -43,6 +46,8 @@ export class PickupHandoffService {
     private readonly custody: CustodyEventService,
     private readonly transitions: FulfillmentTransitionService,
     private readonly config: ConfigService,
+    @Inject(forwardRef(() => RiderAdvanceService))
+    private readonly riderAdvance: RiderAdvanceService,
   ) {}
 
   ttlSeconds(): number {
@@ -367,6 +372,16 @@ export class PickupHandoffService {
             metadata: { tokenId: token!.id, reason: checks.code },
           });
           return this.deny(checks);
+        }
+
+        // Stage 4A: RA orders require vendor cash ack before goods release.
+        // Token semantics unchanged — this is an explicit eligibility guard.
+        const raGate = await this.riderAdvance.assertPickupAllowedForOrder(
+          token!.wkOrderId,
+          tx,
+        );
+        if (!raGate.ok) {
+          return this.deny(raGate);
         }
 
         const now = new Date();

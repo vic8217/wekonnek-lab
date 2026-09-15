@@ -19,6 +19,7 @@ import { FulfillmentTransitionService } from './fulfillment-transition.service';
 import { OrderDomainEventService } from './order-domain-event.service';
 import { RiderAssignmentService } from './rider-assignment.service';
 import { FulfillmentService } from './fulfillment.service';
+import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
 
 jest.setTimeout(60_000);
 
@@ -27,7 +28,8 @@ const LOCAL_DB_HOST = /localhost|127\.0\.0\.1/;
 describe('Stage 0A fulfillment concurrency (PostgreSQL)', () => {
   const prisma = new PrismaService();
   const events = new OrderDomainEventService(prisma);
-  const assignments = new RiderAssignmentService(prisma, events);
+  const riderAdvance = new RiderAdvanceService(prisma, events);
+  const assignments = new RiderAssignmentService(prisma, events, riderAdvance);
   const transitions = new FulfillmentTransitionService(
     prisma,
     events,

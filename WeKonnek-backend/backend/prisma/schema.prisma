@@ -129,6 +129,8 @@ model Merchant {
   subscriptionExpiresAt  DateTime?       @map("subscription_expires_at") @db.Timestamptz
   autoRenew              Boolean         @default(false) @map("auto_renew")
   paymentMethod          String?         @map("payment_method") @db.VarChar(50)
+  /// Stage 4A: merchant must explicitly allow Rider Advance (cash-only alone is insufficient).
+  allowRiderAdvance      Boolean         @default(false) @map("allow_rider_advance")
   taxClassification      String          @default("") @map("tax_classification") @db.VarChar(50)
   tin                    String?         @db.VarChar(30)
   registeredBusinessName String?         @map("registered_business_name") @db.VarChar(255)
@@ -175,6 +177,7 @@ model Merchant {
   fulfillments             OrderFulfillment[]
   paymentMethods           MerchantPaymentMethod[]
   pickupHandoffTokens      PickupHandoffToken[]
+  riderAdvances            RiderAdvance[]
 
   @@index([userId])
   @@index([categoryId])
@@ -977,6 +980,7 @@ model WkOrder {
   agreementEvidences    AgreementEvidence[]
   custodyEvents         CustodyEvent[]
   pickupHandoffTokens   PickupHandoffToken[]
+  riderAdvances         RiderAdvance[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1292,6 +1296,8 @@ model User {
   activeFulfillments       OrderFulfillment[]           @relation("FulfillmentActiveRider")
   riderAssignments         RiderAssignment[]            @relation("RiderAssignmentRider")
   pickupHandoffTokensAsRider PickupHandoffToken[]       @relation("PickupHandoffRider")
+  riderAdvancesAsRider       RiderAdvance[]             @relation("RiderAdvanceRider")
+  riderAdvancesAsCustomer    RiderAdvance[]             @relation("RiderAdvanceCustomer")
 
   @@map("users")
 }
@@ -2804,6 +2810,7 @@ model OrderFulfillment {
   custodyEvents CustodyEvent[]
   agreements   Agreement[]
   pickupHandoffTokens PickupHandoffToken[]
+  riderAdvances       RiderAdvance[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3081,6 +3088,7 @@ model Agreement {
   evidences          AgreementEvidence[]
   custodyEvents      CustodyEvent[]
   trustTrade         TrustTradeTransaction?
+  riderAdvances      RiderAdvance[]
 
   @@index([agreementType, status])
   @@index([wkOrderId, createdAt])
@@ -3108,6 +3116,7 @@ model AgreementVersion {
   currentFor         Agreement?            @relation("AgreementCurrentVersion")
   acceptances        AgreementAcceptance[]
   evidences          AgreementEvidence[]
+  riderAdvances      RiderAdvance[]
 
   @@unique([agreementId, versionNumber])
   @@index([termsHash])
@@ -3277,4 +3286,78 @@ model PickupHandoffToken {
   @@index([status, expiresAt])
   @@index([riderAssignmentId, assignmentVersion])
   @@map("pickup_handoff_tokens")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 4A — Rider Advance Authorization & Obligation
+// ═══════════════════════════════════════════════════════
+
+enum RiderAdvanceStatus {
+  PROPOSED
+  CUSTOMER_AUTHORIZED
+  RIDER_ACCEPTED
+  ADVANCE_RECORDED
+  VENDOR_ACKNOWLEDGED
+  REIMBURSEMENT_DUE
+  REIMBURSED
+  DISPUTED
+  CANCELLED
+}
+
+/// Customer-authorized rider cash advance for cash-only merchants.
+/// WeKonnek is facilitator only — rider advances own funds; customer reimburses actual amount.
+model RiderAdvance {
+  id                        String             @id @default(uuid()) @db.Uuid
+  wkOrderId                 Int                @map("wk_order_id")
+  fulfillmentId             String             @map("fulfillment_id") @db.Uuid
+  agreementId               String             @map("agreement_id") @db.Uuid
+  agreementVersionId        String             @map("agreement_version_id") @db.Uuid
+  customerId                String             @map("customer_id") @db.Uuid
+  merchantId                Int                @map("merchant_id")
+  riderId                   String             @map("rider_id") @db.Uuid
+  riderAssignmentId         String             @map("rider_assignment_id") @db.Uuid
+  assignmentVersion         Int                @map("assignment_version")
+  currency                  String             @default("PHP") @db.VarChar(3)
+  authorizedMaximumAmount   Decimal            @map("authorized_maximum_amount") @db.Decimal(14, 2)
+  actualAdvanceAmount       Decimal?           @map("actual_advance_amount") @db.Decimal(14, 2)
+  vendorAcknowledgedAmount  Decimal?           @map("vendor_acknowledged_amount") @db.Decimal(14, 2)
+  reimbursementPrincipal    Decimal?           @map("reimbursement_principal") @db.Decimal(14, 2)
+  /// Extension point only — Stage 4A does not collect this fee.
+  convenienceFeeAmount      Decimal?           @map("convenience_fee_amount") @db.Decimal(14, 2)
+  status                    RiderAdvanceStatus @default(PROPOSED)
+  version                   Int                @default(0)
+  authorizedAt              DateTime?          @map("authorized_at") @db.Timestamptz
+  riderAcceptedAt           DateTime?          @map("rider_accepted_at") @db.Timestamptz
+  advanceRecordedAt         DateTime?          @map("advance_recorded_at") @db.Timestamptz
+  vendorAcknowledgedAt      DateTime?          @map("vendor_acknowledged_at") @db.Timestamptz
+  reimbursementDueAt        DateTime?          @map("reimbursement_due_at") @db.Timestamptz
+  reimbursedAt              DateTime?          @map("reimbursed_at") @db.Timestamptz
+  cancelledAt               DateTime?          @map("cancelled_at") @db.Timestamptz
+  disputedAt                DateTime?          @map("disputed_at") @db.Timestamptz
+  cancelReason              String?            @map("cancel_reason") @db.VarChar(255)
+  disputeReason             String?            @map("dispute_reason") @db.VarChar(255)
+  authorizeIdempotencyKey   String?            @unique @map("authorize_idempotency_key") @db.VarChar(64)
+  acceptIdempotencyKey      String?            @unique @map("accept_idempotency_key") @db.VarChar(64)
+  recordIdempotencyKey      String?            @unique @map("record_idempotency_key") @db.VarChar(64)
+  acknowledgeIdempotencyKey String?            @unique @map("acknowledge_idempotency_key") @db.VarChar(64)
+  correlationId             String?            @map("correlation_id") @db.VarChar(64)
+  createdAt                 DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder          WkOrder          @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment      OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  agreement        Agreement        @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  agreementVersion AgreementVersion @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
+  customer         User             @relation("RiderAdvanceCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  merchant         Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  rider            User             @relation("RiderAdvanceRider", fields: [riderId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId, status])
+  @@index([fulfillmentId, status])
+  @@index([riderId, status])
+  @@index([merchantId, status])
+  @@index([customerId, status])
+  @@index([agreementId])
+  @@index([riderAssignmentId, assignmentVersion])
+  @@map("rider_advances")
 }

@@ -6,6 +6,7 @@ node_modules
 .env.stage1.test
 .env.stage2.test
 .env.stage3.test
+.env.stage4.test
 
 
 /generated/prisma

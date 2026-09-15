@@ -83,7 +83,7 @@ describe('Stage 2A agreement canonical + integrity', () => {
 });
 
 describe('Stage 2A Rider Advance activation guard', () => {
-  it('refuses operational Rider Advance activation', () => {
+  it('refuses uncontrolled Rider Advance activation outside dedicated service', () => {
     const svc = Object.create(AgreementService.prototype) as AgreementService;
     expect(() =>
       svc.assertRiderAdvanceNotActivated(AgreementType.RIDER_ADVANCE),

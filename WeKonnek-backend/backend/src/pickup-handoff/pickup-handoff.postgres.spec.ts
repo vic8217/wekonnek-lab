@@ -34,6 +34,7 @@ import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transit
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { RiderAssignmentService } from '../fulfillment/rider-assignment.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
 import { PickupHandoffService } from './pickup-handoff.service';
 import {
   encodePickupQrPayload,
@@ -48,7 +49,8 @@ jest.setTimeout(120_000);
 describeIf('Stage 3A pickup handoff PostgreSQL (wekonnek_stage3_test)', () => {
   const prisma = new PrismaService();
   const events = new OrderDomainEventService(prisma);
-  const assignments = new RiderAssignmentService(prisma, events);
+  const riderAdvance = new RiderAdvanceService(prisma, events);
+  const assignments = new RiderAssignmentService(prisma, events, riderAdvance);
   const transitions = new FulfillmentTransitionService(
     prisma,
     events,
@@ -66,6 +68,7 @@ describeIf('Stage 3A pickup handoff PostgreSQL (wekonnek_stage3_test)', () => {
     custody,
     transitions,
     config,
+    riderAdvance,
   );
   let cleanup: (() => Promise<void>) | undefined;
 

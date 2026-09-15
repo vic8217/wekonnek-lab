@@ -63,6 +63,7 @@ import { FulfillmentModule } from './fulfillment/fulfillment.module';
 import { PaymentOwnershipModule } from './payment-ownership/payment-ownership.module';
 import { AgreementsModule } from './agreements/agreements.module';
 import { PickupHandoffModule } from './pickup-handoff/pickup-handoff.module';
+import { RiderAdvanceModule } from './rider-advance/rider-advance.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { PickupHandoffModule } from './pickup-handoff/pickup-handoff.module';
     PaymentOwnershipModule,
     AgreementsModule,
     PickupHandoffModule,
+    RiderAdvanceModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

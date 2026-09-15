@@ -196,13 +196,17 @@ export class AgreementService {
     return this.prisma.$transaction(run);
   }
 
-  /** RIDER_ADVANCE is schema-only in Stage 2A — refuse operational activation. */
+  /**
+   * Blocks uncontrolled RIDER_ADVANCE creation/amendment outside RiderAdvanceService.
+   * Stage 4A activates RIDER_ADVANCE only via the dedicated Rider Advance workflow.
+   * Acceptance of an already-offered RIDER_ADVANCE version is permitted.
+   */
   assertRiderAdvanceNotActivated(agreementType: AgreementType) {
     if (agreementType === AgreementType.RIDER_ADVANCE) {
       throw new BadRequestException({
-        code: 'RIDER_ADVANCE_NOT_ACTIVATED',
+        code: 'RIDER_ADVANCE_CONTROLLED_PATH_REQUIRED',
         message:
-          'Rider Advance is schema/framework capability only in Stage 2A',
+          'Rider Advance may only be created/amended through RiderAdvanceService',
       });
     }
   }
@@ -254,7 +258,8 @@ export class AgreementService {
             acceptances: true,
           },
         });
-        this.assertRiderAdvanceNotActivated(version.agreement.agreementType);
+        // RIDER_ADVANCE acceptance is allowed (Stage 4A controlled workflow).
+        // Uncontrolled RIDER_ADVANCE create/amend remains blocked elsewhere.
 
         await this.assertPartyRole(
           version.agreement,

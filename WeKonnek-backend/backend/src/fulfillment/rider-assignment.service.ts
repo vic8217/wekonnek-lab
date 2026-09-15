@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   FulfillmentStatus,
@@ -14,6 +16,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
 import {
   assertOperationAllowed,
   AuthActor,
@@ -40,6 +43,8 @@ export class RiderAssignmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: OrderDomainEventService,
+    @Inject(forwardRef(() => RiderAdvanceService))
+    private readonly riderAdvance: RiderAdvanceService,
   ) {}
 
   async assign(input: AssignRiderInput) {
@@ -144,6 +149,14 @@ export class RiderAssignmentService {
           unassignedAt: new Date(),
           reason: input.reason ?? 'reassigned',
         },
+      });
+      // Stage 4A: old Rider Advance must not transfer to new rider.
+      await this.riderAdvance.invalidateOnReassignmentInTx(tx, {
+        fulfillmentId: fulfillment.id,
+        previousRiderId,
+        newRiderId: input.riderId,
+        actorId: input.actor.id,
+        correlationId: input.correlationId,
       });
     }
 

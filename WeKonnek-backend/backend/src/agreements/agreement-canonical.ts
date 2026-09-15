@@ -41,8 +41,17 @@ export type CanonicalAgreementTerms = {
   /** Future Rider Advance fields live here when activated; never mutate after accept. */
   riderAdvance: null | {
     maximumAuthorizedAdvance: string;
+    currency: 'PHP';
     purpose: string;
     assignedRiderUserId: string | null;
+    riderAssignmentId: string | null;
+    assignmentVersion: number | null;
+    merchantAllowRiderAdvance: boolean;
+    merchantHasCashMethod: boolean;
+    wekonnekIsNotAdvancingParty: true;
+    reimbursementPrincipalRule: 'actual_acknowledged_amount_not_maximum';
+    convenienceFeeSeparate: true;
+    deliveryFeeSeparate: true;
   };
   issuedAt: string;
 };
@@ -145,6 +154,106 @@ export function buildMerchantTradeTerms(input: {
       note: 'payment_beneficiary_not_decided_by_agreement',
     },
     riderAdvance: null,
+    issuedAt: (input.issuedAt ?? new Date()).toISOString(),
+  };
+  const canonicalJson = canonicalizeJson(terms);
+  return { terms, canonicalJson, termsHash: sha256Hex(canonicalJson) };
+}
+
+export function buildRiderAdvanceTerms(input: {
+  wkOrderId: number;
+  orderCode: string;
+  buyerId: string;
+  merchantId: number;
+  merchantName: string;
+  riderUserId: string;
+  riderAssignmentId: string;
+  assignmentVersion: number;
+  shopId: number | null;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  paymentRef: string | null;
+  totalAmount: unknown;
+  deliveryFee: unknown;
+  discountAmount: unknown;
+  transactionFeeAmount: unknown;
+  maximumAuthorizedAdvance: unknown;
+  merchantAllowRiderAdvance: boolean;
+  merchantHasCashMethod: boolean;
+  items: Array<{
+    productId: number | null;
+    productName: string;
+    variantId: number | null;
+    quantity: number;
+    price: unknown;
+    subtotal: unknown;
+  }>;
+  issuedAt?: Date;
+}): { terms: CanonicalAgreementTerms; canonicalJson: string; termsHash: string } {
+  const terms: CanonicalAgreementTerms = {
+    schema: AGREEMENT_CANONICAL_SCHEMA,
+    agreementType: 'RIDER_ADVANCE',
+    wkOrderId: input.wkOrderId,
+    orderCode: input.orderCode,
+    parties: (
+      [
+        {
+          role: 'CUSTOMER' as const,
+          userId: input.buyerId,
+          merchantId: null,
+          historicalLabel: null,
+        },
+        {
+          role: 'RIDER' as const,
+          userId: input.riderUserId,
+          merchantId: null,
+          historicalLabel: null,
+        },
+        {
+          role: 'MERCHANT' as const,
+          userId: null,
+          merchantId: input.merchantId,
+          historicalLabel: input.merchantName,
+        },
+      ] satisfies CanonicalAgreementTerms['parties']
+    ).sort((a, b) => a.role.localeCompare(b.role)),
+    merchandise: {
+      items: input.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        unitPrice: moneyString(item.price),
+        subtotal: moneyString(item.subtotal),
+      })),
+    },
+    money: {
+      currency: 'PHP',
+      total: moneyString(input.totalAmount),
+      deliveryFee: moneyString(input.deliveryFee),
+      discount: moneyString(input.discountAmount),
+      transactionFeeAmount: moneyString(input.transactionFeeAmount),
+    },
+    paymentFacts: {
+      method: input.paymentMethod,
+      status: input.paymentStatus,
+      reference: input.paymentRef,
+      note: 'payment_beneficiary_not_decided_by_agreement',
+    },
+    riderAdvance: {
+      maximumAuthorizedAdvance: moneyString(input.maximumAuthorizedAdvance),
+      currency: 'PHP',
+      purpose: 'cash_only_merchant_purchase_with_rider_own_funds',
+      assignedRiderUserId: input.riderUserId,
+      riderAssignmentId: input.riderAssignmentId,
+      assignmentVersion: input.assignmentVersion,
+      merchantAllowRiderAdvance: input.merchantAllowRiderAdvance,
+      merchantHasCashMethod: input.merchantHasCashMethod,
+      wekonnekIsNotAdvancingParty: true,
+      reimbursementPrincipalRule: 'actual_acknowledged_amount_not_maximum',
+      convenienceFeeSeparate: true,
+      deliveryFeeSeparate: true,
+    },
     issuedAt: (input.issuedAt ?? new Date()).toISOString(),
   };
   const canonicalJson = canonicalizeJson(terms);
