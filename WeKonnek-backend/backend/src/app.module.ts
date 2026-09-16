@@ -65,6 +65,7 @@ import { AgreementsModule } from './agreements/agreements.module';
 import { PickupHandoffModule } from './pickup-handoff/pickup-handoff.module';
 import { RiderAdvanceModule } from './rider-advance/rider-advance.module';
 import { DeliveryHandoffModule } from './delivery-handoff/delivery-handoff.module';
+import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-advance-settlement.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { DeliveryHandoffModule } from './delivery-handoff/delivery-handoff.modul
     PickupHandoffModule,
     RiderAdvanceModule,
     DeliveryHandoffModule,
+    RiderAdvanceSettlementModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

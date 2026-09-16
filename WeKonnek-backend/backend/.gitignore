@@ -11,3 +11,4 @@ node_modules
 
 /generated/prisma
 .env.stage5.test
+.env.stage5b.test

@@ -982,6 +982,7 @@ model WkOrder {
   pickupHandoffTokens   PickupHandoffToken[]
   riderAdvances         RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
+  riderAdvanceSettlements RiderAdvanceSettlement[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1301,6 +1302,8 @@ model User {
   riderAdvancesAsCustomer    RiderAdvance[]             @relation("RiderAdvanceCustomer")
   deliveryHandoffTokensAsRider    CustomerDeliveryHandoffToken[] @relation("DeliveryHandoffRider")
   deliveryHandoffTokensAsCustomer CustomerDeliveryHandoffToken[] @relation("DeliveryHandoffCustomer")
+  settlementsAsCustomer      RiderAdvanceSettlement[]   @relation("SettlementCustomer")
+  settlementsAsCreditor      RiderAdvanceSettlement[]   @relation("SettlementCreditor")
 
   @@map("users")
 }
@@ -3361,6 +3364,7 @@ model RiderAdvance {
   customer         User             @relation("RiderAdvanceCustomer", fields: [customerId], references: [id], onDelete: Restrict)
   merchant         Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   rider            User             @relation("RiderAdvanceRider", fields: [riderId], references: [id], onDelete: Restrict)
+  settlements      RiderAdvanceSettlement[]
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, status])
@@ -3370,6 +3374,68 @@ model RiderAdvance {
   @@index([agreementId])
   @@index([riderAssignmentId, assignmentVersion])
   @@map("rider_advances")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 5B — Rider Advance Reimbursement Settlement
+// ═══════════════════════════════════════════════════════
+
+enum RiderAdvanceSettlementMethod {
+  CASH
+  DIRECT_TRANSFER
+}
+
+enum RiderAdvanceSettlementStatus {
+  CLAIMED
+  ACKNOWLEDGED
+  REJECTED
+  CANCELLED
+}
+
+/// Append-oriented customer→creditor reimbursement settlement.
+/// Authoritative debt reduction only via ACKNOWLEDGED acknowledgedAmount.
+model RiderAdvanceSettlement {
+  id                   String                        @id @default(uuid()) @db.Uuid
+  riderAdvanceId       String                        @map("rider_advance_id") @db.Uuid
+  wkOrderId            Int                           @map("wk_order_id")
+  customerId           String                        @map("customer_id") @db.Uuid
+  creditorRiderId      String                        @map("creditor_rider_id") @db.Uuid
+  method               RiderAdvanceSettlementMethod
+  status               RiderAdvanceSettlementStatus  @default(CLAIMED)
+  currency             String                        @default("PHP") @db.VarChar(3)
+  claimedAmount        Decimal?                      @map("claimed_amount") @db.Decimal(14, 2)
+  acknowledgedAmount   Decimal?                      @map("acknowledged_amount") @db.Decimal(14, 2)
+  externalReference    String?                       @map("external_reference") @db.VarChar(120)
+  proofStorageReference String?                      @map("proof_storage_reference") @db.VarChar(1000)
+  claimEvidenceId      String?                       @map("claim_evidence_id") @db.Uuid
+  ackEvidenceId        String?                       @map("ack_evidence_id") @db.Uuid
+  rejectionReason      String?                       @map("rejection_reason") @db.VarChar(255)
+  claimedAt            DateTime?                     @map("claimed_at") @db.Timestamptz
+  claimedByUserId      String?                       @map("claimed_by_user_id") @db.Uuid
+  acknowledgedAt       DateTime?                     @map("acknowledged_at") @db.Timestamptz
+  acknowledgedByUserId String?                       @map("acknowledged_by_user_id") @db.Uuid
+  rejectedAt           DateTime?                     @map("rejected_at") @db.Timestamptz
+  rejectedByUserId     String?                       @map("rejected_by_user_id") @db.Uuid
+  claimIdempotencyKey  String?                       @unique @map("claim_idempotency_key") @db.VarChar(64)
+  ackIdempotencyKey    String?                       @unique @map("ack_idempotency_key") @db.VarChar(64)
+  cashIdempotencyKey   String?                       @unique @map("cash_idempotency_key") @db.VarChar(64)
+  rejectIdempotencyKey String?                       @unique @map("reject_idempotency_key") @db.VarChar(64)
+  payloadFingerprint   String?                       @map("payload_fingerprint") @db.VarChar(64)
+  correlationId        String?                       @map("correlation_id") @db.VarChar(64)
+  createdAt            DateTime                      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime                      @updatedAt @map("updated_at") @db.Timestamptz
+
+  riderAdvance RiderAdvance @relation(fields: [riderAdvanceId], references: [id], onDelete: Restrict)
+  wkOrder      WkOrder      @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  customer     User         @relation("SettlementCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  creditor     User         @relation("SettlementCreditor", fields: [creditorRiderId], references: [id], onDelete: Restrict)
+
+  @@index([riderAdvanceId, status])
+  @@index([wkOrderId, status])
+  @@index([customerId, status])
+  @@index([creditorRiderId, status])
+  @@index([status, createdAt])
+  @@map("rider_advance_settlements")
 }
 
 // ═══════════════════════════════════════════════════════
