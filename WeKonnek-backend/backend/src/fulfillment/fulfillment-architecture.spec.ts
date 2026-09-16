@@ -98,6 +98,16 @@ describe('Stage 0A authorization matrix', () => {
       ),
     ).toThrow(ForbiddenException);
 
+    // Stage 8: rider cannot self-transition to delivery_failed
+    expect(() =>
+      assertOperationAllowed(
+        { id: 'r1', type: 'RIDER' },
+        'transition',
+        { activeRiderId: 'r1' },
+        'delivery_failed',
+      ),
+    ).toThrow(ForbiddenException);
+
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },

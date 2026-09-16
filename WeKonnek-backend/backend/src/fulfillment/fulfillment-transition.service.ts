@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -135,6 +136,22 @@ export class FulfillmentTransitionService {
     }
 
     assertFulfillmentTransition(from, target);
+
+    // Stage 8: marketplace wkOrder path — riders (and other non-trusted actors)
+    // must use POST /orders/:id/delivery-failures; do not self-transition to delivery_failed.
+    if (
+      target === 'delivery_failed' &&
+      fulfillment.wkOrderId != null &&
+      input.actor.type !== 'INTERNAL_SERVICE' &&
+      input.actor.type !== 'SYSTEM_ADMIN' &&
+      input.actor.type !== 'SYSTEM'
+    ) {
+      throw new ForbiddenException({
+        code: 'USE_DELIVERY_FAILURE_REPORT',
+        message:
+          'Marketplace delivery failure must be recorded via the Stage 8 delivery-failure report path',
+      });
+    }
 
     const operation =
       target === 'cancelled' ? 'cancel' : ('transition' as const);

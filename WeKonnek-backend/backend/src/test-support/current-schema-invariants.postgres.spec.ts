@@ -1,15 +1,15 @@
 /**
- * Prove raw SQL invariants on wekonnek_stage7_regression_test that ordinary
+ * Prove raw SQL invariants on wekonnek_stage8_regression_test that ordinary
  * Prisma schema push may omit (partial unique indexes, check constraints,
- * settlement triggers).
+ * settlement / Stage 8 append-only triggers).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from './test-database-guard';
 
 process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
-const ENV_OK = loadStageTestEnv('.env.stage7.regression.test');
+const ENV_OK = loadStageTestEnv('.env.stage8.regression.test');
 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,7 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = ENV_OK ? describe : describe.skip;
 jest.setTimeout(60_000);
 
-describeIf('Stage 7 current-schema raw SQL invariants', () => {
+describeIf('Stage 8 current-schema raw SQL invariants', () => {
   const prisma = new PrismaService();
 
   beforeAll(async () => {
@@ -25,7 +25,7 @@ describeIf('Stage 7 current-schema raw SQL invariants', () => {
     const id = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(id[0]?.database).toBe(STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    expect(id[0]?.database).toBe(STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -63,16 +63,6 @@ describeIf('Stage 7 current-schema raw SQL invariants', () => {
   });
 
   it('STAGE 4: nonnegative money / actual <= maximum / one active RA per order', async () => {
-    const checks = await prisma.$queryRaw<Array<{ conname: string }>>`
-      SELECT conname FROM pg_constraint
-      WHERE conrelid = 'public.rider_advances'::regclass
-        AND contype = 'c'
-    `;
-    const names = checks.map((c) => c.conname);
-    expect(names.some((n) => /non.?neg|amount|maximum|actual/i.test(n) || true)).toBe(
-      true,
-    );
-    // Prefer known Stage 4 constraint names when present; also accept expression defs.
     const defs = await prisma.$queryRaw<Array<{ def: string }>>`
       SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
       WHERE conrelid = 'public.rider_advances'::regclass AND contype = 'c'
@@ -158,6 +148,60 @@ describeIf('Stage 7 current-schema raw SQL invariants', () => {
     `;
     expect(def[0]?.def).toMatch(
       /BETWEEN 0 AND 5|otp_failed_attempts >= 0.*otp_failed_attempts <= 5/i,
+    );
+  });
+
+  it('STAGE 8: attempt uniqueness + open case partial unique + append-only triggers', async () => {
+    expect(
+      await indexExists('delivery_attempts_fulfillment_id_attempt_number_key'),
+    ).toBe(true);
+    expect(
+      await indexExists(
+        'delivery_attempts_reported_by_actor_id_idempotency_key_key',
+      ),
+    ).toBe(true);
+    const idemDef = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes
+      WHERE indexname = 'delivery_attempts_reported_by_actor_id_idempotency_key_key'
+    `;
+    expect(idemDef[0]?.indexdef).toMatch(/WHERE.*idempotency_key IS NOT NULL/i);
+
+    expect(
+      await indexExists(
+        'operational_cases_one_open_delivery_failure_per_fulfillment',
+      ),
+    ).toBe(true);
+    const caseDef = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes
+      WHERE indexname = 'operational_cases_one_open_delivery_failure_per_fulfillment'
+    `;
+    expect(caseDef[0]?.indexdef).toMatch(/DELIVERY_FAILURE/i);
+    expect(caseDef[0]?.indexdef).toMatch(/OPEN/i);
+
+    expect(
+      await triggerExists('stage8_delivery_attempts_append_only_upd_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage8_delivery_attempts_append_only_del_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage8_delivery_attempt_evidences_append_only_upd_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage8_delivery_attempt_evidences_append_only_del_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage8_operational_case_events_append_only_upd_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage8_operational_case_events_append_only_del_trg'),
+    ).toBe(true);
+
+    expect(await checkExists('delivery_attempts_failed_requires_reason_check')).toBe(
+      true,
+    );
+    expect(await checkExists('delivery_attempts_other_requires_notes_check')).toBe(
+      true,
     );
   });
 });

@@ -53,9 +53,13 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/docs/ACCURA_INTEGRATION.md
 !backend/docs/adr/
 !backend/docs/adr/*.md
+!backend/docs/stage7-current-schema-regression.md
+!backend/docs/stage8-current-schema-regression.md
 !backend/.env.stage2.test.example
 !backend/.env.stage3.test.example
 !backend/.env.stage4.test.example
+!backend/.env.stage8.test.example
+!backend/.env.stage8.regression.test.example
 !backend/benchmark-fixtures/
 !backend/benchmark-fixtures/vertex-poc-v1/
 !backend/benchmark-fixtures/vertex-poc-v1/dataset.json

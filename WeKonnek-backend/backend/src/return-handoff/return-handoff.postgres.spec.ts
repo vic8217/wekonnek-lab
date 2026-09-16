@@ -7,6 +7,7 @@ import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
   isCurrentSchemaRegressionMode,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE6_ENV_PRESENT = loadStageTestEnv('.env.stage6.test');
@@ -44,6 +45,7 @@ const ALLOWED_DB_USERS = new Set([
   'victor',
   'wekonnek_stage6_test',
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
@@ -110,7 +112,7 @@ describeIf(
       const okHistorical = database === 'wekonnek_stage6_test';
       const okRegression =
         isCurrentSchemaRegressionMode() &&
-        database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
+        (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
       if (
         (!okHistorical && !okRegression) ||
         !user ||
@@ -328,7 +330,8 @@ describeIf(
       await transitions.transition({
         fulfillmentId: fx.fulfillment.id,
         targetStatus: 'delivery_failed',
-        actor: { id: active, type: 'RIDER' },
+        // Stage 8: marketplace delivery_failed is INTERNAL_SERVICE (report path).
+        actor: { id: active, type: 'INTERNAL_SERVICE' },
         reason: 's6_delivery_failed',
       });
       await transitions.transition({
@@ -348,7 +351,8 @@ describeIf(
       >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
       expect(
         rows[0]?.database === 'wekonnek_stage6_test' ||
-          rows[0]?.database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+          rows[0]?.database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE ||
+          rows[0]?.database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
       ).toBe(true);
     });
 

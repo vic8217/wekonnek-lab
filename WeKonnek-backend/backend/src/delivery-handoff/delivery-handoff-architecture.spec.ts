@@ -41,7 +41,7 @@ describe('Stage 5A delivery handoff architecture', () => {
     expect(() => parseDeliveryQrPayload('WKDH2.x.y')).toThrow();
   });
 
-  it('closes rider self-delivered while keeping failed-delivery rider path', () => {
+  it('closes rider self-delivered and Stage 8 closes rider delivery_failed', () => {
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },
@@ -50,6 +50,7 @@ describe('Stage 5A delivery handoff architecture', () => {
         'delivered',
       ),
     ).toThrow(ForbiddenException);
+    // Stage 8: delivery_failed via delivery-failure report only
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },
@@ -57,7 +58,7 @@ describe('Stage 5A delivery handoff architecture', () => {
         { activeRiderId: 'r1' },
         'delivery_failed',
       ),
-    ).not.toThrow();
+    ).toThrow(ForbiddenException);
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },

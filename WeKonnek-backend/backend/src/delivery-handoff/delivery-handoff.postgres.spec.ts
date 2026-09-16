@@ -8,6 +8,7 @@ import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
   isCurrentSchemaRegressionMode,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE5_ENV_PRESENT = loadStageTestEnv('.env.stage5.test');
@@ -45,6 +46,7 @@ const ALLOWED_DB_USERS = new Set([
   'victor',
   'wekonnek_stage5_test',
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
@@ -105,7 +107,7 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     const okHistorical = database === 'wekonnek_stage5_test';
     const okRegression =
       isCurrentSchemaRegressionMode() &&
-      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
+      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
     if (
       (!okHistorical && !okRegression) ||
       !user ||
@@ -706,7 +708,8 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     await transitions.transition({
       fulfillmentId: fx.fulfillment.id,
       targetStatus: 'delivery_failed',
-      actor: { id: fx.rider.id, type: 'RIDER' },
+      // Stage 8: marketplace delivery_failed is INTERNAL_SERVICE (report path).
+      actor: { id: fx.rider.id, type: 'INTERNAL_SERVICE' },
       reason: 's5a_delivery_failed',
     });
     await transitions.transition({

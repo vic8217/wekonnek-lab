@@ -986,6 +986,8 @@ model WkOrder {
   riderAdvanceSettlements RiderAdvanceSettlement[]
   returnHandoffTokens   MerchantReturnHandoffToken[]
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
+  deliveryAttempts      DeliveryAttempt[]
+  operationalCases      OperationalCase[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1312,6 +1314,8 @@ model User {
   returnHandoffTokensAsRider MerchantReturnHandoffToken[] @relation("ReturnHandoffRider")
   riderCustodyHandoffsAsOutgoing RiderCustodyHandoffToken[] @relation("RiderCustodyOutgoing")
   riderCustodyHandoffsAsIncoming RiderCustodyHandoffToken[] @relation("RiderCustodyIncoming")
+  deliveryAttemptsAsRider        DeliveryAttempt[]          @relation("DeliveryAttemptRider")
+  deliveryAttemptsAsPhysicalCustodian DeliveryAttempt[]     @relation("DeliveryAttemptPhysicalCustodian")
 
   @@map("users")
 }
@@ -2843,6 +2847,8 @@ model OrderFulfillment {
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
   returnHandoffTokens MerchantReturnHandoffToken[]
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
+  deliveryAttempts    DeliveryAttempt[]
+  operationalCases    OperationalCase[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -2867,6 +2873,7 @@ model RiderAssignment {
 
   fulfillment OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
   rider       User             @relation("RiderAssignmentRider", fields: [riderId], references: [id], onDelete: Restrict)
+  deliveryAttempts DeliveryAttempt[]
 
   @@index([fulfillmentId, status])
   @@index([orderV2Id, status])
@@ -3224,6 +3231,7 @@ model AgreementEvidence {
   supersededBy            AgreementEvidence?     @relation("EvidenceSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes              AgreementEvidence?     @relation("EvidenceSupersession")
   custodyLinks            CustodyEventEvidence[]
+  deliveryAttemptEvidenceLinks DeliveryAttemptEvidence[]
 
   @@index([agreementId, createdAt])
   @@index([wkOrderId, createdAt])
@@ -3637,4 +3645,191 @@ model RiderCustodyHandoffToken {
   @@index([status, expiresAt])
   @@index([sourceRiderAssignmentId, sourceAssignmentVersion])
   @@map("rider_custody_handoff_tokens")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 8 — Failed delivery / operational exception foundation
+// ═══════════════════════════════════════════════════════
+
+enum DeliveryAttemptOutcome {
+  SUCCESSFUL_HANDOFF
+  FAILED
+}
+
+enum DeliveryFailureReasonCode {
+  CUSTOMER_UNREACHABLE
+  CUSTOMER_REFUSED
+  ADDRESS_ISSUE
+  CUSTOMER_REQUESTED_RESCHEDULE
+  MERCHANT_REQUESTED_RETURN
+  RIDER_OPERATIONAL_FAILURE
+  VEHICLE_OR_TRANSPORT_FAILURE
+  SAFETY_ISSUE
+  GOODS_DAMAGED
+  GOODS_LOST
+  OTHER
+}
+
+/// Rider-reported customer response provenance — never customer-authenticated.
+enum DeliveryAttemptCustomerResponse {
+  NONE
+  UNREACHABLE
+  REFUSED
+  REQUESTED_RESCHEDULE
+  ACCEPTANCE_NOT_COMPLETED
+}
+
+enum DeliveryAttemptLocationProvenance {
+  RIDER_DEVICE_REPORTED
+}
+
+enum DeliveryAttemptEvidenceKind {
+  PHOTO
+  VIDEO
+  GPS_LOCATION
+  NOTES
+  OTHER_ATTACHMENT
+}
+
+enum OperationalCaseType {
+  DELIVERY_FAILURE
+  /// Extensibility — unused by Stage 8 application paths
+  RETURN_REFUSED
+  CUSTODY_EXCEPTION
+  FINANCIAL_DISPUTE
+}
+
+enum OperationalCaseStatus {
+  OPEN
+  DISPOSITION_SELECTED
+  RESOLVED
+  CANCELLED
+}
+
+enum OperationalDisposition {
+  RETURN_TO_MERCHANT
+  HOLD_FOR_REVIEW
+  RESCHEDULE_REQUESTED
+  CUSTOMER_REFUSED_RETURN_REQUIRED
+  OPERATIONS_RECOVERY_REQUIRED
+}
+
+enum OperationalCaseEventType {
+  CASE_OPENED
+  DISPOSITION_SELECTED
+  CASE_RESOLVED
+  CASE_CANCELLED
+}
+
+/// Append-oriented delivery attempt record (Stage 8 writes FAILED only).
+model DeliveryAttempt {
+  id                         String                           @id @default(uuid()) @db.Uuid
+  wkOrderId                  Int                              @map("wk_order_id")
+  fulfillmentId              String                           @map("fulfillment_id") @db.Uuid
+  attemptNumber              Int                              @map("attempt_number")
+  riderId                    String                           @map("rider_id") @db.Uuid
+  riderAssignmentId          String                           @map("rider_assignment_id") @db.Uuid
+  assignmentVersion          Int                              @map("assignment_version")
+  physicalCustodianRiderId   String                           @map("physical_custodian_rider_id") @db.Uuid
+  outcome                    DeliveryAttemptOutcome
+  failureReasonCode          DeliveryFailureReasonCode?       @map("failure_reason_code")
+  customerResponse           DeliveryAttemptCustomerResponse  @default(NONE) @map("customer_response")
+  occurredAt                 DateTime                         @map("occurred_at") @db.Timestamptz
+  reportedAt                 DateTime                         @default(now()) @map("reported_at") @db.Timestamptz
+  reportedByActorType        OrderDomainActorType             @map("reported_by_actor_type")
+  reportedByActorId          String                           @map("reported_by_actor_id") @db.Uuid
+  notes                      String?                          @db.VarChar(2000)
+  correlationId              String?                          @map("correlation_id") @db.VarChar(64)
+  idempotencyKey             String?                          @map("idempotency_key") @db.VarChar(64)
+  requestPayloadHash         String?                          @map("request_payload_hash") @db.VarChar(64)
+  locationLatitude           Decimal?                         @map("location_latitude") @db.Decimal(10, 7)
+  locationLongitude          Decimal?                         @map("location_longitude") @db.Decimal(10, 7)
+  locationProvenance         DeliveryAttemptLocationProvenance? @map("location_provenance")
+  createdAt                  DateTime                         @default(now()) @map("created_at") @db.Timestamptz
+
+  wkOrder                WkOrder                   @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment            OrderFulfillment          @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  rider                  User                      @relation("DeliveryAttemptRider", fields: [riderId], references: [id], onDelete: Restrict)
+  physicalCustodianRider User                      @relation("DeliveryAttemptPhysicalCustodian", fields: [physicalCustodianRiderId], references: [id], onDelete: Restrict)
+  riderAssignment        RiderAssignment           @relation(fields: [riderAssignmentId], references: [id], onDelete: Restrict)
+  evidences              DeliveryAttemptEvidence[]
+  operationalCase        OperationalCase?
+
+  @@unique([fulfillmentId, attemptNumber])
+  @@unique([reportedByActorId, idempotencyKey])
+  @@index([wkOrderId])
+  @@index([fulfillmentId, outcome])
+  @@index([riderId])
+  @@map("delivery_attempts")
+}
+
+/// Append-only evidence references (no binary payloads).
+model DeliveryAttemptEvidence {
+  id                   String                      @id @default(uuid()) @db.Uuid
+  deliveryAttemptId    String                      @map("delivery_attempt_id") @db.Uuid
+  evidenceKind         DeliveryAttemptEvidenceKind @map("evidence_kind")
+  storageReference     String?                     @map("storage_reference") @db.VarChar(1000)
+  contentHash          String?                     @map("content_hash") @db.VarChar(64)
+  contentType          String?                     @map("content_type") @db.VarChar(120)
+  sizeBytes            Int?                        @map("size_bytes")
+  agreementEvidenceId  String?                     @map("agreement_evidence_id") @db.Uuid
+  metadata             Json?
+  submittedBy          String                      @map("submitted_by") @db.Uuid
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+
+  deliveryAttempt   DeliveryAttempt    @relation(fields: [deliveryAttemptId], references: [id], onDelete: Restrict)
+  agreementEvidence AgreementEvidence? @relation(fields: [agreementEvidenceId], references: [id], onDelete: SetNull)
+
+  @@index([deliveryAttemptId, createdAt])
+  @@map("delivery_attempt_evidences")
+}
+
+model OperationalCase {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  wkOrderId          Int                     @map("wk_order_id")
+  fulfillmentId      String                  @map("fulfillment_id") @db.Uuid
+  deliveryAttemptId  String?                 @unique @map("delivery_attempt_id") @db.Uuid
+  caseType           OperationalCaseType     @map("case_type")
+  status             OperationalCaseStatus   @default(OPEN)
+  openedAt           DateTime                @default(now()) @map("opened_at") @db.Timestamptz
+  openedByActorType  OrderDomainActorType    @map("opened_by_actor_type")
+  openedByActorId    String                  @map("opened_by_actor_id") @db.Uuid
+  currentDisposition OperationalDisposition? @map("current_disposition")
+  resolvedAt         DateTime?               @map("resolved_at") @db.Timestamptz
+  resolvedByActorType OrderDomainActorType?  @map("resolved_by_actor_type")
+  resolvedByActorId  String?                 @map("resolved_by_actor_id") @db.Uuid
+  resolutionReason   String?                 @map("resolution_reason") @db.VarChar(2000)
+  correlationId      String?                 @map("correlation_id") @db.VarChar(64)
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime                @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder         WkOrder                @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment     OrderFulfillment       @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  deliveryAttempt DeliveryAttempt?       @relation(fields: [deliveryAttemptId], references: [id], onDelete: SetNull)
+  events          OperationalCaseEvent[]
+
+  @@index([wkOrderId, status])
+  @@index([fulfillmentId, caseType, status])
+  @@map("operational_cases")
+}
+
+/// Append-only operational case audit trail.
+model OperationalCaseEvent {
+  id                String                   @id @default(uuid()) @db.Uuid
+  operationalCaseId String                   @map("operational_case_id") @db.Uuid
+  eventType         OperationalCaseEventType @map("event_type")
+  fromStatus        OperationalCaseStatus?   @map("from_status")
+  toStatus          OperationalCaseStatus?   @map("to_status")
+  disposition       OperationalDisposition?
+  actorType         OrderDomainActorType     @map("actor_type")
+  actorId           String                   @map("actor_id") @db.Uuid
+  reason            String?                  @db.VarChar(2000)
+  correlationId     String?                  @map("correlation_id") @db.VarChar(64)
+  metadata          Json?
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+
+  operationalCase OperationalCase @relation(fields: [operationalCaseId], references: [id], onDelete: Restrict)
+
+  @@index([operationalCaseId, createdAt])
+  @@map("operational_case_events")
 }

@@ -7,10 +7,14 @@ import {
   CustodyEventType,
   FulfillmentStatus,
   MerchantPaymentStatus,
+  OperationalCaseStatus,
+  OperationalCaseType,
+  OperationalDisposition,
   Prisma,
   RiderAdvanceSettlementStatus,
   RiderAdvanceStatus,
   UserRole,
+  DeliveryAttemptOutcome,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -172,6 +176,9 @@ export class OrderOperationalStateService {
 
     if (physicalStatus === FulfillmentStatus.returning) {
       flags.push('RETURN_IN_PROGRESS');
+      if (!hasReturnReceived) {
+        flags.push('RETURN_MERCHANT_CONFIRMATION_PENDING');
+      }
     }
     if (fulfillment?.pendingCustodyIncomingRiderId) {
       flags.push('CUSTODY_TRANSFER_PENDING');
@@ -184,6 +191,56 @@ export class OrderOperationalStateService {
       flags.push('ASSIGNMENT_CUSTODY_MISMATCH');
     }
 
+    if (fulfillment) {
+      const opCase = await this.prisma.operationalCase.findFirst({
+        where: {
+          fulfillmentId: fulfillment.id,
+          caseType: OperationalCaseType.DELIVERY_FAILURE,
+          status: {
+            in: [
+              OperationalCaseStatus.OPEN,
+              OperationalCaseStatus.DISPOSITION_SELECTED,
+            ],
+          },
+        },
+        orderBy: { openedAt: 'desc' },
+      });
+      if (opCase) {
+        flags.push('DELIVERY_FAILURE_CASE_OPEN');
+        if (
+          opCase.status === OperationalCaseStatus.OPEN &&
+          opCase.currentDisposition == null
+        ) {
+          flags.push('DELIVERY_DISPOSITION_REQUIRED');
+        }
+        if (
+          opCase.currentDisposition ===
+            OperationalDisposition.RESCHEDULE_REQUESTED &&
+          opCase.status !== OperationalCaseStatus.RESOLVED
+        ) {
+          flags.push('RESCHEDULE_PENDING');
+        }
+        if (
+          opCase.currentDisposition ===
+          OperationalDisposition.OPERATIONS_RECOVERY_REQUIRED
+        ) {
+          flags.push('OPERATIONS_RECOVERY_REQUIRED');
+        }
+      }
+
+      if (physicalStatus === FulfillmentStatus.delivery_failed) {
+        const failedAttempt = await this.prisma.deliveryAttempt.count({
+          where: {
+            fulfillmentId: fulfillment.id,
+            outcome: DeliveryAttemptOutcome.FAILED,
+          },
+        });
+        if (failedAttempt === 0) {
+          flags.push('DELIVERY_FAILED_WITHOUT_ATTEMPT');
+        }
+      }
+    }
+
     const integrityBlocking = flags.some((f) =>
       [
         'CUSTOMER_CUSTODY_UNCONFIRMED',
@@ -191,6 +248,7 @@ export class OrderOperationalStateService {
         'RA_REIMBURSED_TOTAL_MISMATCH',
         'RA_DUE_WITHOUT_PRINCIPAL',
         'ASSIGNMENT_CUSTODY_MISMATCH',
+        'DELIVERY_FAILED_WITHOUT_ATTEMPT',
       ].includes(f),
     );
 
@@ -312,6 +370,12 @@ export class OrderOperationalStateService {
           'RETURN_COMPLETED',
           'CUSTODY_TRANSFER_PENDING',
           'ASSIGNMENT_CUSTODY_MISMATCH',
+          'DELIVERY_FAILURE_CASE_OPEN',
+          'DELIVERY_DISPOSITION_REQUIRED',
+          'RESCHEDULE_PENDING',
+          'RETURN_MERCHANT_CONFIRMATION_PENDING',
+          'OPERATIONS_RECOVERY_REQUIRED',
+          'DELIVERY_FAILED_WITHOUT_ATTEMPT',
         ].includes(f),
       ),
       custody: full.custody,

@@ -52,7 +52,7 @@ describe('Stage 6 return handoff architecture', () => {
     expect(DEFAULT_RETURN_HANDOFF_TTL_SECONDS).toBe(300);
   });
 
-  it('closes rider self-return while keeping delivery_failed and returning', () => {
+  it('closes rider self-return; Stage 8 closes rider delivery_failed; returning remains', () => {
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },
@@ -61,6 +61,7 @@ describe('Stage 6 return handoff architecture', () => {
         'returned',
       ),
     ).toThrow(ForbiddenException);
+    // Stage 8: delivery_failed via delivery-failure report only
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },
@@ -68,7 +69,7 @@ describe('Stage 6 return handoff architecture', () => {
         { activeRiderId: 'r1' },
         'delivery_failed',
       ),
-    ).not.toThrow();
+    ).toThrow(ForbiddenException);
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },

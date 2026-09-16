@@ -1,17 +1,16 @@
 /**
  * Stage 7 secure rider custody handoff — PostgreSQL acceptance.
- * Requires backend/.env.stage7.test and database wekonnek_stage7_test.
+ * Requires backend/.env.stage7.test and database wekonnek_stage7_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage8_regression_test.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE7_ENV = resolve(__dirname, '../../.env.stage7.test');
-const STAGE7_ENV_PRESENT = existsSync(STAGE7_ENV);
-
-if (STAGE7_ENV_PRESENT) {
-  loadEnv({ path: STAGE7_ENV, override: true });
-}
+const STAGE7_ENV_PRESENT = loadStageTestEnv('.env.stage7.test');
 
 import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -41,7 +40,14 @@ import { RiderCustodyHandoffService } from './rider-custody-handoff.service';
 const describeIf = STAGE7_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage7_test']);
+const EXPECTED_DB = isCurrentSchemaRegressionMode()
+  ? STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE
+  : STAGE7_ACCEPTANCE_DATABASE;
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
 const FORBIDDEN_DBS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
@@ -52,7 +58,7 @@ const FORBIDDEN_DBS = new Set([
 ]);
 
 describeIf(
-  'Stage 7 Rider Custody Handoff PostgreSQL (wekonnek_stage7_test)',
+  `Stage 7 Rider Custody Handoff PostgreSQL (${EXPECTED_DB})`,
   () => {
     const prisma = new PrismaService();
     const events = new OrderDomainEventService(prisma);
@@ -114,12 +120,12 @@ describeIf(
       if (
         !database ||
         FORBIDDEN_DBS.has(database) ||
-        database !== 'wekonnek_stage7_test' ||
+        database !== EXPECTED_DB ||
         !user ||
         !ALLOWED_DB_USERS.has(user)
       ) {
         throw new Error(
-          `Stage 7 tests require wekonnek_stage7_test identity; got database=${database} user=${user}`,
+          `Stage 7 tests require ${EXPECTED_DB} identity; got database=${database} user=${user}`,
         );
       }
     });
@@ -332,7 +338,8 @@ describeIf(
       await transitions.transition({
         fulfillmentId: fx.fulfillment.id,
         targetStatus: 'delivery_failed',
-        actor: { id: active, type: 'RIDER' },
+        // Stage 8: marketplace delivery_failed is INTERNAL_SERVICE (report path).
+        actor: { id: active, type: 'INTERNAL_SERVICE' },
         reason: 's7_failed',
       });
       await transitions.transition({

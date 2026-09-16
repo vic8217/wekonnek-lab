@@ -69,6 +69,7 @@ import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-a
 import { ReturnHandoffModule } from './return-handoff/return-handoff.module';
 import { RiderCustodyHandoffModule } from './rider-custody-handoff/rider-custody-handoff.module';
 import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
+import { DeliveryFailureModule } from './delivery-failure/delivery-failure.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { OrderOperationalStateModule } from './order-operational-state/order-ope
     ReturnHandoffModule,
     RiderCustodyHandoffModule,
     OrderOperationalStateModule,
+    DeliveryFailureModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',
