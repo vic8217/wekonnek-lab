@@ -140,7 +140,10 @@ const MATRIX: Record<
 const RIDER_ALLOWED_TARGETS: ReadonlySet<string> = new Set([
   'picked_up',
   'in_transit',
-  'delivered',
+  // Stage 5A: 'delivered' removed — customer handoff only (INTERNAL_SERVICE).
+  'delivery_failed',
+  'returning',
+  'returned',
 ]);
 
 const MERCHANT_ALLOWED_TARGETS: ReadonlySet<string> = new Set([

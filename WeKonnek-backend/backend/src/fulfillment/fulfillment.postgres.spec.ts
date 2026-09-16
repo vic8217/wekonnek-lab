@@ -277,7 +277,8 @@ describe('Stage 0A fulfillment concurrency (PostgreSQL)', () => {
     await transitions.transition({
       orderV2Id: order.id,
       targetStatus: 'delivered',
-      actor: { id: riderA.id, type: 'RIDER' },
+      // Stage 5A: rider cannot self-deliver; INTERNAL_SERVICE simulates secure handoff.
+      actor: { id: riderA.id, type: 'INTERNAL_SERVICE' },
     });
 
     const fresh = await prisma.order.findUniqueOrThrow({

@@ -42,6 +42,12 @@ const POST_EXPENDITURE: RiderAdvanceStatus[] = [
   RiderAdvanceStatus.REIMBURSED,
 ];
 
+/** Obligation fully established — reassignment must not auto-DISPUTE. */
+const ESTABLISHED_REIMBURSEMENT_OBLIGATION: RiderAdvanceStatus[] = [
+  RiderAdvanceStatus.VENDOR_ACKNOWLEDGED,
+  RiderAdvanceStatus.REIMBURSEMENT_DUE,
+];
+
 @Injectable()
 export class RiderAdvanceService {
   constructor(
@@ -124,7 +130,10 @@ export class RiderAdvanceService {
 
   /**
    * Called from rider reassignment (same transaction).
-   * Pre-expenditure RA → CANCELLED. Post-expenditure → DISPUTED (history preserved).
+   * Pre-expenditure RA → CANCELLED.
+   * ADVANCE_RECORDED (no established principal) → DISPUTED (history preserved).
+   * Stage 5A: once reimbursement obligation is established (VENDOR_ACKNOWLEDGED /
+   * REIMBURSEMENT_DUE), keep status + creditor riderId + principal; emit audit only.
    * No-op when Stage 4 schema is absent (Stage 0–3 dedicated DBs).
    */
   async invalidateOnReassignmentInTx(
@@ -143,6 +152,7 @@ export class RiderAdvanceService {
       agreementId: string;
       wkOrderId: number;
       fulfillmentId: string;
+      riderId: string;
       actualAdvanceAmount: Prisma.Decimal | null;
       reimbursementPrincipal: Prisma.Decimal | null;
     }>;
@@ -204,7 +214,34 @@ export class RiderAdvanceService {
             newRiderId: input.newRiderId,
           },
         });
-      } else if (POST_EXPENDITURE.includes(ra.status)) {
+      } else if (ESTABLISHED_REIMBURSEMENT_OBLIGATION.includes(ra.status)) {
+        // Stage 5A Decision 1: delivery reassignment does not transfer creditor
+        // and must not auto-DISPUTE an established reimbursement obligation.
+        await this.events.record({
+          tx,
+          aggregateType: 'AGREEMENT',
+          aggregateId: ra.agreementId,
+          wkOrderId: ra.wkOrderId,
+          fulfillmentId: ra.fulfillmentId,
+          actorId: input.actorId,
+          actorType: 'SYSTEM',
+          action: 'RIDER_ADVANCE_DELIVERY_REASSIGNED',
+          previousState: ra.status,
+          newState: ra.status,
+          correlationId: input.correlationId,
+          metadata: {
+            riderAdvanceId: ra.id,
+            creditorRiderId: ra.riderId,
+            previousDeliveryRiderId: input.previousRiderId,
+            newDeliveryRiderId: input.newRiderId,
+            reimbursementPrincipal:
+              ra.reimbursementPrincipal?.toFixed(2) ?? null,
+            creditorUnchanged: true,
+            statusUnchanged: true,
+            note: 'Delivery rider changed; reimbursement creditor preserved',
+          },
+        });
+      } else if (ra.status === RiderAdvanceStatus.ADVANCE_RECORDED) {
         await tx.riderAdvance.update({
           where: { id: ra.id },
           data: {

@@ -11,6 +11,9 @@ export type FulfillmentLifecycleStatus =
   | 'picked_up'
   | 'in_transit'
   | 'delivered'
+  | 'delivery_failed'
+  | 'returning'
+  | 'returned'
   | 'cancelled';
 
 export const FULFILLMENT_TRANSITIONS: Record<
@@ -24,14 +27,17 @@ export const FULFILLMENT_TRANSITIONS: Record<
   rider_assigned: ['picked_up', 'cancelled'],
   // Future verified pickup inserts between rider_assigned and in_transit.
   picked_up: ['in_transit'],
-  // Future verified delivery inserts before delivered.
-  in_transit: ['delivered'],
+  // Stage 5A: secured delivery via customer handoff; failed-delivery branch.
+  in_transit: ['delivered', 'delivery_failed'],
   delivered: [],
+  delivery_failed: ['returning'],
+  returning: ['returned'],
+  returned: [],
   cancelled: [],
 } as const;
 
 export const TERMINAL_FULFILLMENT_STATUSES: ReadonlySet<FulfillmentLifecycleStatus> =
-  new Set(['delivered', 'cancelled']);
+  new Set(['delivered', 'returned', 'cancelled']);
 
 export function isFulfillmentLifecycleStatus(
   value: string,
@@ -97,7 +103,7 @@ export const TRANSITION_CATALOG: readonly TransitionDefinition[] = [
       'MERCHANT_ADMIN',
     ],
     preconditions: [
-      'Fulfillment not cancelled/delivered',
+      'Fulfillment not cancelled/delivered/returned',
       'Target rider exists with rider role (when assigning)',
       'Assignment version matches expected (when provided)',
     ],
@@ -118,7 +124,7 @@ export const TRANSITION_CATALOG: readonly TransitionDefinition[] = [
     preconditions: [
       'Active rider assignment exists',
       'Actor is assigned rider (unless system)',
-      // Future: verified pickup QR / custody evidence
+      // Known debt: Stage 3 QR path exists but rider→picked_up bypass remains.
     ],
     sideEffects: ['Update status', 'Emit domain event'],
     idempotency: 'Already picked_up → no-op success',
@@ -136,17 +142,52 @@ export const TRANSITION_CATALOG: readonly TransitionDefinition[] = [
   {
     from: 'in_transit',
     to: 'delivered',
-    authorizedActorTypes: ['RIDER', 'SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    // Stage 5A: RIDER removed — customer handoff uses INTERNAL_SERVICE.
+    authorizedActorTypes: ['SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
     preconditions: [
-      'Active assignment; actor is assigned rider (unless system)',
-      // Future: customer delivery confirmation / OTP
+      'Active assignment',
+      'Customer-authenticated delivery handoff (secured WkOrder path)',
     ],
     sideEffects: [
       'Update status + deliveredAt',
       'Emit domain event',
       'Does NOT mark commerce payment paid (payment separate)',
+      'Does NOT settle Rider Advance reimbursement',
     ],
     idempotency: 'Already delivered → no-op success',
-    failure: 'Forbidden / BadRequest as above',
+    failure: 'Forbidden for rider self-confirm; BadRequest if illegal',
+  },
+  {
+    from: 'in_transit',
+    to: 'delivery_failed',
+    authorizedActorTypes: ['RIDER', 'SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    preconditions: ['Active assignment; actor is assigned rider (unless system)'],
+    sideEffects: [
+      'Update status',
+      'Emit domain event',
+      'Does NOT erase Rider Advance principal / evidence',
+    ],
+    idempotency: 'Already delivery_failed → no-op success',
+    failure: 'Forbidden / BadRequest',
+  },
+  {
+    from: 'delivery_failed',
+    to: 'returning',
+    authorizedActorTypes: ['RIDER', 'SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    preconditions: ['Active assignment where applicable'],
+    sideEffects: ['Update status', 'Emit domain event', 'Optional RETURN_INITIATED custody'],
+    idempotency: 'Already returning → no-op success',
+    failure: 'Forbidden / BadRequest',
+  },
+  {
+    from: 'returning',
+    to: 'returned',
+    authorizedActorTypes: ['RIDER', 'SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    preconditions: [
+      'Fulfillment truth only — does not invent merchant receipt custody',
+    ],
+    sideEffects: ['Update status', 'Emit domain event'],
+    idempotency: 'Already returned → no-op success',
+    failure: 'Forbidden / BadRequest',
   },
 ];

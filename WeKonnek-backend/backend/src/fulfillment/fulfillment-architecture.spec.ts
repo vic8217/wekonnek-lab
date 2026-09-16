@@ -21,7 +21,12 @@ describe('Stage 0A fulfillment state machine', () => {
     ]);
     expect(FULFILLMENT_TRANSITIONS.rider_assigned).toContain('picked_up');
     expect(FULFILLMENT_TRANSITIONS.picked_up).toEqual(['in_transit']);
-    expect(FULFILLMENT_TRANSITIONS.in_transit).toEqual(['delivered']);
+    expect(FULFILLMENT_TRANSITIONS.in_transit).toEqual([
+      'delivered',
+      'delivery_failed',
+    ]);
+    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toEqual(['returning']);
+    expect(FULFILLMENT_TRANSITIONS.returning).toEqual(['returned']);
   });
 
   it('rejects incompatible transitions', () => {
@@ -73,6 +78,15 @@ describe('Stage 0A authorization matrix', () => {
         'picked_up',
       ),
     ).not.toThrow();
+
+    expect(() =>
+      assertOperationAllowed(
+        { id: 'r1', type: 'RIDER' },
+        'transition',
+        { activeRiderId: 'r1' },
+        'delivered',
+      ),
+    ).toThrow(ForbiddenException);
 
     expect(() =>
       assertOperationAllowed(
