@@ -1,15 +1,15 @@
 /**
- * Prove raw SQL invariants on wekonnek_stage8_regression_test that ordinary
+ * Prove raw SQL invariants on wekonnek_stage9_regression_test that ordinary
  * Prisma schema push may omit (partial unique indexes, check constraints,
  * settlement / Stage 8 append-only triggers).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from './test-database-guard';
 
 process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
-const ENV_OK = loadStageTestEnv('.env.stage8.regression.test');
+const ENV_OK = loadStageTestEnv('.env.stage9.regression.test');
 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,7 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = ENV_OK ? describe : describe.skip;
 jest.setTimeout(60_000);
 
-describeIf('Stage 8 current-schema raw SQL invariants', () => {
+describeIf('Stage 9 current-schema raw SQL invariants', () => {
   const prisma = new PrismaService();
 
   beforeAll(async () => {
@@ -25,7 +25,7 @@ describeIf('Stage 8 current-schema raw SQL invariants', () => {
     const id = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(id[0]?.database).toBe(STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    expect(id[0]?.database).toBe(STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE);
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -203,5 +203,21 @@ describeIf('Stage 8 current-schema raw SQL invariants', () => {
     expect(await checkExists('delivery_attempts_other_requires_notes_check')).toBe(
       true,
     );
+  });
+
+  it('STAGE 9: one FINALIZED determination per order + ACTIVE restriction + append-only', async () => {
+    expect(
+      await indexExists('return_financial_determinations_one_finalized_per_order'),
+    ).toBe(true);
+    expect(
+      await indexExists('rider_advance_collection_restrictions_one_active_per_ra'),
+    ).toBe(true);
+    expect(
+      await indexExists('return_financial_obligations_determination_id_type_key'),
+    ).toBe(true);
+    expect(await triggerExists('stage9_rfd_immutable_trg')).toBe(true);
+    expect(await triggerExists('stage9_rfs_immutable_trg')).toBe(true);
+    expect(await triggerExists('stage9_rfs_append_only_del_trg')).toBe(true);
+    expect(await triggerExists('stage9_racr_append_only_del_trg')).toBe(true);
   });
 });

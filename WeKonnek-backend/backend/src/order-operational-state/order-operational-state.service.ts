@@ -11,6 +11,9 @@ import {
   OperationalCaseType,
   OperationalDisposition,
   Prisma,
+  ReturnFinancialDeterminationStatus,
+  ReturnFinancialObligationType,
+  ReturnFinancialPartyType,
   RiderAdvanceSettlementStatus,
   RiderAdvanceStatus,
   UserRole,
@@ -118,6 +121,66 @@ export class OrderOperationalStateService {
     }
     if (physicalStatus === FulfillmentStatus.returned && hasReturnReceived) {
       flags.push('RETURN_COMPLETED');
+      const det = await this.prisma.returnFinancialDetermination.findFirst({
+        where: { wkOrderId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!det) {
+        flags.push('RETURN_FINANCIAL_DETERMINATION_REQUIRED');
+      } else if (
+        det.status === ReturnFinancialDeterminationStatus.DISPUTED
+      ) {
+        flags.push('RETURN_FINANCIAL_DISPUTED');
+      } else if (
+        det.status !== ReturnFinancialDeterminationStatus.FINALIZED &&
+        det.status !== ReturnFinancialDeterminationStatus.CANCELLED
+      ) {
+        flags.push('RETURN_FINANCIAL_DETERMINATION_PENDING');
+      } else if (
+        det.status === ReturnFinancialDeterminationStatus.FINALIZED
+      ) {
+        const obls = await this.prisma.returnFinancialObligation.findMany({
+          where: { determinationId: det.id },
+        });
+        for (const obl of obls) {
+          if (obl.status === 'OPEN' || obl.status === 'PARTIALLY_SETTLED') {
+            if (
+              obl.type ===
+              ReturnFinancialObligationType.MERCHANT_TO_RIDER_ADVANCE_REPAYMENT
+            ) {
+              flags.push('RETURN_REPAYMENT_PENDING');
+            }
+            if (
+              obl.type ===
+              ReturnFinancialObligationType.MERCHANT_TO_CUSTOMER_REFUND
+            ) {
+              flags.push('RETURN_REFUND_PENDING');
+            }
+          }
+        }
+      }
+      if (
+        !det ||
+        det.status !== ReturnFinancialDeterminationStatus.FINALIZED
+      ) {
+        const merchantTerms =
+          await this.prisma.returnFinancialTermsAcceptance.count({
+            where: {
+              wkOrderId,
+              partyType: ReturnFinancialPartyType.MERCHANT,
+            },
+          });
+        const customerTerms =
+          await this.prisma.returnFinancialTermsAcceptance.count({
+            where: {
+              wkOrderId,
+              partyType: ReturnFinancialPartyType.CUSTOMER,
+            },
+          });
+        if (merchantTerms === 0 || customerTerms === 0) {
+          flags.push('RETURN_FINANCIAL_MANUAL_DETERMINATION_REQUIRED');
+        }
+      }
     }
     if (
       ra &&

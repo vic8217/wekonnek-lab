@@ -179,6 +179,9 @@ model Merchant {
   pickupHandoffTokens      PickupHandoffToken[]
   riderAdvances            RiderAdvance[]
   returnHandoffTokens      MerchantReturnHandoffToken[]
+  returnFinancialTermsAcceptances ReturnFinancialTermsAcceptance[]
+  returnFinancialObligations      ReturnFinancialObligation[]
+  returnFinancialObligationsAsDebtor ReturnFinancialObligation[] @relation("ReturnFinancialObligationDebtorMerchant")
 
   @@index([userId])
   @@index([categoryId])
@@ -988,6 +991,11 @@ model WkOrder {
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
   deliveryAttempts      DeliveryAttempt[]
   operationalCases      OperationalCase[]
+  returnFinancialDeterminations ReturnFinancialDetermination[]
+  returnFinancialObligations    ReturnFinancialObligation[]
+  returnFinancialSettlements    ReturnFinancialSettlement[]
+  returnFinancialTermsAcceptances ReturnFinancialTermsAcceptance[]
+  riderAdvanceCollectionRestrictions RiderAdvanceCollectionRestriction[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1316,6 +1324,13 @@ model User {
   riderCustodyHandoffsAsIncoming RiderCustodyHandoffToken[] @relation("RiderCustodyIncoming")
   deliveryAttemptsAsRider        DeliveryAttempt[]          @relation("DeliveryAttemptRider")
   deliveryAttemptsAsPhysicalCustodian DeliveryAttempt[]     @relation("DeliveryAttemptPhysicalCustodian")
+  returnFinancialTermsAcceptancesAsParty ReturnFinancialTermsAcceptance[] @relation("ReturnFinancialTermsParty")
+  returnFinancialTermsAcceptancesAsActor ReturnFinancialTermsAcceptance[] @relation("ReturnFinancialTermsActor")
+  returnFinancialObligationsAsCreditor ReturnFinancialObligation[] @relation("ReturnFinancialObligationCreditor")
+  returnFinancialObligationsAsDebtorUser ReturnFinancialObligation[] @relation("ReturnFinancialObligationDebtorUser")
+  returnFinancialSettlementsClaimed ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementClaimedBy")
+  returnFinancialSettlementsAcked   ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementAckedBy")
+  returnFinancialSettlementsRejected ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementRejectedBy")
 
   @@map("users")
 }
@@ -2849,6 +2864,7 @@ model OrderFulfillment {
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
   deliveryAttempts    DeliveryAttempt[]
   operationalCases    OperationalCase[]
+  returnFinancialDeterminations ReturnFinancialDetermination[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3259,6 +3275,7 @@ model CustodyEvent {
   fulfillment OrderFulfillment?      @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
   agreement   Agreement?             @relation(fields: [agreementId], references: [id], onDelete: SetNull)
   evidences   CustodyEventEvidence[]
+  returnFinancialDeterminations ReturnFinancialDetermination[]
 
   @@index([wkOrderId, occurredAt])
   @@index([fulfillmentId, occurredAt])
@@ -3397,6 +3414,8 @@ model RiderAdvance {
   merchant         Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   rider            User             @relation("RiderAdvanceRider", fields: [riderId], references: [id], onDelete: Restrict)
   settlements      RiderAdvanceSettlement[]
+  returnFinancialDeterminations ReturnFinancialDetermination[]
+  collectionRestrictions RiderAdvanceCollectionRestriction[]
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, status])
@@ -3754,6 +3773,7 @@ model DeliveryAttempt {
   riderAssignment        RiderAssignment           @relation(fields: [riderAssignmentId], references: [id], onDelete: Restrict)
   evidences              DeliveryAttemptEvidence[]
   operationalCase        OperationalCase?
+  returnFinancialDeterminations ReturnFinancialDetermination[]
 
   @@unique([fulfillmentId, attemptNumber])
   @@unique([reportedByActorId, idempotencyKey])
@@ -3807,6 +3827,7 @@ model OperationalCase {
   fulfillment     OrderFulfillment       @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
   deliveryAttempt DeliveryAttempt?       @relation(fields: [deliveryAttemptId], references: [id], onDelete: SetNull)
   events          OperationalCaseEvent[]
+  returnFinancialDeterminations ReturnFinancialDetermination[]
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, caseType, status])
@@ -3832,4 +3853,266 @@ model OperationalCaseEvent {
 
   @@index([operationalCaseId, createdAt])
   @@map("operational_case_events")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 9 — Return Financial Determination
+// ═══════════════════════════════════════════════════════
+
+enum ReturnFinancialDeterminationStatus {
+  PENDING
+  PROPOSED
+  ACKNOWLEDGED
+  FINALIZED
+  DISPUTED
+  CANCELLED
+}
+
+enum ReturnFinancialDeterminationOutcome {
+  QUALIFYING_FULL_RETURN
+  RETURN_CONDITION_DISPUTED
+  DAMAGED_RETURN_REVIEW_REQUIRED
+  PARTIAL_RETURN_UNSUPPORTED
+  OPERATIONS_RECOVERY_REQUIRED
+}
+
+enum ReturnFinancialObligationType {
+  MERCHANT_TO_RIDER_ADVANCE_REPAYMENT
+  MERCHANT_TO_CUSTOMER_REFUND
+}
+
+enum ReturnFinancialObligationStatus {
+  OPEN
+  PARTIALLY_SETTLED
+  SETTLED
+  CANCELLED
+}
+
+enum ReturnFinancialSettlementMethod {
+  CASH
+  DIRECT_TRANSFER
+}
+
+enum ReturnFinancialSettlementStatus {
+  CLAIMED
+  ACKNOWLEDGED
+  REJECTED
+}
+
+enum ReturnFinancialPartyType {
+  MERCHANT
+  CUSTOMER
+  RIDER
+}
+
+enum RiderAdvanceCollectionRestrictionEffect {
+  TRANSFER_OUTSTANDING_TO_MERCHANT_RETURN_RESOLUTION
+}
+
+enum RiderAdvanceCollectionRestrictionStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum ReturnFinancialTermsKind {
+  MERCHANT_RETURN_FINANCIAL
+  CUSTOMER_RETURN_FINANCIAL
+}
+
+model ReturnFinancialTermsVersion {
+  id             String                   @id @default(uuid()) @db.Uuid
+  kind           ReturnFinancialTermsKind
+  versionNumber  Int                      @map("version_number")
+  termsHash      String                   @unique @map("terms_hash") @db.VarChar(64)
+  canonicalTerms Json                     @map("canonical_terms")
+  activatedAt    DateTime?                @map("activated_at") @db.Timestamptz
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+
+  acceptances               ReturnFinancialTermsAcceptance[]
+  merchantDeterminations    ReturnFinancialDetermination[] @relation("DeterminationMerchantTerms")
+  customerDeterminations    ReturnFinancialDetermination[] @relation("DeterminationCustomerTerms")
+
+  @@unique([kind, versionNumber])
+  @@index([kind, activatedAt])
+  @@map("return_financial_terms_versions")
+}
+
+model ReturnFinancialTermsAcceptance {
+  id                String                  @id @default(uuid()) @db.Uuid
+  termsVersionId    String                  @map("terms_version_id") @db.Uuid
+  partyType         ReturnFinancialPartyType @map("party_type")
+  partyUserId       String?                 @map("party_user_id") @db.Uuid
+  merchantId        Int?                    @map("merchant_id")
+  wkOrderId         Int?                    @map("wk_order_id")
+  acceptedAt        DateTime                @default(now()) @map("accepted_at") @db.Timestamptz
+  actorUserId       String                  @map("actor_user_id") @db.Uuid
+  correlationId     String?                 @map("correlation_id") @db.VarChar(64)
+  termsHashSnapshot String                  @map("terms_hash_snapshot") @db.VarChar(64)
+
+  termsVersion ReturnFinancialTermsVersion @relation(fields: [termsVersionId], references: [id], onDelete: Restrict)
+  partyUser    User?    @relation("ReturnFinancialTermsParty", fields: [partyUserId], references: [id], onDelete: Restrict)
+  actorUser    User     @relation("ReturnFinancialTermsActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  merchant     Merchant? @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  wkOrder      WkOrder?  @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId])
+  @@index([merchantId])
+  @@map("return_financial_terms_acceptances")
+}
+
+model ReturnFinancialDetermination {
+  id                          String                              @id @default(uuid()) @db.Uuid
+  wkOrderId                   Int                                 @map("wk_order_id")
+  fulfillmentId               String                              @map("fulfillment_id") @db.Uuid
+  operationalCaseId           String?                             @map("operational_case_id") @db.Uuid
+  deliveryAttemptId           String?                             @map("delivery_attempt_id") @db.Uuid
+  returnCustodyEventId        String                              @map("return_custody_event_id") @db.Uuid
+  riderAdvanceId              String?                             @map("rider_advance_id") @db.Uuid
+  status                      ReturnFinancialDeterminationStatus  @default(PENDING)
+  outcome                     ReturnFinancialDeterminationOutcome?
+  currency                    String                              @default("PHP") @db.VarChar(3)
+  snapshotPrincipal           Decimal?                            @map("snapshot_principal") @db.Decimal(14, 2)
+  snapshotReimbursed          Decimal?                            @map("snapshot_reimbursed") @db.Decimal(14, 2)
+  merchantToRiderAmount       Decimal?                            @map("merchant_to_rider_amount") @db.Decimal(14, 2)
+  merchantToCustomerAmount    Decimal?                            @map("merchant_to_customer_amount") @db.Decimal(14, 2)
+  merchantPaymentStatusSnapshot MerchantPaymentStatus?            @map("merchant_payment_status_snapshot")
+  merchantTermsVersionId      String?                             @map("merchant_terms_version_id") @db.Uuid
+  merchantTermsHash           String?                             @map("merchant_terms_hash") @db.VarChar(64)
+  customerTermsVersionId      String?                             @map("customer_terms_version_id") @db.Uuid
+  customerTermsHash           String?                             @map("customer_terms_hash") @db.VarChar(64)
+  raAgreementVersionId        String?                             @map("ra_agreement_version_id") @db.Uuid
+  raAgreementHash             String?                             @map("ra_agreement_hash") @db.VarChar(64)
+  ordinaryRefundPrincipal     Decimal?                            @map("ordinary_refund_principal") @db.Decimal(14, 2)
+  path                        String                              @default("RIDER_ADVANCE") @db.VarChar(32)
+  reason                      String?                             @db.VarChar(2000)
+  proposedByActorType         OrderDomainActorType?               @map("proposed_by_actor_type")
+  proposedByActorId           String?                             @map("proposed_by_actor_id") @db.Uuid
+  proposedAt                  DateTime?                           @map("proposed_at") @db.Timestamptz
+  acknowledgedByActorType     OrderDomainActorType?               @map("acknowledged_by_actor_type")
+  acknowledgedByActorId       String?                             @map("acknowledged_by_actor_id") @db.Uuid
+  acknowledgedAt              DateTime?                           @map("acknowledged_at") @db.Timestamptz
+  finalizedByActorType        OrderDomainActorType?               @map("finalized_by_actor_type")
+  finalizedByActorId          String?                             @map("finalized_by_actor_id") @db.Uuid
+  finalizedAt                 DateTime?                           @map("finalized_at") @db.Timestamptz
+  disputedByActorType         OrderDomainActorType?               @map("disputed_by_actor_type")
+  disputedByActorId           String?                             @map("disputed_by_actor_id") @db.Uuid
+  disputedAt                  DateTime?                           @map("disputed_at") @db.Timestamptz
+  disputeReason               String?                             @map("dispute_reason") @db.VarChar(2000)
+  correlationId               String?                             @map("correlation_id") @db.VarChar(64)
+  proposeIdempotencyKey       String?                             @map("propose_idempotency_key") @db.VarChar(64)
+  finalizeIdempotencyKey      String?                             @map("finalize_idempotency_key") @db.VarChar(64)
+  createdAt                   DateTime                            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime                            @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder             WkOrder              @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment         OrderFulfillment     @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  operationalCase     OperationalCase?     @relation(fields: [operationalCaseId], references: [id], onDelete: SetNull)
+  deliveryAttempt     DeliveryAttempt?     @relation(fields: [deliveryAttemptId], references: [id], onDelete: SetNull)
+  returnCustodyEvent  CustodyEvent         @relation(fields: [returnCustodyEventId], references: [id], onDelete: Restrict)
+  riderAdvance        RiderAdvance?        @relation(fields: [riderAdvanceId], references: [id], onDelete: Restrict)
+  merchantTermsVersion ReturnFinancialTermsVersion? @relation("DeterminationMerchantTerms", fields: [merchantTermsVersionId], references: [id], onDelete: Restrict)
+  customerTermsVersion ReturnFinancialTermsVersion? @relation("DeterminationCustomerTerms", fields: [customerTermsVersionId], references: [id], onDelete: Restrict)
+  obligations         ReturnFinancialObligation[]
+  collectionRestrictions RiderAdvanceCollectionRestriction[]
+
+  @@index([wkOrderId, status])
+  @@index([fulfillmentId])
+  @@index([riderAdvanceId])
+  @@map("return_financial_determinations")
+}
+
+model ReturnFinancialObligation {
+  id               String                          @id @default(uuid()) @db.Uuid
+  determinationId  String                          @map("determination_id") @db.Uuid
+  wkOrderId        Int                             @map("wk_order_id")
+  merchantId       Int                             @map("merchant_id")
+  type             ReturnFinancialObligationType
+  debtorType       ReturnFinancialPartyType        @map("debtor_type")
+  debtorUserId     String?                         @map("debtor_user_id") @db.Uuid
+  debtorMerchantId Int?                            @map("debtor_merchant_id")
+  creditorType     ReturnFinancialPartyType        @map("creditor_type")
+  creditorUserId   String                          @map("creditor_user_id") @db.Uuid
+  principal        Decimal                         @db.Decimal(14, 2)
+  currency         String                          @default("PHP") @db.VarChar(3)
+  status           ReturnFinancialObligationStatus @default(OPEN)
+  reason           String?                         @db.VarChar(2000)
+  correlationId    String?                         @map("correlation_id") @db.VarChar(64)
+  createdAt        DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime                        @updatedAt @map("updated_at") @db.Timestamptz
+
+  determination  ReturnFinancialDetermination @relation(fields: [determinationId], references: [id], onDelete: Restrict)
+  wkOrder        WkOrder                      @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  merchant       Merchant                     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  creditorUser   User                         @relation("ReturnFinancialObligationCreditor", fields: [creditorUserId], references: [id], onDelete: Restrict)
+  debtorUser     User?                        @relation("ReturnFinancialObligationDebtorUser", fields: [debtorUserId], references: [id], onDelete: Restrict)
+  debtorMerchant Merchant?                    @relation("ReturnFinancialObligationDebtorMerchant", fields: [debtorMerchantId], references: [id], onDelete: Restrict)
+  settlements    ReturnFinancialSettlement[]
+
+  @@unique([determinationId, type])
+  @@index([wkOrderId, status])
+  @@index([merchantId, status])
+  @@index([creditorUserId])
+  @@map("return_financial_obligations")
+}
+
+model ReturnFinancialSettlement {
+  id                    String                          @id @default(uuid()) @db.Uuid
+  obligationId          String                          @map("obligation_id") @db.Uuid
+  wkOrderId             Int                             @map("wk_order_id")
+  method                ReturnFinancialSettlementMethod
+  status                ReturnFinancialSettlementStatus @default(CLAIMED)
+  currency              String                          @default("PHP") @db.VarChar(3)
+  claimedAmount         Decimal?                        @map("claimed_amount") @db.Decimal(14, 2)
+  acknowledgedAmount    Decimal?                        @map("acknowledged_amount") @db.Decimal(14, 2)
+  externalReference     String?                         @map("external_reference") @db.VarChar(120)
+  proofStorageReference String?                         @map("proof_storage_reference") @db.VarChar(1000)
+  claimEvidenceId       String?                         @map("claim_evidence_id") @db.Uuid
+  ackEvidenceId         String?                         @map("ack_evidence_id") @db.Uuid
+  rejectionReason       String?                         @map("rejection_reason") @db.VarChar(255)
+  claimedAt             DateTime?                       @map("claimed_at") @db.Timestamptz
+  claimedByUserId       String?                         @map("claimed_by_user_id") @db.Uuid
+  acknowledgedAt        DateTime?                       @map("acknowledged_at") @db.Timestamptz
+  acknowledgedByUserId  String?                         @map("acknowledged_by_user_id") @db.Uuid
+  rejectedAt            DateTime?                       @map("rejected_at") @db.Timestamptz
+  rejectedByUserId      String?                         @map("rejected_by_user_id") @db.Uuid
+  claimIdempotencyKey   String?                         @map("claim_idempotency_key") @db.VarChar(64)
+  ackIdempotencyKey     String?                         @map("ack_idempotency_key") @db.VarChar(64)
+  cashIdempotencyKey    String?                         @map("cash_idempotency_key") @db.VarChar(64)
+  rejectIdempotencyKey  String?                         @map("reject_idempotency_key") @db.VarChar(64)
+  payloadFingerprint    String?                         @map("payload_fingerprint") @db.VarChar(64)
+  correlationId         String?                         @map("correlation_id") @db.VarChar(64)
+  createdAt             DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime                        @updatedAt @map("updated_at") @db.Timestamptz
+
+  obligation       ReturnFinancialObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+  wkOrder          WkOrder                   @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  claimedByUser    User?                     @relation("ReturnFinancialSettlementClaimedBy", fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedByUser User?                   @relation("ReturnFinancialSettlementAckedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  rejectedByUser   User?                     @relation("ReturnFinancialSettlementRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([obligationId, status])
+  @@index([wkOrderId, status])
+  @@map("return_financial_settlements")
+}
+
+model RiderAdvanceCollectionRestriction {
+  id                              String                                   @id @default(uuid()) @db.Uuid
+  riderAdvanceId                  String                                   @map("rider_advance_id") @db.Uuid
+  wkOrderId                       Int                                      @map("wk_order_id")
+  returnFinancialDeterminationId  String                                   @map("return_financial_determination_id") @db.Uuid
+  restrictedAmount                Decimal                                  @map("restricted_amount") @db.Decimal(14, 2)
+  effect                          RiderAdvanceCollectionRestrictionEffect  @default(TRANSFER_OUTSTANDING_TO_MERCHANT_RETURN_RESOLUTION)
+  status                          RiderAdvanceCollectionRestrictionStatus  @default(ACTIVE)
+  createdByActorType              OrderDomainActorType                     @map("created_by_actor_type")
+  createdByActorId                String                                   @map("created_by_actor_id") @db.Uuid
+  correlationId                   String?                                  @map("correlation_id") @db.VarChar(64)
+  createdAt                       DateTime                                 @default(now()) @map("created_at") @db.Timestamptz
+
+  riderAdvance   RiderAdvance                  @relation(fields: [riderAdvanceId], references: [id], onDelete: Restrict)
+  wkOrder        WkOrder                       @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  determination  ReturnFinancialDetermination  @relation(fields: [returnFinancialDeterminationId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId])
+  @@index([returnFinancialDeterminationId])
+  @@map("rider_advance_collection_restrictions")
 }

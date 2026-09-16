@@ -70,6 +70,7 @@ import { ReturnHandoffModule } from './return-handoff/return-handoff.module';
 import { RiderCustodyHandoffModule } from './rider-custody-handoff/rider-custody-handoff.module';
 import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
 import { DeliveryFailureModule } from './delivery-failure/delivery-failure.module';
+import { ReturnFinancialModule } from './return-financial/return-financial.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { DeliveryFailureModule } from './delivery-failure/delivery-failure.modul
     RiderCustodyHandoffModule,
     OrderOperationalStateModule,
     DeliveryFailureModule,
+    ReturnFinancialModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

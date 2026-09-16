@@ -16,6 +16,7 @@ import {
 import { createHash, randomUUID } from 'crypto';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RiderAdvanceCollectibilityService } from '../return-financial/rider-advance-collectibility.service';
 
 const MONEY = (v: unknown) =>
   new Prisma.Decimal((v ?? 0) as Prisma.Decimal.Value).toDecimalPlaces(2);
@@ -67,6 +68,7 @@ export class RiderAdvanceSettlementService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: OrderDomainEventService,
+    private readonly collectibility: RiderAdvanceCollectibilityService,
   ) {}
 
   private async withSerializableRetry<T>(
@@ -198,6 +200,11 @@ export class RiderAdvanceSettlementService {
                 message: 'Claim amount exceeds remaining reimbursement',
               });
             }
+            await this.collectibility.assertCollectibleForAmount(
+              tx,
+              ra,
+              claimed,
+            );
 
             const now = new Date();
             const fingerprint = this.claimFingerprint({
@@ -389,6 +396,11 @@ export class RiderAdvanceSettlementService {
                 message: 'Cash amount exceeds remaining reimbursement',
               });
             }
+            await this.collectibility.assertCollectibleForAmount(
+              tx,
+              ra,
+              amount,
+            );
 
             const now = new Date();
             const fingerprint = this.cashFingerprint(amount);
@@ -627,6 +639,7 @@ export class RiderAdvanceSettlementService {
                 message: 'Acknowledged amount exceeds remaining reimbursement',
               });
             }
+            await this.collectibility.assertCollectibleForAmount(tx, ra, ack);
 
             const now = new Date();
             const ackEvidence = await tx.agreementEvidence.create({

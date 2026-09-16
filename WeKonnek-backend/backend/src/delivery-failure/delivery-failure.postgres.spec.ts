@@ -8,6 +8,7 @@ import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
   STAGE8_ACCEPTANCE_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_FORBIDDEN_DATABASES,
   isCurrentSchemaRegressionMode,
 } from '../test-support/test-database-guard';
@@ -58,9 +59,10 @@ const ALLOWED_DB_USERS = new Set([
   'victor',
   'wekonnek_stage8_test',
   'wekonnek_stage8_regression_test',
+  'wekonnek_stage9_regression_test',
 ]);
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE
   : STAGE8_ACCEPTANCE_DATABASE;
 
 function errCode(e: unknown): string | undefined {

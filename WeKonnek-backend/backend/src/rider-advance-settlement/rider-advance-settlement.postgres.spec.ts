@@ -11,7 +11,9 @@ import {
   STAGE7_ACCEPTANCE_DATABASE,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
+import { RiderAdvanceCollectibilityService } from '../return-financial/rider-advance-collectibility.service';
 
 const STAGE5B_ENV_PRESENT =
   loadStageTestEnv('.env.stage7.test') || loadStageTestEnv('.env.stage5b.test');
@@ -47,6 +49,7 @@ const ALLOWED_DB_USERS = new Set([
   STAGE7_ACCEPTANCE_DATABASE,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
@@ -78,7 +81,11 @@ describeIf(
     const prisma = new PrismaService();
     const events = new OrderDomainEventService(prisma);
     const riderAdvance = new RiderAdvanceService(prisma, events);
-    const settlements = new RiderAdvanceSettlementService(prisma, events);
+    const settlements = new RiderAdvanceSettlementService(
+      prisma,
+      events,
+      new RiderAdvanceCollectibilityService(prisma),
+    );
     const assignments = new RiderAssignmentService(
       prisma,
       events,

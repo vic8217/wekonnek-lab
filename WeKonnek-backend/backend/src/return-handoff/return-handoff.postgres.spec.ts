@@ -8,6 +8,7 @@ import {
   isCurrentSchemaRegressionMode,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE6_ENV_PRESENT = loadStageTestEnv('.env.stage6.test');
@@ -112,7 +113,7 @@ describeIf(
       const okHistorical = database === 'wekonnek_stage6_test';
       const okRegression =
         isCurrentSchemaRegressionMode() &&
-        (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
+        (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE));
       if (
         (!okHistorical && !okRegression) ||
         !user ||
@@ -352,7 +353,8 @@ describeIf(
       expect(
         rows[0]?.database === 'wekonnek_stage6_test' ||
           rows[0]?.database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE ||
-          rows[0]?.database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+          rows[0]?.database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE ||
+          rows[0]?.database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
       ).toBe(true);
     });
 

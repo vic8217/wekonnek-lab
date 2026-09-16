@@ -9,6 +9,7 @@ import {
   isCurrentSchemaRegressionMode,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE5_ENV_PRESENT = loadStageTestEnv('.env.stage5.test');
@@ -107,7 +108,7 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     const okHistorical = database === 'wekonnek_stage5_test';
     const okRegression =
       isCurrentSchemaRegressionMode() &&
-      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE);
+      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE));
     if (
       (!okHistorical && !okRegression) ||
       !user ||
