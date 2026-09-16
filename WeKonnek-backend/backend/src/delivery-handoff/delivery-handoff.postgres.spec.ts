@@ -1,18 +1,16 @@
 /**
  * Stage 5A PostgreSQL concurrency / integrity suite.
- * Requires backend/.env.stage5.test and database wekonnek_stage5_test.
+ * Requires backend/.env.stage5.test and database wekonnek_stage5_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  * Does NOT fall back to stage2/stage3/stage4 databases.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE5_ENV = resolve(__dirname, '../../.env.stage5.test');
-const STAGE5_ENV_PRESENT = existsSync(STAGE5_ENV);
-
-if (STAGE5_ENV_PRESENT) {
-  loadEnv({ path: STAGE5_ENV, override: true });
-}
+const STAGE5_ENV_PRESENT = loadStageTestEnv('.env.stage5.test');
 
 import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -36,13 +34,18 @@ import { RiderAssignmentService } from '../fulfillment/rider-assignment.service'
 import { PickupHandoffService } from '../pickup-handoff/pickup-handoff.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
+import { RiderCustodyHandoffService } from '../rider-custody-handoff/rider-custody-handoff.service';
 import { DeliveryHandoffService } from './delivery-handoff.service';
 
 const describeIf = STAGE5_ENV_PRESENT ? describe : describe.skip;
 
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage5_test']);
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  'wekonnek_stage5_test',
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
@@ -64,6 +67,7 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     get: (key: string) => {
       if (key === 'DELIVERY_HANDOFF_TTL_SECONDS') return '300';
       if (key === 'PICKUP_HANDOFF_TTL_SECONDS') return '300';
+      if (key === 'RIDER_CUSTODY_HANDOFF_TTL_SECONDS') return '300';
       return undefined;
     },
   } as ConfigService;
@@ -82,6 +86,13 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     transitions,
     config,
   );
+  const custodyHandoff = new RiderCustodyHandoffService(
+    prisma,
+    events,
+    custody,
+    assignments,
+    config,
+  );
   let cleanup: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -91,14 +102,18 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
     const database = target[0]?.database;
     const user = target[0]?.user;
+    const okHistorical = database === 'wekonnek_stage5_test';
+    const okRegression =
+      isCurrentSchemaRegressionMode() &&
+      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
     if (
-      database !== 'wekonnek_stage5_test' ||
+      (!okHistorical && !okRegression) ||
       !user ||
       FORBIDDEN_DB_USERS.has(user) ||
       !ALLOWED_DB_USERS.has(user)
     ) {
       throw new Error(
-        `Stage 5 tests require wekonnek_stage5_test identity (user victor|wekonnek_stage5_test); got database=${database} user=${user}`,
+        `Stage 5 tests require wekonnek_stage5_test or stage7 regression identity; got database=${database} user=${user}`,
       );
     }
   });
@@ -215,6 +230,9 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
         ...deliveryTokens.map((t) => t.custodyEventId),
         ...pickupTokens.map((t) => t.custodyEventId),
       ].filter(Boolean) as string[];
+      await prisma.riderCustodyHandoffToken.deleteMany({
+        where: { wkOrderId: order.id },
+      });
       await prisma.customerDeliveryHandoffToken.deleteMany({
         where: { wkOrderId: order.id },
       });
@@ -317,6 +335,30 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
     return prisma.orderFulfillment.findUniqueOrThrow({
       where: { id: fx.fulfillment.id },
     });
+  }
+
+  async function confirmCustodyTransfer(
+    fx: Awaited<ReturnType<typeof seed>>,
+    outgoingId: string,
+    incomingId: string,
+  ) {
+    const pending = await assignments.assign({
+      fulfillmentId: fx.fulfillment.id,
+      riderId: incomingId,
+      actor: { type: 'SYSTEM' },
+      allowReassignment: true,
+      reason: 's5a_mid_custody',
+    });
+    expect(pending.pendingCustodyTransfer).toBe(true);
+    const handoff = await custodyHandoff.issueForOrder({
+      wkOrderId: fx.order.id,
+      actorUserId: outgoingId,
+    });
+    const ok = await custodyHandoff.confirm({
+      actorUserId: incomingId,
+      qrPayload: handoff.qrPayload,
+    });
+    expect(ok.ok).toBe(true);
   }
 
   async function completeRaToReimbursementDue(
@@ -443,13 +485,7 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
       actorUserId: fx.rider.id,
     });
 
-    await assignments.assign({
-      fulfillmentId: fx.fulfillment.id,
-      riderId: fx.riderB.id,
-      actor: { type: 'SYSTEM' },
-      allowReassignment: true,
-      reason: 's5a_mid_delivery_reassign',
-    });
+    await confirmCustodyTransfer(fx, fx.rider.id, fx.riderB.id);
 
     const token = await prisma.customerDeliveryHandoffToken.findUniqueOrThrow({
       where: { id: issued.tokenId },
@@ -636,13 +672,7 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
 
     await advanceToInTransit(fx, fx.rider.id);
 
-    await assignments.assign({
-      fulfillmentId: fx.fulfillment.id,
-      riderId: fx.riderB.id,
-      actor: { type: 'SYSTEM' },
-      allowReassignment: true,
-      reason: 'mid_delivery_to_B',
-    });
+    await confirmCustodyTransfer(fx, fx.rider.id, fx.riderB.id);
 
     const issued = await delivery.issueForOrder({
       wkOrderId: fx.order.id,

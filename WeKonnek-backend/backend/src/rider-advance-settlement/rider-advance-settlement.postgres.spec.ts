@@ -1,17 +1,19 @@
 /**
  * Stage 5B Rider Advance reimbursement settlement — PostgreSQL acceptance.
- * Requires backend/.env.stage5b.test and database wekonnek_stage5b_test.
+ * Requires disposable Stage 7 DB:
+ *   wekonnek_stage7_regression_test (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1)
+ *   or wekonnek_stage7_test
+ * Historical stage5b/stage6 acceptance DBs are frozen / contaminated and refused.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  DISPOSABLE_CLEANUP_DATABASES,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE5B_ENV = resolve(__dirname, '../../.env.stage5b.test');
-const STAGE5B_ENV_PRESENT = existsSync(STAGE5B_ENV);
-
-if (STAGE5B_ENV_PRESENT) {
-  loadEnv({ path: STAGE5B_ENV, override: true });
-}
+const STAGE5B_ENV_PRESENT =
+  loadStageTestEnv('.env.stage7.test') || loadStageTestEnv('.env.stage5b.test');
 
 import {
   BadRequestException,
@@ -41,19 +43,18 @@ jest.setTimeout(180_000);
 
 const ALLOWED_DB_USERS = new Set([
   'victor',
-  'wekonnek_stage5b_test',
-  'wekonnek_stage6_test',
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
   'wekonnek_stage4_test',
   'wekonnek_stage5_test',
-]);
-const ALLOWED_DATABASES = new Set([
   'wekonnek_stage5b_test',
   'wekonnek_stage6_test',
 ]);
+const ALLOWED_DATABASES = DISPOSABLE_CLEANUP_DATABASES;
 
 function errCode(err: unknown): string | undefined {
   if (
@@ -105,7 +106,7 @@ describeIf(
         !ALLOWED_DB_USERS.has(user)
       ) {
         throw new Error(
-          `Stage 5B tests require wekonnek_stage5b_test|wekonnek_stage6_test identity; got database=${database} user=${user}`,
+          `Stage 5B tests require wekonnek_stage7_test|wekonnek_stage7_regression_test identity; got database=${database} user=${user}`,
         );
       }
     });
@@ -303,7 +304,7 @@ describeIf(
       return ack.riderAdvance;
     }
 
-    it('reports dedicated DB identity wekonnek_stage5b_test|wekonnek_stage6_test', async () => {
+    it('reports dedicated DB identity wekonnek_stage7_test|wekonnek_stage7_regression_test', async () => {
       const row = await prisma.$queryRaw<
         Array<{ database: string; user: string }>
       >(

@@ -1,17 +1,18 @@
 /**
  * Stage 6 OrderOperationalStateService — real PostgreSQL matrix.
- * Requires backend/.env.stage6.test and database wekonnek_stage6_test.
+ * Requires disposable Stage 7 DB when truncating settlements:
+ *   WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → wekonnek_stage7_regression_test
+ *   or wekonnek_stage7_test
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  DISPOSABLE_CLEANUP_DATABASES,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE6_ENV = resolve(__dirname, '../../.env.stage6.test');
-const STAGE6_ENV_PRESENT = existsSync(STAGE6_ENV);
-
-if (STAGE6_ENV_PRESENT) {
-  loadEnv({ path: STAGE6_ENV, override: true });
-}
+const STAGE6_ENV_PRESENT =
+  loadStageTestEnv('.env.stage7.test') || loadStageTestEnv('.env.stage6.test');
 
 import { ForbiddenException } from '@nestjs/common';
 import {
@@ -36,14 +37,20 @@ import { OrderOperationalStateService } from './order-operational-state.service'
 const describeIf = STAGE6_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage6_test']);
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
   'wekonnek_stage4_test',
   'wekonnek_stage5_test',
   'wekonnek_stage5b_test',
+  'wekonnek_stage6_test',
 ]);
+const ALLOWED_DATABASES = DISPOSABLE_CLEANUP_DATABASES;
 
 describeIf(
   'Stage 6 Operational State PostgreSQL (wekonnek_stage6_test)',
@@ -63,13 +70,14 @@ describeIf(
       const database = target[0]?.database;
       const user = target[0]?.user;
       if (
-        database !== 'wekonnek_stage6_test' ||
+        !database ||
+        !ALLOWED_DATABASES.has(database) ||
         !user ||
         FORBIDDEN_DB_USERS.has(user) ||
         !ALLOWED_DB_USERS.has(user)
       ) {
         throw new Error(
-          `Stage 6 ops-state tests require wekonnek_stage6_test; got database=${database} user=${user}`,
+          `Stage 6 ops-state tests require wekonnek_stage7_test|wekonnek_stage7_regression_test; got database=${database} user=${user}`,
         );
       }
     });

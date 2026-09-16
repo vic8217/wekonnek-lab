@@ -1,17 +1,15 @@
 /**
  * Stage 6 secure merchant return handoff — PostgreSQL acceptance.
- * Requires backend/.env.stage6.test and database wekonnek_stage6_test.
+ * Requires backend/.env.stage6.test and database wekonnek_stage6_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE6_ENV = resolve(__dirname, '../../.env.stage6.test');
-const STAGE6_ENV_PRESENT = existsSync(STAGE6_ENV);
-
-if (STAGE6_ENV_PRESENT) {
-  loadEnv({ path: STAGE6_ENV, override: true });
-}
+const STAGE6_ENV_PRESENT = loadStageTestEnv('.env.stage6.test');
 
 import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -35,13 +33,18 @@ import { OrderOperationalStateService } from '../order-operational-state/order-o
 import { PickupHandoffService } from '../pickup-handoff/pickup-handoff.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
+import { RiderCustodyHandoffService } from '../rider-custody-handoff/rider-custody-handoff.service';
 import { ReturnHandoffService } from './return-handoff.service';
 import { hashReturnSecret } from './return-token';
 
 const describeIf = STAGE6_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage6_test']);
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  'wekonnek_stage6_test',
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
@@ -68,6 +71,7 @@ describeIf(
         if (key === 'RETURN_HANDOFF_TTL_SECONDS') return '300';
         if (key === 'PICKUP_HANDOFF_TTL_SECONDS') return '300';
         if (key === 'DELIVERY_HANDOFF_TTL_SECONDS') return '300';
+        if (key === 'RIDER_CUSTODY_HANDOFF_TTL_SECONDS') return '300';
         return undefined;
       },
     } as ConfigService;
@@ -86,6 +90,13 @@ describeIf(
       transitions,
       config,
     );
+    const custodyHandoff = new RiderCustodyHandoffService(
+      prisma,
+      events,
+      custody,
+      assignments,
+      config,
+    );
     const operational = new OrderOperationalStateService(prisma);
     let cleanup: (() => Promise<void>) | undefined;
 
@@ -96,14 +107,18 @@ describeIf(
       >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
       const database = target[0]?.database;
       const user = target[0]?.user;
+      const okHistorical = database === 'wekonnek_stage6_test';
+      const okRegression =
+        isCurrentSchemaRegressionMode() &&
+        database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
       if (
-        database !== 'wekonnek_stage6_test' ||
+        (!okHistorical && !okRegression) ||
         !user ||
         FORBIDDEN_DB_USERS.has(user) ||
         !ALLOWED_DB_USERS.has(user)
       ) {
         throw new Error(
-          `Stage 6 tests require wekonnek_stage6_test identity; got database=${database} user=${user}`,
+          `Stage 6 tests require wekonnek_stage6_test or stage7 regression identity; got database=${database} user=${user}`,
         );
       }
     });
@@ -204,6 +219,9 @@ describeIf(
       });
 
       cleanup = async () => {
+        await prisma.riderCustodyHandoffToken.deleteMany({
+          where: { wkOrderId: order.id },
+        });
         await prisma.merchantReturnHandoffToken.deleteMany({
           where: { wkOrderId: order.id },
         });
@@ -328,7 +346,10 @@ describeIf(
       const rows = await prisma.$queryRaw<
         Array<{ database: string; user: string }>
       >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-      expect(rows[0]?.database).toBe('wekonnek_stage6_test');
+      expect(
+        rows[0]?.database === 'wekonnek_stage6_test' ||
+          rows[0]?.database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+      ).toBe(true);
     });
 
     it('enforces one ACTIVE return token per fulfillment/purpose', async () => {
@@ -545,13 +566,20 @@ describeIf(
         wkOrderId: fx.order.id,
         actorUserId: fx.riderB.id,
       });
-      await assignments.assign({
+      const pendingAssign = await assignments.assign({
         fulfillmentId: fx.fulfillment.id,
         riderId: fx.riderC.id,
         actor: { type: 'SYSTEM' },
         allowReassignment: true,
         reason: 's6_reassign_return',
       });
+      expect(pendingAssign.pendingCustodyTransfer).toBe(true);
+      const pendingFul = await prisma.orderFulfillment.findUniqueOrThrow({
+        where: { id: fx.fulfillment.id },
+      });
+      expect(pendingFul.activeRiderId).toBe(fx.riderB.id);
+      expect(pendingFul.pendingCustodyIncomingRiderId).toBe(fx.riderC.id);
+
       const revoked = await prisma.merchantReturnHandoffToken.findUniqueOrThrow({
         where: { id: bToken.tokenId },
       });
@@ -562,6 +590,17 @@ describeIf(
         qrPayload: bToken.qrPayload,
       });
       expect(denied.ok).toBe(false);
+
+      const handoff = await custodyHandoff.issueForOrder({
+        wkOrderId: fx.order.id,
+        actorUserId: fx.riderB.id,
+      });
+      const custodyOk = await custodyHandoff.confirm({
+        actorUserId: fx.riderC.id,
+        qrPayload: handoff.qrPayload,
+        correlationId: 's6-return-reassign-custody',
+      });
+      expect(custodyOk.ok).toBe(true);
 
       const cToken = await returns.issueForOrder({
         wkOrderId: fx.order.id,

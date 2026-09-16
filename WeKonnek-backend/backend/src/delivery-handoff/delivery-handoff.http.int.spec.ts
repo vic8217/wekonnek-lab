@@ -1,17 +1,17 @@
 /**
  * Stage 5A delivery handoff HTTP acceptance.
- * Requires backend/.env.stage5.test and database wekonnek_stage5_test.
+ * Requires backend/.env.stage5.test and database wekonnek_stage5_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE5_ENV = resolve(__dirname, '../../.env.stage5.test');
-const STAGE5_ENV_PRESENT = existsSync(STAGE5_ENV);
-
-if (STAGE5_ENV_PRESENT) {
-  loadEnv({ path: STAGE5_ENV, override: true });
-}
+const STAGE5_ENV_PRESENT = loadStageTestEnv('.env.stage5.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -42,7 +42,11 @@ const describeIf = STAGE5_ENV_PRESENT ? describe : describe.skip;
 
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage5_test']);
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  'wekonnek_stage5_test',
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
@@ -91,14 +95,18 @@ describeIf('Stage 5A Delivery Handoff HTTP (wekonnek_stage5_test)', () => {
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
     const database = target[0]?.database;
     const user = target[0]?.user;
+    const okHistorical = database === 'wekonnek_stage5_test';
+    const okRegression =
+      isCurrentSchemaRegressionMode() &&
+      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
     if (
-      database !== 'wekonnek_stage5_test' ||
+      (!okHistorical && !okRegression) ||
       !user ||
       FORBIDDEN_DB_USERS.has(user) ||
       !ALLOWED_DB_USERS.has(user)
     ) {
       throw new Error(
-        `Stage 5 HTTP tests require wekonnek_stage5_test identity; got database=${database} user=${user}`,
+        `Stage 5 HTTP tests require wekonnek_stage5_test or stage7 regression identity; got database=${database} user=${user}`,
       );
     }
   });
@@ -661,14 +669,18 @@ describeIf(
       >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
       const database = target[0]?.database;
       const user = target[0]?.user;
+      const okHistorical = database === 'wekonnek_stage5_test';
+      const okRegression =
+        isCurrentSchemaRegressionMode() &&
+        database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
       if (
-        database !== 'wekonnek_stage5_test' ||
+        (!okHistorical && !okRegression) ||
         !user ||
         FORBIDDEN_DB_USERS.has(user) ||
         !ALLOWED_DB_USERS.has(user)
       ) {
         throw new Error(
-          `Stage 5 WS tests require wekonnek_stage5_test identity; got database=${database} user=${user}`,
+          `Stage 5 WS tests require wekonnek_stage5_test or stage7 regression identity; got database=${database} user=${user}`,
         );
       }
     });

@@ -1,18 +1,16 @@
 /**
  * Stage 4A PostgreSQL concurrency / integrity suite.
- * Requires backend/.env.stage4.test and database wekonnek_stage4_test.
+ * Requires backend/.env.stage4.test and database wekonnek_stage4_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  * Does NOT fall back to stage0/stage1/stage2/stage3 databases.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE4_ENV = resolve(__dirname, '../../.env.stage4.test');
-const STAGE4_ENV_PRESENT = existsSync(STAGE4_ENV);
-
-if (STAGE4_ENV_PRESENT) {
-  loadEnv({ path: STAGE4_ENV, override: true });
-}
+const STAGE4_ENV_PRESENT = loadStageTestEnv('.env.stage4.test');
 
 import { ConfigService } from '@nestjs/config';
 import {
@@ -67,12 +65,17 @@ describeIf('Stage 4A Rider Advance PostgreSQL (wekonnek_stage4_test)', () => {
     const target = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    if (
-      target[0]?.database !== 'wekonnek_stage4_test' ||
-      target[0]?.user !== 'wekonnek_stage4_test'
-    ) {
+    const database = target[0]?.database;
+    const user = target[0]?.user;
+    const okHistorical =
+      database === 'wekonnek_stage4_test' && user === 'wekonnek_stage4_test';
+    const okRegression =
+      isCurrentSchemaRegressionMode() &&
+      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE &&
+      (user === 'victor' || user === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    if (!okHistorical && !okRegression) {
       throw new Error(
-        `Stage 4 tests require wekonnek_stage4_test identity; got database=${target[0]?.database} user=${target[0]?.user}`,
+        `Stage 4 tests require wekonnek_stage4_test or stage7 regression identity; got database=${database} user=${user}`,
       );
     }
   });

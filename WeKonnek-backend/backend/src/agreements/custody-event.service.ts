@@ -49,6 +49,7 @@ export class CustodyEventService {
     return this.recordCore({
       ...input,
       trustedSecureMerchantReturn: false,
+      trustedSecureRiderTransfer: false,
     });
   }
 
@@ -81,6 +82,44 @@ export class CustodyEventService {
       occurredAt: input.occurredAt,
       tx: input.tx,
       trustedSecureMerchantReturn: true,
+      trustedSecureRiderTransfer: false,
+    });
+  }
+
+  /**
+   * Stage 7 trusted path only — called after RiderCustodyHandoffService has
+   * validated the incoming rider capability. Public custody APIs cannot set
+   * this authority flag.
+   */
+  async recordSecureRiderTransferInTx(input: {
+    actorUserId: string;
+    eventType:
+      | 'RIDER_TRANSFER_RELEASED'
+      | 'RIDER_TRANSFER_RECEIVED';
+    wkOrderId: number;
+    fulfillmentId: string;
+    fromUserId: string;
+    toUserId: string;
+    correlationId?: string;
+    metadata?: Prisma.InputJsonValue;
+    occurredAt?: Date;
+    tx: Prisma.TransactionClient;
+  }) {
+    return this.recordCore({
+      actorUserId: input.actorUserId,
+      eventType: input.eventType as CustodyEventType,
+      wkOrderId: input.wkOrderId,
+      fulfillmentId: input.fulfillmentId,
+      fromPartyRole: 'RIDER',
+      toPartyRole: 'RIDER',
+      fromUserId: input.fromUserId,
+      toUserId: input.toUserId,
+      correlationId: input.correlationId,
+      metadata: input.metadata,
+      occurredAt: input.occurredAt,
+      tx: input.tx,
+      trustedSecureMerchantReturn: false,
+      trustedSecureRiderTransfer: true,
     });
   }
 
@@ -101,6 +140,8 @@ export class CustodyEventService {
     tx?: Prisma.TransactionClient;
     /** Server-internal only — never from request body. */
     trustedSecureMerchantReturn: boolean;
+    /** Server-internal only — only the Stage 7 capability flow may record transfer custody. */
+    trustedSecureRiderTransfer: boolean;
   }) {
     const db = input.tx ?? this.prisma;
     if (!input.wkOrderId && !input.fulfillmentId) {
@@ -114,6 +155,8 @@ export class CustodyEventService {
     let merchantId: number | null = null;
     let customerId: string | null = null;
     let activeRiderId: string | null = null;
+    let physicalCustodianRiderId: string | null = null;
+    let pendingCustodyIncomingRiderId: string | null = null;
 
     if (fulfillmentId) {
       const fulfillment = await db.orderFulfillment.findUnique({
@@ -124,6 +167,8 @@ export class CustodyEventService {
       merchantId = fulfillment.merchantId;
       customerId = fulfillment.customerId;
       activeRiderId = fulfillment.activeRiderId;
+      physicalCustodianRiderId = fulfillment.physicalCustodianRiderId;
+      pendingCustodyIncomingRiderId = fulfillment.pendingCustodyIncomingRiderId;
     } else if (wkOrderId != null) {
       const order = await db.wkOrder.findUnique({
         where: { id: wkOrderId },
@@ -137,6 +182,9 @@ export class CustodyEventService {
       if (fulfillment) {
         fulfillmentId = fulfillment.id;
         activeRiderId = fulfillment.activeRiderId;
+        physicalCustodianRiderId = fulfillment.physicalCustodianRiderId;
+        pendingCustodyIncomingRiderId =
+          fulfillment.pendingCustodyIncomingRiderId;
       }
     }
 
@@ -145,9 +193,12 @@ export class CustodyEventService {
       merchantId,
       customerId,
       activeRiderId,
+      physicalCustodianRiderId,
+      pendingCustodyIncomingRiderId,
       eventType: input.eventType,
       wkOrderId,
       trustedSecureMerchantReturn: input.trustedSecureMerchantReturn === true,
+      trustedSecureRiderTransfer: input.trustedSecureRiderTransfer === true,
       db,
     });
 
@@ -166,6 +217,8 @@ export class CustodyEventService {
       [
         customerId,
         activeRiderId,
+        physicalCustodianRiderId,
+        pendingCustodyIncomingRiderId,
         merchantUsers?.userId,
         ...(merchantUsers?.merchantStaff.map((staff) => staff.userId) ?? []),
       ].filter((id): id is string => Boolean(id)),
@@ -210,9 +263,27 @@ export class CustodyEventService {
 
     // Do not trust client-supplied party user ids unless they match persisted relationships
     if (input.toUserId && activeRiderId && input.toPartyRole === 'RIDER') {
-      if (input.toUserId !== activeRiderId) {
+      const riderTransfer =
+        input.eventType === CustodyEventType.RIDER_TRANSFER_RELEASED ||
+        input.eventType === CustodyEventType.RIDER_TRANSFER_RECEIVED;
+      const allowedRiderTargets = new Set(
+        [
+          activeRiderId,
+          physicalCustodianRiderId,
+          pendingCustodyIncomingRiderId,
+        ].filter((id): id is string => Boolean(id)),
+      );
+      if (
+        !riderTransfer &&
+        input.toUserId !== activeRiderId
+      ) {
         throw new ForbiddenException(
           'toUserId rider must match active fulfillment assignment',
+        );
+      }
+      if (riderTransfer && !allowedRiderTargets.has(input.toUserId)) {
+        throw new ForbiddenException(
+          'toUserId rider must match active, custodian, or pending incoming rider',
         );
       }
     }
@@ -303,13 +374,26 @@ export class CustodyEventService {
     merchantId: number | null;
     customerId: string | null;
     activeRiderId: string | null;
+    physicalCustodianRiderId?: string | null;
+    pendingCustodyIncomingRiderId?: string | null;
     eventType: CustodyEventType;
     wkOrderId?: number | null;
     trustedSecureMerchantReturn?: boolean;
+    trustedSecureRiderTransfer?: boolean;
     readOnly?: boolean;
     db?: Prisma.TransactionClient | PrismaService;
   }) {
     const db = input.db ?? this.prisma;
+    if (
+      (input.eventType === CustodyEventType.RIDER_TRANSFER_RELEASED ||
+        input.eventType === CustodyEventType.RIDER_TRANSFER_RECEIVED) &&
+      !input.trustedSecureRiderTransfer
+    ) {
+      throw new ForbiddenException({
+        code: 'RIDER_TRANSFER_REQUIRES_HANDOFF',
+        message: 'Rider transfer custody requires secured rider handoff',
+      });
+    }
     if (input.customerId === input.actorUserId) {
       if (input.readOnly) return;
       const allowed: CustodyEventType[] = [
@@ -324,7 +408,13 @@ export class CustodyEventService {
       return;
     }
 
-    if (input.activeRiderId === input.actorUserId) {
+    const isOutgoingCustodian =
+      input.activeRiderId === input.actorUserId ||
+      input.physicalCustodianRiderId === input.actorUserId;
+    const isPendingIncoming =
+      input.pendingCustodyIncomingRiderId === input.actorUserId;
+
+    if (isOutgoingCustodian || isPendingIncoming) {
       if (input.readOnly) return;
       const allowed: CustodyEventType[] = [
         CustodyEventType.RIDER_RECEIVED,
@@ -333,11 +423,28 @@ export class CustodyEventService {
         // Stage 6: RETURN_RECEIVED is merchant-authoritative via secure return handoff.
         // Riders must not self-assert merchant receipt.
       ];
-      if (!allowed.includes(input.eventType)) {
+      if (
+        isOutgoingCustodian &&
+        input.eventType === CustodyEventType.RIDER_TRANSFER_RELEASED
+      ) {
+        return;
+      }
+      if (
+        isPendingIncoming &&
+        input.eventType === CustodyEventType.RIDER_TRANSFER_RECEIVED
+      ) {
+        return;
+      }
+      if (!isOutgoingCustodian || !allowed.includes(input.eventType)) {
         throw new ForbiddenException({
-          code: 'RETURN_RECEIVED_RIDER_DENIED',
+          code:
+            input.eventType === CustodyEventType.RETURN_RECEIVED
+              ? 'RETURN_RECEIVED_RIDER_DENIED'
+              : 'CUSTODY_EVENT_RIDER_DENIED',
           message:
-            'Rider cannot record RETURN_RECEIVED; merchant return handoff is required',
+            input.eventType === CustodyEventType.RETURN_RECEIVED
+              ? 'Rider cannot record RETURN_RECEIVED; merchant return handoff is required'
+              : 'Rider cannot record this custody event type',
         });
       }
       return;

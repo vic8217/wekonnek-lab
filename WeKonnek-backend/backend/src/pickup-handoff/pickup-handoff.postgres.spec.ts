@@ -1,18 +1,16 @@
 /**
  * Stage 3A PostgreSQL concurrency / atomicity suite.
- * Requires backend/.env.stage3.test and database wekonnek_stage3_test.
+ * Requires backend/.env.stage3.test and database wekonnek_stage3_test,
+ * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  * Does NOT fall back to stage0/stage1/stage2 databases.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import {
+  isCurrentSchemaRegressionMode,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+} from '../test-support/test-database-guard';
 
-const STAGE3_ENV = resolve(__dirname, '../../.env.stage3.test');
-const STAGE3_ENV_PRESENT = existsSync(STAGE3_ENV);
-
-if (STAGE3_ENV_PRESENT) {
-  loadEnv({ path: STAGE3_ENV, override: true });
-}
+const STAGE3_ENV_PRESENT = loadStageTestEnv('.env.stage3.test');
 
 import { ConfigService } from '@nestjs/config';
 import {
@@ -77,12 +75,17 @@ describeIf('Stage 3A pickup handoff PostgreSQL (wekonnek_stage3_test)', () => {
     const target = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    if (
-      target[0]?.database !== 'wekonnek_stage3_test' ||
-      target[0]?.user !== 'wekonnek_stage3_test'
-    ) {
+    const database = target[0]?.database;
+    const user = target[0]?.user;
+    const okHistorical =
+      database === 'wekonnek_stage3_test' && user === 'wekonnek_stage3_test';
+    const okRegression =
+      isCurrentSchemaRegressionMode() &&
+      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE &&
+      (user === 'victor' || user === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    if (!okHistorical && !okRegression) {
       throw new Error(
-        `Stage 3 tests require wekonnek_stage3_test identity; got database=${target[0]?.database} user=${target[0]?.user}`,
+        `Stage 3 tests require wekonnek_stage3_test or stage7 regression identity; got database=${database} user=${user}`,
       );
     }
   });
@@ -783,7 +786,9 @@ describeIf('Stage 3A pickup handoff PostgreSQL (wekonnek_stage3_test)', () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.code).toMatch(/ASSIGNMENT/);
+      // Stage 3: assignment-version mismatch. Stage 7+ also revokes ACTIVE pickup
+      // tokens on reassignment (TOKEN_REVOKED) — both prove capability unusable.
+      expect(result.code).toMatch(/ASSIGNMENT|TOKEN_REVOKED/);
     }
     expect(
       (

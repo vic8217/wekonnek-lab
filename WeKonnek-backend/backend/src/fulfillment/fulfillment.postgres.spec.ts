@@ -1,4 +1,12 @@
-import 'dotenv/config';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { isCurrentSchemaRegressionMode } from '../test-support/test-database-guard';
+
+if (isCurrentSchemaRegressionMode()) {
+  loadStageTestEnv('.env.stage7.regression.test');
+} else {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('dotenv').config();
+}
 import {
   ConflictException,
   ForbiddenException,

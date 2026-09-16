@@ -19,6 +19,7 @@ import { CustodyEventService } from '../agreements/custody-event.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertPossessionDependentRiderAuthority } from '../rider-custody-handoff/possession-authority';
 import {
   DEFAULT_DELIVERY_HANDOFF_TTL_SECONDS,
   DELIVERY_OTP_MAX_ATTEMPTS,
@@ -136,6 +137,14 @@ export class DeliveryHandoffService {
             message: 'Only the active delivery rider may request delivery capability',
           });
         }
+        assertPossessionDependentRiderAuthority({
+          actorUserId: input.actorUserId,
+          status: locked.status,
+          activeRiderId: locked.activeRiderId,
+          physicalCustodianRiderId: locked.physicalCustodianRiderId,
+          pendingCustodyIncomingRiderId: locked.pendingCustodyIncomingRiderId,
+          action: 'delivery_capability',
+        });
         if (!locked.customerId || locked.customerId !== order.userId) {
           throw new ForbiddenException({
             code: 'CUSTOMER_SCOPE_MISMATCH',

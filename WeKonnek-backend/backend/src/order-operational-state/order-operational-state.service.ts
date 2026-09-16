@@ -173,6 +173,16 @@ export class OrderOperationalStateService {
     if (physicalStatus === FulfillmentStatus.returning) {
       flags.push('RETURN_IN_PROGRESS');
     }
+    if (fulfillment?.pendingCustodyIncomingRiderId) {
+      flags.push('CUSTODY_TRANSFER_PENDING');
+    }
+    if (
+      fulfillment?.physicalCustodianRiderId != null &&
+      fulfillment.activeRiderId != null &&
+      fulfillment.physicalCustodianRiderId !== fulfillment.activeRiderId
+    ) {
+      flags.push('ASSIGNMENT_CUSTODY_MISMATCH');
+    }
 
     const integrityBlocking = flags.some((f) =>
       [
@@ -180,6 +190,7 @@ export class OrderOperationalStateService {
         'RETURN_CUSTODY_UNCONFIRMED',
         'RA_REIMBURSED_TOTAL_MISMATCH',
         'RA_DUE_WITHOUT_PRINCIPAL',
+        'ASSIGNMENT_CUSTODY_MISMATCH',
       ].includes(f),
     );
 
@@ -296,7 +307,12 @@ export class OrderOperationalStateService {
       operationalState: full.operationalState,
       physicalStatus: full.physicalStatus,
       flags: full.flags.filter((f) =>
-        ['RETURN_IN_PROGRESS', 'RETURN_COMPLETED'].includes(f),
+        [
+          'RETURN_IN_PROGRESS',
+          'RETURN_COMPLETED',
+          'CUSTODY_TRANSFER_PENDING',
+          'ASSIGNMENT_CUSTODY_MISMATCH',
+        ].includes(f),
       ),
       custody: full.custody,
       activeRiderId: full.activeRiderId,

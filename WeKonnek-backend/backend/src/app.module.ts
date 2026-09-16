@@ -67,6 +67,7 @@ import { RiderAdvanceModule } from './rider-advance/rider-advance.module';
 import { DeliveryHandoffModule } from './delivery-handoff/delivery-handoff.module';
 import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-advance-settlement.module';
 import { ReturnHandoffModule } from './return-handoff/return-handoff.module';
+import { RiderCustodyHandoffModule } from './rider-custody-handoff/rider-custody-handoff.module';
 import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
 
 @Module({
@@ -86,6 +87,7 @@ import { OrderOperationalStateModule } from './order-operational-state/order-ope
     DeliveryHandoffModule,
     RiderAdvanceSettlementModule,
     ReturnHandoffModule,
+    RiderCustodyHandoffModule,
     OrderOperationalStateModule,
 
     I18nModule.forRoot({

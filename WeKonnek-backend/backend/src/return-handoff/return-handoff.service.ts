@@ -17,6 +17,7 @@ import { CustodyEventService } from '../agreements/custody-event.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertPossessionDependentRiderAuthority } from '../rider-custody-handoff/possession-authority';
 import {
   DEFAULT_RETURN_HANDOFF_TTL_SECONDS,
   RETURN_OTP_MAX_ATTEMPTS,
@@ -145,6 +146,14 @@ export class ReturnHandoffService {
             message: 'Only the active return rider may request return capability',
           });
         }
+        assertPossessionDependentRiderAuthority({
+          actorUserId: input.actorUserId,
+          status: locked.status,
+          activeRiderId: locked.activeRiderId,
+          physicalCustodianRiderId: locked.physicalCustodianRiderId,
+          pendingCustodyIncomingRiderId: locked.pendingCustodyIncomingRiderId,
+          action: 'return_capability',
+        });
         if (!locked.merchantId || locked.merchantId !== order.merchantId) {
           throw new ForbiddenException({
             code: 'MERCHANT_SCOPE_MISMATCH',

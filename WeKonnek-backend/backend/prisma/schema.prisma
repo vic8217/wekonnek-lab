@@ -985,6 +985,7 @@ model WkOrder {
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
   riderAdvanceSettlements RiderAdvanceSettlement[]
   returnHandoffTokens   MerchantReturnHandoffToken[]
+  riderCustodyHandoffTokens RiderCustodyHandoffToken[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1298,6 +1299,8 @@ model User {
   paymentsMade             PlatformPaymentTransaction[] @relation("PlatformPaymentPayer")
   riderWalletLoads         PlatformPaymentTransaction[] @relation("PlatformPaymentRider")
   activeFulfillments       OrderFulfillment[]           @relation("FulfillmentActiveRider")
+  physicalCustodianFulfillments OrderFulfillment[]      @relation("FulfillmentPhysicalCustodian")
+  pendingCustodyIncomingFulfillments OrderFulfillment[] @relation("FulfillmentPendingCustodyIncoming")
   riderAssignments         RiderAssignment[]            @relation("RiderAssignmentRider")
   pickupHandoffTokensAsRider PickupHandoffToken[]       @relation("PickupHandoffRider")
   riderAdvancesAsRider       RiderAdvance[]             @relation("RiderAdvanceRider")
@@ -1307,6 +1310,8 @@ model User {
   settlementsAsCustomer      RiderAdvanceSettlement[]   @relation("SettlementCustomer")
   settlementsAsCreditor      RiderAdvanceSettlement[]   @relation("SettlementCreditor")
   returnHandoffTokensAsRider MerchantReturnHandoffToken[] @relation("ReturnHandoffRider")
+  riderCustodyHandoffsAsOutgoing RiderCustodyHandoffToken[] @relation("RiderCustodyOutgoing")
+  riderCustodyHandoffsAsIncoming RiderCustodyHandoffToken[] @relation("RiderCustodyIncoming")
 
   @@map("users")
 }
@@ -2812,12 +2817,21 @@ model OrderFulfillment {
   customerId         String?           @map("customer_id") @db.Uuid
   cancelledAt        DateTime?         @map("cancelled_at") @db.Timestamptz
   deliveredAt        DateTime?         @map("delivered_at") @db.Timestamptz
+  /// Stage 7: last rider proven to physically possess goods (pickup / rider transfer).
+  /// Never inferred solely from activeRiderId.
+  physicalCustodianRiderId String?     @map("physical_custodian_rider_id") @db.Uuid
+  /// Stage 7: mid-possession reassignment target awaiting secure rider handoff.
+  pendingCustodyIncomingRiderId String? @map("pending_custody_incoming_rider_id") @db.Uuid
+  pendingCustodyFromAssignmentVersion Int? @map("pending_custody_from_assignment_version")
+  pendingCustodyRequestedAt DateTime?  @map("pending_custody_requested_at") @db.Timestamptz
   createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
   wkOrder      WkOrder?           @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
   orderV2      Order?             @relation(fields: [orderV2Id], references: [id], onDelete: Restrict)
   activeRider  User?              @relation("FulfillmentActiveRider", fields: [activeRiderId], references: [id], onDelete: SetNull)
+  physicalCustodianRider User?    @relation("FulfillmentPhysicalCustodian", fields: [physicalCustodianRiderId], references: [id], onDelete: SetNull)
+  pendingCustodyIncomingRider User? @relation("FulfillmentPendingCustodyIncoming", fields: [pendingCustodyIncomingRiderId], references: [id], onDelete: SetNull)
   merchant     Merchant?          @relation(fields: [merchantId], references: [id], onDelete: SetNull)
   shop         Branch?            @relation(fields: [shopId], references: [id], onDelete: SetNull)
   assignments  RiderAssignment[]
@@ -2828,9 +2842,11 @@ model OrderFulfillment {
   riderAdvances       RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
   returnHandoffTokens MerchantReturnHandoffToken[]
+  riderCustodyHandoffTokens RiderCustodyHandoffToken[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
+  @@index([physicalCustodianRiderId, status])
   @@index([merchantId, shopId])
   @@map("order_fulfillments")
 }
@@ -3079,6 +3095,10 @@ enum CustodyEventType {
   CUSTOMER_RECEIVED
   RETURN_INITIATED
   RETURN_RECEIVED
+  /// Stage 7: outgoing rider released goods to another rider (not merchant/customer).
+  RIDER_TRANSFER_RELEASED
+  /// Stage 7: incoming rider confirmed physical receipt from another rider.
+  RIDER_TRANSFER_RECEIVED
 }
 
 model Agreement {
@@ -3558,4 +3578,63 @@ model MerchantReturnHandoffToken {
   @@index([status, expiresAt])
   @@index([riderAssignmentId, assignmentVersion])
   @@map("merchant_return_handoff_tokens")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 7 — Secure Rider-to-Rider Custody Handoff
+// ═══════════════════════════════════════════════════════
+
+enum RiderCustodyHandoffPurpose {
+  RIDER_CUSTODY_HANDOFF
+}
+
+enum RiderCustodyHandoffTokenStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+/// Short-lived capability proving Rider A → Rider B physical custody transfer.
+/// Assignment alone never establishes possession; incoming rider must confirm.
+model RiderCustodyHandoffToken {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  tokenHash                  String                         @unique @map("token_hash") @db.VarChar(64)
+  otpHash                    String                         @unique @map("otp_hash") @db.VarChar(64)
+  purpose                    RiderCustodyHandoffPurpose     @default(RIDER_CUSTODY_HANDOFF)
+  status                     RiderCustodyHandoffTokenStatus @default(ACTIVE)
+  wkOrderId                  Int                            @map("wk_order_id")
+  fulfillmentId              String                         @map("fulfillment_id") @db.Uuid
+  outgoingRiderId            String                         @map("outgoing_rider_id") @db.Uuid
+  incomingRiderId            String                         @map("incoming_rider_id") @db.Uuid
+  sourceRiderAssignmentId    String                         @map("source_rider_assignment_id") @db.Uuid
+  sourceAssignmentVersion    Int                            @map("source_assignment_version")
+  targetAssignmentVersion    Int?                           @map("target_assignment_version")
+  expiresAt                  DateTime                       @map("expires_at") @db.Timestamptz
+  consumedAt                 DateTime?                      @map("consumed_at") @db.Timestamptz
+  consumedByUserId           String?                        @map("consumed_by_user_id") @db.Uuid
+  incomingConfirmedAt        DateTime?                      @map("incoming_confirmed_at") @db.Timestamptz
+  releaseCustodyEventId      String?                        @unique @map("release_custody_event_id") @db.Uuid
+  receiptCustodyEventId      String?                        @unique @map("receipt_custody_event_id") @db.Uuid
+  otpFailedAttempts          Int                            @default(0) @map("otp_failed_attempts")
+  otpLockedUntil             DateTime?                      @map("otp_locked_until") @db.Timestamptz
+  confirmIdempotencyKey      String?                        @unique @map("confirm_idempotency_key") @db.VarChar(64)
+  correlationId              String?                        @map("correlation_id") @db.VarChar(64)
+  createdAt                  DateTime                       @default(now()) @map("created_at") @db.Timestamptz
+  createdByUserId            String                         @map("created_by_user_id") @db.Uuid
+  revokedAt                  DateTime?                      @map("revoked_at") @db.Timestamptz
+  revokeReason               String?                        @map("revoke_reason") @db.VarChar(255)
+
+  wkOrder       WkOrder          @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment   OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  outgoingRider User             @relation("RiderCustodyOutgoing", fields: [outgoingRiderId], references: [id], onDelete: Restrict)
+  incomingRider User             @relation("RiderCustodyIncoming", fields: [incomingRiderId], references: [id], onDelete: Restrict)
+
+  @@index([fulfillmentId, status])
+  @@index([wkOrderId, status])
+  @@index([outgoingRiderId, status])
+  @@index([incomingRiderId, status])
+  @@index([status, expiresAt])
+  @@index([sourceRiderAssignmentId, sourceAssignmentVersion])
+  @@map("rider_custody_handoff_tokens")
 }

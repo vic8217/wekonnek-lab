@@ -406,6 +406,12 @@ export class PickupHandoffService {
           },
         });
 
+        // Stage 7: pickup confirmation establishes proven physical custodian.
+        await tx.orderFulfillment.update({
+          where: { id: token!.fulfillmentId },
+          data: { physicalCustodianRiderId: token!.riderId },
+        });
+
         const transition = await this.transitions.transitionInTx(
           tx,
           {
