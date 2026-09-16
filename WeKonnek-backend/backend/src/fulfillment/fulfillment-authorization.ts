@@ -143,7 +143,7 @@ const RIDER_ALLOWED_TARGETS: ReadonlySet<string> = new Set([
   // Stage 5A: 'delivered' removed — customer handoff only (INTERNAL_SERVICE).
   'delivery_failed',
   'returning',
-  'returned',
+  // Stage 6: 'returned' removed — merchant return handoff only (INTERNAL_SERVICE).
 ]);
 
 const MERCHANT_ALLOWED_TARGETS: ReadonlySet<string> = new Set([

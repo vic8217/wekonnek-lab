@@ -34,15 +34,23 @@ import { truncateSettlementsForStage5bTest } from './stage5b-test-cleanup';
 const describeIf = STAGE5B_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage5b_test']);
+const ALLOWED_DB_USERS = new Set([
+  'victor',
+  'wekonnek_stage5b_test',
+  'wekonnek_stage6_test',
+]);
 const FORBIDDEN_DB_USERS = new Set([
   'wekonnek_stage2_test',
   'wekonnek_stage3_test',
   'wekonnek_stage4_test',
   'wekonnek_stage5_test',
 ]);
+const ALLOWED_DATABASES = new Set([
+  'wekonnek_stage5b_test',
+  'wekonnek_stage6_test',
+]);
 
-describeIf('Stage 5B Rider Advance Settlement HTTP (wekonnek_stage5b_test)', () => {
+describeIf('Stage 5B Rider Advance Settlement HTTP (stage5b|stage6)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let assignments: RiderAssignmentService;
@@ -85,13 +93,14 @@ describeIf('Stage 5B Rider Advance Settlement HTTP (wekonnek_stage5b_test)', () 
     const database = target[0]?.database;
     const user = target[0]?.user;
     if (
-      database !== 'wekonnek_stage5b_test' ||
+      !database ||
+      !ALLOWED_DATABASES.has(database) ||
       !user ||
       FORBIDDEN_DB_USERS.has(user) ||
       !ALLOWED_DB_USERS.has(user)
     ) {
       throw new Error(
-        `Stage 5B HTTP tests require wekonnek_stage5b_test identity; got database=${database} user=${user}`,
+        `Stage 5B HTTP tests require wekonnek_stage5b_test|wekonnek_stage6_test identity; got database=${database} user=${user}`,
       );
     }
   });
@@ -247,11 +256,11 @@ describeIf('Stage 5B Rider Advance Settlement HTTP (wekonnek_stage5b_test)', () 
     return id;
   }
 
-  it('reports DB identity wekonnek_stage5b_test', async () => {
+  it('reports DB identity wekonnek_stage5b_test|wekonnek_stage6_test', async () => {
     const row = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(row[0].database).toBe('wekonnek_stage5b_test');
+    expect(ALLOWED_DATABASES.has(row[0].database)).toBe(true);
   });
 
   it('CUSTOMER own GET succeeds; foreign GET denied; anonymous denied', async () => {

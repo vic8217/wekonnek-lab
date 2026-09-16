@@ -685,11 +685,13 @@ describeIf('Stage 5A Delivery Handoff PostgreSQL (wekonnek_stage5_test)', () => 
       actor: { id: fx.rider.id, type: 'RIDER' },
       reason: 's5a_returning',
     });
+    // Stage 6: returned requires merchant-confirmed handoff (INTERNAL_SERVICE)
     await transitions.transition({
       fulfillmentId: fx.fulfillment.id,
       targetStatus: 'returned',
-      actor: { id: fx.rider.id, type: 'RIDER' },
-      reason: 's5a_returned',
+      actor: { id: fx.merchantUser.id, type: 'INTERNAL_SERVICE' },
+      reason: 's5a_returned_via_secure_handoff',
+      correlationId: 's5a-secure-return',
     });
 
     const fulfillment = await prisma.orderFulfillment.findUniqueOrThrow({

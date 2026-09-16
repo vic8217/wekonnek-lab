@@ -190,6 +190,13 @@ export class RiderAssignmentService {
         actorId: input.actor.id,
         correlationId: input.correlationId,
       });
+      // Stage 6: invalidate active merchant return handoff capabilities
+      await this.revokeActiveReturnTokensInTx(tx, {
+        fulfillmentId: fulfillment.id,
+        reason: 'rider_reassigned',
+        actorId: input.actor.id,
+        correlationId: input.correlationId,
+      });
     }
 
     const nextVersion = currentVersion + 1;
@@ -313,6 +320,56 @@ export class RiderAssignmentService {
         actorId: input.actorId,
         actorType: 'SYSTEM',
         action: 'DELIVERY_TOKEN_REVOKED',
+        correlationId: input.correlationId,
+        metadata: {
+          tokenId: token.id,
+          reason: input.reason,
+          assignmentVersion: token.assignmentVersion,
+        },
+      });
+    }
+  }
+
+  /** Stage 6: revoke ACTIVE merchant return handoff tokens (absent on older DBs). */
+  private async revokeActiveReturnTokensInTx(
+    tx: Prisma.TransactionClient,
+    input: {
+      fulfillmentId: string;
+      reason: string;
+      actorId?: string | null;
+      correlationId?: string;
+    },
+  ) {
+    const reg = await tx.$queryRaw<Array<{ reg: string | null }>>`
+      SELECT to_regclass('public.merchant_return_handoff_tokens')::text AS reg
+    `;
+    if (!reg[0]?.reg) return;
+
+    const prior = await tx.merchantReturnHandoffToken.findMany({
+      where: {
+        fulfillmentId: input.fulfillmentId,
+        status: 'ACTIVE',
+      },
+    });
+    const now = new Date();
+    for (const token of prior) {
+      await tx.merchantReturnHandoffToken.update({
+        where: { id: token.id },
+        data: {
+          status: 'REVOKED',
+          revokedAt: now,
+          revokeReason: input.reason,
+        },
+      });
+      await this.events.record({
+        tx,
+        aggregateType: 'ORDER_FULFILLMENT',
+        aggregateId: input.fulfillmentId,
+        fulfillmentId: input.fulfillmentId,
+        wkOrderId: token.wkOrderId,
+        actorId: input.actorId,
+        actorType: 'SYSTEM',
+        action: 'RETURN_HANDOFF_REVOKED',
         correlationId: input.correlationId,
         metadata: {
           tokenId: token.id,

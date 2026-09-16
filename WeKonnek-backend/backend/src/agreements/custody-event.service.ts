@@ -24,6 +24,11 @@ export class CustodyEventService {
     private readonly events: OrderDomainEventService,
   ) {}
 
+  /**
+   * Public / general custody recording. Never accepts client-supplied
+   * secure-return authorization — marketplace RETURN_RECEIVED requires
+   * {@link recordSecureMerchantReturnReceiptInTx}.
+   */
   async record(input: {
     actorUserId: string;
     eventType: CustodyEventType;
@@ -40,6 +45,62 @@ export class CustodyEventService {
     occurredAt?: Date;
     /** Optional outer transaction (Stage 3A atomic handoff). */
     tx?: Prisma.TransactionClient;
+  }) {
+    return this.recordCore({
+      ...input,
+      trustedSecureMerchantReturn: false,
+    });
+  }
+
+  /**
+   * Stage 6 trusted path only — called from ReturnHandoffService after
+   * merchant confirms a valid return capability. Not reachable from HTTP DTOs.
+   */
+  async recordSecureMerchantReturnReceiptInTx(input: {
+    actorUserId: string;
+    wkOrderId: number;
+    fulfillmentId: string;
+    fromUserId?: string;
+    toUserId?: string;
+    correlationId?: string;
+    metadata?: Prisma.InputJsonValue;
+    occurredAt?: Date;
+    tx: Prisma.TransactionClient;
+  }) {
+    return this.recordCore({
+      actorUserId: input.actorUserId,
+      eventType: CustodyEventType.RETURN_RECEIVED,
+      wkOrderId: input.wkOrderId,
+      fulfillmentId: input.fulfillmentId,
+      fromPartyRole: 'RIDER',
+      toPartyRole: 'MERCHANT',
+      fromUserId: input.fromUserId,
+      toUserId: input.toUserId,
+      correlationId: input.correlationId,
+      metadata: input.metadata,
+      occurredAt: input.occurredAt,
+      tx: input.tx,
+      trustedSecureMerchantReturn: true,
+    });
+  }
+
+  private async recordCore(input: {
+    actorUserId: string;
+    eventType: CustodyEventType;
+    wkOrderId?: number;
+    fulfillmentId?: string;
+    agreementId?: string;
+    fromPartyRole?: AgreementPartyRole;
+    toPartyRole?: AgreementPartyRole;
+    fromUserId?: string;
+    toUserId?: string;
+    evidenceIds?: string[];
+    correlationId?: string;
+    metadata?: Prisma.InputJsonValue;
+    occurredAt?: Date;
+    tx?: Prisma.TransactionClient;
+    /** Server-internal only — never from request body. */
+    trustedSecureMerchantReturn: boolean;
   }) {
     const db = input.tx ?? this.prisma;
     if (!input.wkOrderId && !input.fulfillmentId) {
@@ -85,6 +146,8 @@ export class CustodyEventService {
       customerId,
       activeRiderId,
       eventType: input.eventType,
+      wkOrderId,
+      trustedSecureMerchantReturn: input.trustedSecureMerchantReturn === true,
       db,
     });
 
@@ -241,6 +304,8 @@ export class CustodyEventService {
     customerId: string | null;
     activeRiderId: string | null;
     eventType: CustodyEventType;
+    wkOrderId?: number | null;
+    trustedSecureMerchantReturn?: boolean;
     readOnly?: boolean;
     db?: Prisma.TransactionClient | PrismaService;
   }) {
@@ -265,12 +330,15 @@ export class CustodyEventService {
         CustodyEventType.RIDER_RECEIVED,
         CustodyEventType.IN_TRANSIT,
         CustodyEventType.CUSTOMER_RECEIVED,
-        CustodyEventType.RETURN_RECEIVED,
+        // Stage 6: RETURN_RECEIVED is merchant-authoritative via secure return handoff.
+        // Riders must not self-assert merchant receipt.
       ];
       if (!allowed.includes(input.eventType)) {
-        throw new ForbiddenException(
-          'Rider cannot record this custody event type',
-        );
+        throw new ForbiddenException({
+          code: 'RETURN_RECEIVED_RIDER_DENIED',
+          message:
+            'Rider cannot record RETURN_RECEIVED; merchant return handoff is required',
+        });
       }
       return;
     }
@@ -295,9 +363,21 @@ export class CustodyEventService {
           const allowed: CustodyEventType[] = [
             CustodyEventType.GOODS_PREPARED,
             CustodyEventType.MERCHANT_RELEASED,
-            CustodyEventType.RETURN_RECEIVED,
           ];
-          if (!allowed.includes(input.eventType)) {
+          if (input.eventType === CustodyEventType.RETURN_RECEIVED) {
+            // Marketplace WkOrder: secure return handoff is required.
+            // Legacy/non-marketplace (no wkOrderId) may still record directly.
+            if (
+              input.wkOrderId != null &&
+              !input.trustedSecureMerchantReturn
+            ) {
+              throw new ForbiddenException({
+                code: 'RETURN_RECEIVED_REQUIRES_HANDOFF',
+                message:
+                  'Marketplace RETURN_RECEIVED requires secured merchant return handoff',
+              });
+            }
+          } else if (!allowed.includes(input.eventType)) {
             throw new ForbiddenException(
               'Merchant cannot record this custody event type',
             );

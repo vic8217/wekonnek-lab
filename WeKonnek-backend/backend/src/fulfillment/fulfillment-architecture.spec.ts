@@ -88,6 +88,16 @@ describe('Stage 0A authorization matrix', () => {
       ),
     ).toThrow(ForbiddenException);
 
+    // Stage 6: rider cannot self-confirm merchant return receipt
+    expect(() =>
+      assertOperationAllowed(
+        { id: 'r1', type: 'RIDER' },
+        'transition',
+        { activeRiderId: 'r1' },
+        'returned',
+      ),
+    ).toThrow(ForbiddenException);
+
     expect(() =>
       assertOperationAllowed(
         { id: 'r1', type: 'RIDER' },

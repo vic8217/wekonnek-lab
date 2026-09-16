@@ -186,9 +186,19 @@ export class AgreementsController {
       correlationId?: string;
     },
   ) {
+    // Explicit construction only — never spread body (blocks internal-authority injection).
     return this.custody.record({
       actorUserId: req.user.id,
-      ...body,
+      eventType: body.eventType,
+      wkOrderId: body.wkOrderId,
+      fulfillmentId: body.fulfillmentId,
+      agreementId: body.agreementId,
+      fromPartyRole: body.fromPartyRole,
+      toPartyRole: body.toPartyRole,
+      fromUserId: body.fromUserId,
+      toUserId: body.toUserId,
+      evidenceIds: body.evidenceIds,
+      correlationId: body.correlationId,
     });
   }
 }

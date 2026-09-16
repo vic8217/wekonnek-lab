@@ -154,6 +154,23 @@ export class FulfillmentTransitionService {
       target,
     );
 
+    // Stage 6: admin/system bypass of secure handoff terminal states requires audit fields.
+    if (
+      (target === 'returned' || target === 'delivered') &&
+      (input.actor.type === 'SYSTEM_ADMIN' || input.actor.type === 'SYSTEM') &&
+      from !== target
+    ) {
+      const reason = String(input.reason ?? '').trim();
+      const correlationId = String(input.correlationId ?? '').trim();
+      if (!reason || !correlationId) {
+        throw new BadRequestException({
+          code: 'SECURE_HANDOFF_BYPASS_AUDIT_REQUIRED',
+          message:
+            'Admin/system bypass of secure handoff requires reason and correlationId',
+        });
+      }
+    }
+
     if (
       input.expectedVersion != null &&
       input.expectedVersion !== fulfillment.assignmentVersion

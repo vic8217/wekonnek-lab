@@ -58,6 +58,14 @@ describe('Stage 5A delivery handoff architecture', () => {
         'delivery_failed',
       ),
     ).not.toThrow();
+    expect(() =>
+      assertOperationAllowed(
+        { id: 'r1', type: 'RIDER' },
+        'transition',
+        { activeRiderId: 'r1' },
+        'returned',
+      ),
+    ).toThrow(ForbiddenException);
     expect(FULFILLMENT_TRANSITIONS.in_transit).toEqual([
       'delivered',
       'delivery_failed',

@@ -66,6 +66,8 @@ import { PickupHandoffModule } from './pickup-handoff/pickup-handoff.module';
 import { RiderAdvanceModule } from './rider-advance/rider-advance.module';
 import { DeliveryHandoffModule } from './delivery-handoff/delivery-handoff.module';
 import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-advance-settlement.module';
+import { ReturnHandoffModule } from './return-handoff/return-handoff.module';
+import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
 
 @Module({
   imports: [
@@ -83,6 +85,8 @@ import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-a
     RiderAdvanceModule,
     DeliveryHandoffModule,
     RiderAdvanceSettlementModule,
+    ReturnHandoffModule,
+    OrderOperationalStateModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

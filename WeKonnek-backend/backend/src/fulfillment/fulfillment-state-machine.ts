@@ -182,12 +182,19 @@ export const TRANSITION_CATALOG: readonly TransitionDefinition[] = [
   {
     from: 'returning',
     to: 'returned',
-    authorizedActorTypes: ['RIDER', 'SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    // Stage 6: RIDER removed — merchant return handoff uses INTERNAL_SERVICE.
+    authorizedActorTypes: ['SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
     preconditions: [
-      'Fulfillment truth only — does not invent merchant receipt custody',
+      'Merchant-authenticated return handoff (secured WkOrder path)',
+      'Does not invent merchant receipt without RETURN_RECEIVED custody',
     ],
-    sideEffects: ['Update status', 'Emit domain event'],
+    sideEffects: [
+      'Update status',
+      'Emit domain event',
+      'Does NOT erase Rider Advance principal / settlements',
+      'Does NOT mutate merchant payment ownership',
+    ],
     idempotency: 'Already returned → no-op success',
-    failure: 'Forbidden / BadRequest',
+    failure: 'Forbidden for rider self-confirm; BadRequest if illegal',
   },
 ];

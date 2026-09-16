@@ -178,6 +178,7 @@ model Merchant {
   paymentMethods           MerchantPaymentMethod[]
   pickupHandoffTokens      PickupHandoffToken[]
   riderAdvances            RiderAdvance[]
+  returnHandoffTokens      MerchantReturnHandoffToken[]
 
   @@index([userId])
   @@index([categoryId])
@@ -983,6 +984,7 @@ model WkOrder {
   riderAdvances         RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
   riderAdvanceSettlements RiderAdvanceSettlement[]
+  returnHandoffTokens   MerchantReturnHandoffToken[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1304,6 +1306,7 @@ model User {
   deliveryHandoffTokensAsCustomer CustomerDeliveryHandoffToken[] @relation("DeliveryHandoffCustomer")
   settlementsAsCustomer      RiderAdvanceSettlement[]   @relation("SettlementCustomer")
   settlementsAsCreditor      RiderAdvanceSettlement[]   @relation("SettlementCreditor")
+  returnHandoffTokensAsRider MerchantReturnHandoffToken[] @relation("ReturnHandoffRider")
 
   @@map("users")
 }
@@ -2824,6 +2827,7 @@ model OrderFulfillment {
   pickupHandoffTokens PickupHandoffToken[]
   riderAdvances       RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
+  returnHandoffTokens MerchantReturnHandoffToken[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3495,4 +3499,63 @@ model CustomerDeliveryHandoffToken {
   @@index([status, expiresAt])
   @@index([riderAssignmentId, assignmentVersion])
   @@map("customer_delivery_handoff_tokens")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 6 — Secure Merchant Return Handoff
+// ═══════════════════════════════════════════════════════
+
+enum MerchantReturnHandoffPurpose {
+  MERCHANT_RETURN_HANDOFF
+}
+
+enum MerchantReturnHandoffTokenStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+/// Short-lived, single-use, assignment-bound merchant return capability.
+/// Raw QR secret and OTP are never persisted — only hashes.
+/// After Stage 6, marketplace `returned` means merchant-confirmed receipt.
+model MerchantReturnHandoffToken {
+  id                        String                           @id @default(uuid()) @db.Uuid
+  tokenHash                 String                           @unique @map("token_hash") @db.VarChar(64)
+  otpHash                   String                           @unique @map("otp_hash") @db.VarChar(64)
+  purpose                   MerchantReturnHandoffPurpose     @default(MERCHANT_RETURN_HANDOFF)
+  status                    MerchantReturnHandoffTokenStatus @default(ACTIVE)
+  wkOrderId                 Int                              @map("wk_order_id")
+  fulfillmentId             String                           @map("fulfillment_id") @db.Uuid
+  merchantId                Int                              @map("merchant_id")
+  returnRiderId             String                           @map("return_rider_id") @db.Uuid
+  riderAssignmentId         String                           @map("rider_assignment_id") @db.Uuid
+  assignmentVersion         Int                              @map("assignment_version")
+  expiresAt                 DateTime                         @map("expires_at") @db.Timestamptz
+  consumedAt                DateTime?                        @map("consumed_at") @db.Timestamptz
+  consumedByUserId          String?                          @map("consumed_by_user_id") @db.Uuid
+  merchantConfirmedAt       DateTime?                        @map("merchant_confirmed_at") @db.Timestamptz
+  merchantConfirmedByUserId String?                          @map("merchant_confirmed_by_user_id") @db.Uuid
+  custodyEventId            String?                          @unique @map("custody_event_id") @db.Uuid
+  otpFailedAttempts         Int                              @default(0) @map("otp_failed_attempts")
+  otpLockedUntil            DateTime?                        @map("otp_locked_until") @db.Timestamptz
+  confirmIdempotencyKey     String?                          @unique @map("confirm_idempotency_key") @db.VarChar(64)
+  correlationId             String?                          @map("correlation_id") @db.VarChar(64)
+  createdAt                 DateTime                         @default(now()) @map("created_at") @db.Timestamptz
+  createdByUserId           String                           @map("created_by_user_id") @db.Uuid
+  revokedAt                 DateTime?                        @map("revoked_at") @db.Timestamptz
+  revokeReason              String?                          @map("revoke_reason") @db.VarChar(255)
+
+  wkOrder     WkOrder          @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  merchant    Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  returnRider User             @relation("ReturnHandoffRider", fields: [returnRiderId], references: [id], onDelete: Restrict)
+
+  @@index([fulfillmentId, status])
+  @@index([wkOrderId, status])
+  @@index([merchantId, status])
+  @@index([returnRiderId, status])
+  @@index([status, expiresAt])
+  @@index([riderAssignmentId, assignmentVersion])
+  @@map("merchant_return_handoff_tokens")
 }

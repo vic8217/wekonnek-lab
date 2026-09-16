@@ -12,7 +12,10 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-const ALLOWED_TEST_DATABASES = new Set(['wekonnek_stage5b_test']);
+const ALLOWED_TEST_DATABASES = new Set([
+  'wekonnek_stage5b_test',
+  'wekonnek_stage6_test',
+]);
 
 /**
  * Purge all settlement ledger rows in the disposable Stage 5B acceptance DB.
@@ -27,7 +30,7 @@ export async function truncateSettlementsForStage5bTest(
   const database = identity[0]?.database;
   if (!database || !ALLOWED_TEST_DATABASES.has(database)) {
     throw new Error(
-      `truncateSettlementsForStage5bTest refused: expected wekonnek_stage5b_test, got ${database}`,
+      `truncateSettlementsForStage5bTest refused: expected wekonnek_stage5b_test|wekonnek_stage6_test, got ${database}`,
     );
   }
   await prisma.$executeRawUnsafe(
