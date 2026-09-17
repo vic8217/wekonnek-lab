@@ -72,6 +72,7 @@ import { OrderOperationalStateModule } from './order-operational-state/order-ope
 import { DeliveryFailureModule } from './delivery-failure/delivery-failure.module';
 import { ReturnFinancialModule } from './return-financial/return-financial.module';
 import { RedeliveryModule } from './redelivery/redelivery.module';
+import { OperationsRecoveryModule } from './operations-recovery/operations-recovery.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { RedeliveryModule } from './redelivery/redelivery.module';
     DeliveryFailureModule,
     ReturnFinancialModule,
     RedeliveryModule,
+    OperationsRecoveryModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

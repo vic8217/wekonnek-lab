@@ -1,15 +1,15 @@
 /**
- * Prove raw SQL invariants on wekonnek_stage10_regression_test that ordinary
+ * Prove raw SQL invariants on wekonnek_stage11_regression_test that ordinary
  * Prisma schema push may omit (partial unique indexes, check constraints,
- * settlement / Stage 8–10 append-only triggers).
+ * settlement / Stage 8–11 append-only triggers).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from './test-database-guard';
 
 process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
-const ENV_OK = loadStageTestEnv('.env.stage10.regression.test');
+const ENV_OK = loadStageTestEnv('.env.stage11.regression.test');
 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,7 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = ENV_OK ? describe : describe.skip;
 jest.setTimeout(60_000);
 
-describeIf('Stage 10 current-schema raw SQL invariants', () => {
+describeIf('Stage 11 current-schema raw SQL invariants', () => {
   const prisma = new PrismaService();
 
   beforeAll(async () => {
@@ -25,7 +25,7 @@ describeIf('Stage 10 current-schema raw SQL invariants', () => {
     const id = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(id[0]?.database).toBe(STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    expect(id[0]?.database).toBe(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -144,6 +144,27 @@ describeIf('Stage 10 current-schema raw SQL invariants', () => {
     ).toBe(true);
     expect(
       await checkExists('redelivery_authorizations_address_mode_check'),
+    ).toBe(true);
+  });
+
+  it('STAGE 11: one active recovery + append-only + terminal immutable', async () => {
+    expect(
+      await indexExists('operations_recoveries_one_active_per_fulfillment'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage11_operations_recovery_append_only_del_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage11_operations_recovery_terminal_immutable_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage11_ore_events_append_only_del_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage11_ore_evidence_append_only_del_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage11_ore_verifications_append_only_del_trg'),
     ).toBe(true);
   });
 });

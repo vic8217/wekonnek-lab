@@ -8,6 +8,7 @@ import {
   STAGE9_ACCEPTANCE_DATABASE,
   STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE9_FORBIDDEN_DATABASES,
   isCurrentSchemaRegressionMode,
 } from '../test-support/test-database-guard';
@@ -57,9 +58,10 @@ const ALLOWED_DB_USERS = new Set([
   'wekonnek_stage9_test',
   'wekonnek_stage9_regression_test',
   'wekonnek_stage10_regression_test',
+  'wekonnek_stage11_regression_test',
 ]);
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE
   : STAGE9_ACCEPTANCE_DATABASE;
 
 function errCode(e: unknown): string | undefined {
@@ -336,91 +338,13 @@ describeIf(`Stage 9 Return Financial PostgreSQL (${EXPECTED_DB})`, () => {
     }
 
     cleanup = async () => {
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE return_financial_settlements DISABLE TRIGGER USER;
-        ALTER TABLE rider_advance_collection_restrictions DISABLE TRIGGER USER;
-        ALTER TABLE return_financial_determinations DISABLE TRIGGER USER;
-        ALTER TABLE rider_advance_settlements DISABLE TRIGGER USER;
-      `);
-      try {
-        await prisma.returnFinancialSettlement.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.returnFinancialObligation.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderAdvanceCollectionRestriction.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.returnFinancialDetermination.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.returnFinancialTermsAcceptance.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderAdvanceSettlement.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderAdvance.deleteMany({ where: { wkOrderId: order.id } });
-        await prisma.custodyEvent.deleteMany({ where: { wkOrderId: order.id } });
-        const agreements = await prisma.agreement.findMany({
-          where: { wkOrderId: order.id },
-          select: { id: true },
-        });
-        for (const ag of agreements) {
-          await prisma.agreement.update({
-            where: { id: ag.id },
-            data: { currentVersionId: null },
-          });
-          await prisma.agreementAcceptance.deleteMany({
-            where: { agreementVersion: { agreementId: ag.id } },
-          });
-          await prisma.agreementEvidence.deleteMany({
-            where: { agreementId: ag.id },
-          });
-          await prisma.agreementParty.deleteMany({
-            where: { agreementId: ag.id },
-          });
-          await prisma.agreementVersion.deleteMany({
-            where: { agreementId: ag.id },
-          });
-        }
-        await prisma.agreement.deleteMany({ where: { wkOrderId: order.id } });
-        await prisma.orderDomainEvent.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderAssignment.deleteMany({
-          where: { fulfillmentId: fulfillment.id },
-        });
-        await prisma.orderFulfillment.delete({ where: { id: fulfillment.id } });
-        await prisma.orderItem.deleteMany({ where: { orderId: order.id } });
-        await prisma.wkOrder.delete({ where: { id: order.id } });
-        await prisma.merchantPaymentMethod.deleteMany({
-          where: { merchantId: merchant.id },
-        });
-        await prisma.merchant.delete({ where: { id: merchant.id } });
-        await prisma.user.deleteMany({
-          where: {
-            id: {
-              in: [
-                customer.id,
-                rider.id,
-                returnRider.id,
-                creditorRider.id,
-                admin.id,
-                merchantUser.id,
-              ].filter((v, i, a) => a.indexOf(v) === i),
-            },
-          },
-        });
-      } finally {
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE return_financial_settlements ENABLE TRIGGER USER;
-          ALTER TABLE rider_advance_collection_restrictions ENABLE TRIGGER USER;
-          ALTER TABLE return_financial_determinations ENABLE TRIGGER USER;
-          ALTER TABLE rider_advance_settlements ENABLE TRIGGER USER;
-        `);
-      }
+      // Stage 9 financial history is append-only / terminal-immutable. Do not
+      // DISABLE TRIGGER or DELETE protected rows. Isolation: unique UUID
+      // fixtures; suite repeats use a fresh disposable Stage 11 current-schema DB.
+      void order;
+      void fulfillment;
+      void merchant;
+      return;
     };
 
     return {

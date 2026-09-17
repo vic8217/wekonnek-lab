@@ -26,6 +26,7 @@ import { AuthActorService } from '../fulfillment/auth-actor.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { withSerializableRetry as runSerializableRetry } from '../prisma/serializable-retry';
 import {
   evaluateRedeliveryAttemptCollectibility,
   MAX_DELIVERY_ATTEMPTS,
@@ -61,24 +62,7 @@ export class RedeliveryService {
     run: () => Promise<T>,
     attempts = 5,
   ): Promise<T> {
-    let last: unknown;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        return await run();
-      } catch (err) {
-        last = err;
-        const retryable =
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          (err.code === 'P2034' ||
-            err.code === 'P2002' ||
-            (err.code === 'P2010' &&
-              /could not serialize|40001|40P01|concurrent update|deadlock/i.test(
-                err.message,
-              )));
-        if (!retryable || i === attempts - 1) throw err;
-      }
-    }
-    throw last;
+    return runSerializableRetry(run, attempts);
   }
 
   /**
@@ -838,6 +822,32 @@ export class RedeliveryService {
       throw new ForbiddenException({
         code: 'INVALID_REDELIVERY_STATE',
         message: 'Only CONFIRMED redelivery may be activated',
+      });
+    }
+
+    // Stage 10↔11 mutual exclusivity: no activation while Stage 11 recovery
+    // is active (OPEN / INVESTIGATING / DISPOSITION_SELECTED). Locks under
+    // fulfillment FOR UPDATE + Serializable (caller already locked fulfillment).
+    await tx.$queryRaw`
+      SELECT id FROM "operations_recoveries"
+      WHERE fulfillment_id = ${input.fulfillment.id}::uuid
+        AND status IN ('OPEN', 'INVESTIGATING', 'DISPOSITION_SELECTED')
+      FOR UPDATE
+    `;
+    const activeRecovery = await tx.operationsRecovery.findFirst({
+      where: {
+        fulfillmentId: input.fulfillment.id,
+        status: {
+          in: ['OPEN', 'INVESTIGATING', 'DISPOSITION_SELECTED'],
+        },
+      },
+      select: { id: true, status: true },
+    });
+    if (activeRecovery) {
+      throw new ForbiddenException({
+        code: 'OPERATIONS_RECOVERY_ACTIVE',
+        message:
+          'Active Stage 11 operations recovery blocks Stage 10 redelivery activation',
       });
     }
 

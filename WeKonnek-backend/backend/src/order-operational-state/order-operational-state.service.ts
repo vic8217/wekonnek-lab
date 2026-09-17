@@ -19,6 +19,10 @@ import {
   UserRole,
   DeliveryAttemptOutcome,
   RedeliveryAuthorizationStatus,
+  OperationsRecoveryStatus,
+  OperationsRecoveryDisposition,
+  OperationsRecoveryTrigger,
+  OperationsRecoveryEventType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_DELIVERY_ATTEMPTS } from '../redelivery/redelivery.policy';
@@ -276,7 +280,33 @@ export class OrderOperationalStateService {
           opCase.status === OperationalCaseStatus.OPEN &&
           opCase.currentDisposition == null
         ) {
-          flags.push('DELIVERY_DISPOSITION_REQUIRED');
+          // Stage 11 may own recovery while Stage 8 remains OPEN historically.
+          // Avoid duplicate DELIVERY_DISPOSITION_REQUIRED when Stage 11 is active
+          // or CLOSED with NO_FURTHER_FULFILLMENT (do not hide other Stage 8 facts).
+          const stage11Owns = await this.prisma.operationsRecovery.findFirst({
+            where: {
+              fulfillmentId: fulfillment.id,
+              OR: [
+                {
+                  status: {
+                    in: [
+                      OperationsRecoveryStatus.OPEN,
+                      OperationsRecoveryStatus.INVESTIGATING,
+                      OperationsRecoveryStatus.DISPOSITION_SELECTED,
+                    ],
+                  },
+                },
+                {
+                  status: OperationsRecoveryStatus.CLOSED,
+                  currentDisposition:
+                    OperationsRecoveryDisposition.NO_FURTHER_FULFILLMENT,
+                },
+              ],
+            },
+          });
+          if (!stage11Owns) {
+            flags.push('DELIVERY_DISPOSITION_REQUIRED');
+          }
         }
         if (
           opCase.currentDisposition ===
@@ -373,6 +403,94 @@ export class OrderOperationalStateService {
       if (finalizedDet) {
         flags.push('RETURN_FINANCIAL_RESOLUTION_ACTIVE');
       }
+
+      // Stage 11 operations recovery flags
+      const activeRecovery = await this.prisma.operationsRecovery.findFirst({
+        where: {
+          fulfillmentId: fulfillment.id,
+          status: {
+            in: [
+              OperationsRecoveryStatus.OPEN,
+              OperationsRecoveryStatus.INVESTIGATING,
+              OperationsRecoveryStatus.DISPOSITION_SELECTED,
+            ],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      const latestRecovery = await this.prisma.operationsRecovery.findFirst({
+        where: { fulfillmentId: fulfillment.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (activeRecovery) {
+        flags.push('OPERATIONS_RECOVERY_OPEN');
+        if (
+          activeRecovery.currentDisposition ===
+            OperationsRecoveryDisposition.CUSTODY_INVESTIGATION ||
+          activeRecovery.openingTriggerCode ===
+            OperationsRecoveryTrigger.CUSTODY_UNCONFIRMED
+        ) {
+          flags.push('CUSTODY_INVESTIGATION_REQUIRED');
+        }
+        if (
+          activeRecovery.openingTriggerCode ===
+            OperationsRecoveryTrigger.MERCHANT_RETURN_REFUSED ||
+          activeRecovery.currentDisposition ===
+            OperationsRecoveryDisposition.RETURN_REQUIRED
+        ) {
+          flags.push('MERCHANT_RETURN_REFUSED');
+        }
+        if (
+          activeRecovery.openingTriggerCode ===
+          OperationsRecoveryTrigger.GOODS_REPORTED_LOST
+        ) {
+          flags.push('GOODS_LOSS_REPORTED');
+        }
+        if (
+          activeRecovery.openingTriggerCode ===
+          OperationsRecoveryTrigger.GOODS_REPORTED_DAMAGED
+        ) {
+          flags.push('GOODS_DAMAGE_REPORTED');
+        }
+        if (
+          activeRecovery.currentDisposition ===
+          OperationsRecoveryDisposition.FINANCIAL_REVIEW_REQUIRED
+        ) {
+          flags.push('FINANCIAL_REVIEW_REQUIRED');
+        }
+      }
+      if (
+        latestRecovery?.status === OperationsRecoveryStatus.CLOSED &&
+        latestRecovery.currentDisposition ===
+          OperationsRecoveryDisposition.NO_FURTHER_FULFILLMENT
+      ) {
+        flags.push('NO_FURTHER_FULFILLMENT');
+      }
+      if (
+        latestRecovery?.status === OperationsRecoveryStatus.CLOSED &&
+        latestRecovery.currentDisposition ===
+          OperationsRecoveryDisposition.FINANCIAL_REVIEW_REQUIRED &&
+        !flags.includes('FINANCIAL_REVIEW_REQUIRED')
+      ) {
+        flags.push('FINANCIAL_REVIEW_REQUIRED');
+      }
+      if (
+        physicalStatus === FulfillmentStatus.returned &&
+        !hasReturnReceived
+      ) {
+        flags.push('HOLLOW_RETURNED_WITHOUT_MERCHANT_CUSTODY');
+      }
+      if (
+        !fulfillment.pendingCustodyIncomingRiderId &&
+        (await this.prisma.operationsRecoveryEvent.count({
+          where: {
+            eventType: OperationsRecoveryEventType.PENDING_CUSTODY_CLEARED,
+            operationsRecovery: { fulfillmentId: fulfillment.id },
+          },
+        })) > 0
+      ) {
+        flags.push('PENDING_CUSTODY_TRANSFER_CLEARED');
+      }
     }
 
     const integrityBlocking = flags.some((f) =>
@@ -383,6 +501,9 @@ export class OrderOperationalStateService {
         'RA_DUE_WITHOUT_PRINCIPAL',
         'ASSIGNMENT_CUSTODY_MISMATCH',
         'DELIVERY_FAILED_WITHOUT_ATTEMPT',
+        'HOLLOW_RETURNED_WITHOUT_MERCHANT_CUSTODY',
+        'OPERATIONS_RECOVERY_OPEN',
+        'CUSTODY_INVESTIGATION_REQUIRED',
       ].includes(f),
     );
 
@@ -510,6 +631,11 @@ export class OrderOperationalStateService {
           'RETURN_MERCHANT_CONFIRMATION_PENDING',
           'OPERATIONS_RECOVERY_REQUIRED',
           'DELIVERY_FAILED_WITHOUT_ATTEMPT',
+          'OPERATIONS_RECOVERY_OPEN',
+          'CUSTODY_INVESTIGATION_REQUIRED',
+          'NO_FURTHER_FULFILLMENT',
+          'HOLLOW_RETURNED_WITHOUT_MERCHANT_CUSTODY',
+          'PENDING_CUSTODY_TRANSFER_CLEARED',
         ].includes(f),
       ),
       custody: full.custody,

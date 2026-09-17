@@ -183,6 +183,7 @@ model Merchant {
   returnFinancialObligations      ReturnFinancialObligation[]
   returnFinancialObligationsAsDebtor ReturnFinancialObligation[] @relation("ReturnFinancialObligationDebtorMerchant")
   redeliveryAuthorizations RedeliveryAuthorization[]
+  operationsRecoveries     OperationsRecovery[]
 
   @@index([userId])
   @@index([categoryId])
@@ -998,6 +999,7 @@ model WkOrder {
   returnFinancialTermsAcceptances ReturnFinancialTermsAcceptance[]
   riderAdvanceCollectionRestrictions RiderAdvanceCollectionRestriction[]
   redeliveryAuthorizations RedeliveryAuthorization[]
+  operationsRecoveries     OperationsRecovery[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1335,6 +1337,8 @@ model User {
   returnFinancialSettlementsRejected ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementRejectedBy")
   redeliveryAuthorizationsAsCustomer RedeliveryAuthorization[] @relation("RedeliveryAuthorizationCustomer")
   redeliveryAuthorizationsRequestedBy RedeliveryAuthorization[] @relation("RedeliveryAuthorizationRequestedBy")
+  operationsRecoveriesAsCustomer OperationsRecovery[] @relation("OperationsRecoveryCustomer")
+  operationsRecoveriesOpenedBy   OperationsRecovery[] @relation("OperationsRecoveryOpenedBy")
 
   @@map("users")
 }
@@ -2870,6 +2874,7 @@ model OrderFulfillment {
   operationalCases    OperationalCase[]
   returnFinancialDeterminations ReturnFinancialDetermination[]
   redeliveryAuthorizations RedeliveryAuthorization[]
+  operationsRecoveries OperationsRecovery[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3779,6 +3784,7 @@ model DeliveryAttempt {
   evidences              DeliveryAttemptEvidence[]
   operationalCase        OperationalCase?
   returnFinancialDeterminations ReturnFinancialDetermination[]
+  operationsRecoveriesAsSource OperationsRecovery[] @relation("OperationsRecoverySourceAttempt")
 
   @@unique([fulfillmentId, attemptNumber])
   @@unique([reportedByActorId, idempotencyKey])
@@ -3834,6 +3840,7 @@ model OperationalCase {
   events          OperationalCaseEvent[]
   returnFinancialDeterminations ReturnFinancialDetermination[]
   redeliveryAuthorizations RedeliveryAuthorization[]
+  operationsRecoveriesAsSource OperationsRecovery[] @relation("OperationsRecoverySourceCase")
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, caseType, status])
@@ -4020,6 +4027,7 @@ model ReturnFinancialDetermination {
   customerTermsVersion ReturnFinancialTermsVersion? @relation("DeterminationCustomerTerms", fields: [customerTermsVersionId], references: [id], onDelete: Restrict)
   obligations         ReturnFinancialObligation[]
   collectionRestrictions RiderAdvanceCollectionRestriction[]
+  operationsRecoveriesAsSource OperationsRecovery[] @relation("OperationsRecoveryStage9Determination")
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId])
@@ -4186,10 +4194,206 @@ model RedeliveryAuthorization {
   merchant            Merchant          @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   priorOperationalCase OperationalCase? @relation(fields: [priorOperationalCaseId], references: [id], onDelete: SetNull)
   requestedByUser     User              @relation("RedeliveryAuthorizationRequestedBy", fields: [requestedByActorId], references: [id], onDelete: Restrict)
+  operationsRecoveriesAsSource OperationsRecovery[] @relation("OperationsRecoverySourceRedelivery")
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, status])
   @@index([customerId, requestIdempotencyKey])
   @@index([customerId, confirmIdempotencyKey])
   @@map("redelivery_authorizations")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 11 — Operations Recovery
+// ═══════════════════════════════════════════════════════
+
+enum OperationsRecoveryStatus {
+  OPEN
+  INVESTIGATING
+  DISPOSITION_SELECTED
+  CLOSED
+  CANCELLED
+}
+
+enum OperationsRecoveryTrigger {
+  DELIVERY_ATTEMPTS_EXHAUSTED
+  MERCHANT_RETURN_REFUSED
+  RETURN_BLOCKED
+  CUSTODY_TRANSFER_ABANDONED
+  CUSTODY_UNCONFIRMED
+  RIDER_UNAVAILABLE
+  GOODS_REPORTED_LOST
+  GOODS_REPORTED_DAMAGED
+  ADMIN_RECOVERY_REQUIRED
+  OTHER
+}
+
+enum OperationsRecoveryDisposition {
+  RETURN_REQUIRED
+  CUSTODY_INVESTIGATION
+  CONTACT_CUSTOMER
+  CONTACT_MERCHANT
+  CONTACT_RIDER
+  HOLD_FOR_REVIEW
+  NO_FURTHER_FULFILLMENT
+  FINANCIAL_REVIEW_REQUIRED
+  CLEAR_PENDING_CUSTODY_TRANSFER
+}
+
+enum OperationsRecoveryEventType {
+  CASE_OPENED
+  INVESTIGATION_STARTED
+  DISPOSITION_SELECTED
+  EVIDENCE_ADDED
+  VERIFICATION_RECORDED
+  PENDING_CUSTODY_CLEARED
+  CLOSED
+  CANCELLED
+  NOTE_ADDED
+}
+
+enum OperationsRecoveryEvidenceKind {
+  NOTE
+  PHOTO_REFERENCE
+  DOCUMENT_REFERENCE
+  STATEMENT
+  CONTACT_ATTEMPT
+  CONTACT_RESULT
+  INVESTIGATION_FINDING
+  OTHER
+}
+
+enum OperationsRecoveryVerificationCode {
+  GOODS_LOST_VERIFIED
+  GOODS_DAMAGED_VERIFIED
+  CUSTODY_UNCONFIRMED_CONCLUDED
+  MERCHANT_RETURN_REFUSED_VERIFIED
+  RIDER_UNAVAILABLE_VERIFIED
+  ADMIN_OPERATIONAL_CONCLUSION
+  OTHER
+}
+
+model OperationsRecovery {
+  id                                    String                          @id @default(uuid()) @db.Uuid
+  wkOrderId                             Int                             @map("wk_order_id")
+  fulfillmentId                         String                          @map("fulfillment_id") @db.Uuid
+  customerId                            String                          @map("customer_id") @db.Uuid
+  merchantId                            Int                             @map("merchant_id")
+  openingTriggerCode                    OperationsRecoveryTrigger       @map("opening_trigger_code")
+  openedByActorType                     OrderDomainActorType            @map("opened_by_actor_type")
+  openedByActorId                       String                          @map("opened_by_actor_id") @db.Uuid
+  correlationId                         String                          @map("correlation_id") @db.VarChar(64)
+  physicalCustodianRiderIdAtOpen        String?                         @map("physical_custodian_rider_id_at_open") @db.Uuid
+  activeRiderIdAtOpen                   String?                         @map("active_rider_id_at_open") @db.Uuid
+  pendingCustodyIncomingRiderIdAtOpen   String?                         @map("pending_custody_incoming_rider_id_at_open") @db.Uuid
+  attemptBudgetExhausted                Boolean                         @default(false) @map("attempt_budget_exhausted")
+  failedAttemptCountAtOpen              Int                             @default(0) @map("failed_attempt_count_at_open")
+  sourceOperationalCaseId               String?                         @map("source_operational_case_id") @db.Uuid
+  sourceDeliveryAttemptId               String?                         @map("source_delivery_attempt_id") @db.Uuid
+  sourceRedeliveryAuthorizationId       String?                         @map("source_redelivery_authorization_id") @db.Uuid
+  stage9DeterminationId                 String?                         @map("stage9_determination_id") @db.Uuid
+  status                                OperationsRecoveryStatus        @default(OPEN)
+  currentDisposition                    OperationsRecoveryDisposition?  @map("current_disposition")
+  notes                                 String?                         @db.VarChar(2000)
+  closedAt                              DateTime?                       @map("closed_at") @db.Timestamptz
+  closedByActorType                     OrderDomainActorType?           @map("closed_by_actor_type")
+  closedByActorId                       String?                         @map("closed_by_actor_id") @db.Uuid
+  closeReason                           String?                         @map("close_reason") @db.VarChar(2000)
+  cancelledAt                           DateTime?                       @map("cancelled_at") @db.Timestamptz
+  cancelledByActorType                  OrderDomainActorType?           @map("cancelled_by_actor_type")
+  cancelledByActorId                    String?                         @map("cancelled_by_actor_id") @db.Uuid
+  cancelReason                          String?                         @map("cancel_reason") @db.VarChar(2000)
+  openIdempotencyKey                    String?                         @map("open_idempotency_key") @db.VarChar(64)
+  openPayloadHash                       String?                         @map("open_payload_hash") @db.VarChar(64)
+  closeIdempotencyKey                   String?                         @map("close_idempotency_key") @db.VarChar(64)
+  closePayloadHash                      String?                         @map("close_payload_hash") @db.VarChar(64)
+  clearPendingIdempotencyKey            String?                         @map("clear_pending_idempotency_key") @db.VarChar(64)
+  clearPendingPayloadHash               String?                         @map("clear_pending_payload_hash") @db.VarChar(64)
+  dispositionIdempotencyKey             String?                         @map("disposition_idempotency_key") @db.VarChar(64)
+  dispositionPayloadHash                String?                         @map("disposition_payload_hash") @db.VarChar(64)
+  cancelIdempotencyKey                  String?                         @map("cancel_idempotency_key") @db.VarChar(64)
+  cancelPayloadHash                     String?                         @map("cancel_payload_hash") @db.VarChar(64)
+  createdAt                             DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                             DateTime                        @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder               WkOrder                         @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment           OrderFulfillment                @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  customer              User                            @relation("OperationsRecoveryCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  merchant              Merchant                        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  openedByUser          User                            @relation("OperationsRecoveryOpenedBy", fields: [openedByActorId], references: [id], onDelete: Restrict)
+  sourceOperationalCase OperationalCase?                @relation("OperationsRecoverySourceCase", fields: [sourceOperationalCaseId], references: [id], onDelete: SetNull)
+  sourceDeliveryAttempt DeliveryAttempt?                @relation("OperationsRecoverySourceAttempt", fields: [sourceDeliveryAttemptId], references: [id], onDelete: SetNull)
+  sourceRedeliveryAuthorization RedeliveryAuthorization? @relation("OperationsRecoverySourceRedelivery", fields: [sourceRedeliveryAuthorizationId], references: [id], onDelete: SetNull)
+  stage9Determination   ReturnFinancialDetermination?   @relation("OperationsRecoveryStage9Determination", fields: [stage9DeterminationId], references: [id], onDelete: SetNull)
+  events                OperationsRecoveryEvent[]
+  evidence              OperationsRecoveryEvidence[]
+  verifications         OperationsRecoveryVerification[]
+
+  @@index([wkOrderId, status])
+  @@index([fulfillmentId, status])
+  @@map("operations_recoveries")
+}
+
+model OperationsRecoveryEvent {
+  id                    String                        @id @default(uuid()) @db.Uuid
+  operationsRecoveryId  String                        @map("operations_recovery_id") @db.Uuid
+  eventType             OperationsRecoveryEventType   @map("event_type")
+  fromStatus            OperationsRecoveryStatus?     @map("from_status")
+  toStatus              OperationsRecoveryStatus?     @map("to_status")
+  disposition           OperationsRecoveryDisposition?
+  actorType             OrderDomainActorType          @map("actor_type")
+  actorId               String                        @map("actor_id") @db.Uuid
+  reason                String?                       @db.VarChar(2000)
+  correlationId         String?                       @map("correlation_id") @db.VarChar(64)
+  metadata              Json?
+  createdAt             DateTime                      @default(now()) @map("created_at") @db.Timestamptz
+
+  operationsRecovery OperationsRecovery @relation(fields: [operationsRecoveryId], references: [id], onDelete: Restrict)
+
+  @@index([operationsRecoveryId, createdAt])
+  @@map("operations_recovery_events")
+}
+
+model OperationsRecoveryEvidence {
+  id                    String                          @id @default(uuid()) @db.Uuid
+  operationsRecoveryId  String                          @map("operations_recovery_id") @db.Uuid
+  evidenceKind          OperationsRecoveryEvidenceKind  @map("evidence_kind")
+  storageReference      String?                         @map("storage_reference") @db.VarChar(1000)
+  contentHash           String?                         @map("content_hash") @db.VarChar(64)
+  contentType           String?                         @map("content_type") @db.VarChar(120)
+  notes                 String?                         @db.VarChar(2000)
+  metadata              Json?
+  supersedesEvidenceId  String?                         @map("supersedes_evidence_id") @db.Uuid
+  submittedByActorType  OrderDomainActorType            @map("submitted_by_actor_type")
+  submittedByActorId    String                          @map("submitted_by_actor_id") @db.Uuid
+  idempotencyKey        String?                         @map("idempotency_key") @db.VarChar(64)
+  payloadHash           String?                         @map("payload_hash") @db.VarChar(64)
+  correlationId         String?                         @map("correlation_id") @db.VarChar(64)
+  createdAt             DateTime                        @default(now()) @map("created_at") @db.Timestamptz
+
+  operationsRecovery OperationsRecovery @relation(fields: [operationsRecoveryId], references: [id], onDelete: Restrict)
+  supersedesEvidence OperationsRecoveryEvidence? @relation("OperationsRecoveryEvidenceSupersede", fields: [supersedesEvidenceId], references: [id], onDelete: SetNull)
+  supersededBy       OperationsRecoveryEvidence[] @relation("OperationsRecoveryEvidenceSupersede")
+
+  @@index([operationsRecoveryId, createdAt])
+  @@map("operations_recovery_evidence")
+}
+
+model OperationsRecoveryVerification {
+  id                    String                              @id @default(uuid()) @db.Uuid
+  operationsRecoveryId  String                              @map("operations_recovery_id") @db.Uuid
+  verificationCode      OperationsRecoveryVerificationCode  @map("verification_code")
+  notes                 String?                             @db.VarChar(2000)
+  metadata              Json?
+  verifiedByActorType   OrderDomainActorType                @map("verified_by_actor_type")
+  verifiedByActorId     String                              @map("verified_by_actor_id") @db.Uuid
+  idempotencyKey        String?                             @map("idempotency_key") @db.VarChar(64)
+  payloadHash           String?                             @map("payload_hash") @db.VarChar(64)
+  correlationId         String?                             @map("correlation_id") @db.VarChar(64)
+  createdAt             DateTime                            @default(now()) @map("created_at") @db.Timestamptz
+
+  operationsRecovery OperationsRecovery @relation(fields: [operationsRecoveryId], references: [id], onDelete: Restrict)
+
+  @@index([operationsRecoveryId, createdAt])
+  @@map("operations_recovery_verifications")
 }

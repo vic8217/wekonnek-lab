@@ -57,6 +57,30 @@ export const STAGE10_ACCEPTANCE_DATABASE = 'wekonnek_stage10_test';
 export const STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE =
   'wekonnek_stage10_regression_test';
 
+export const STAGE11_ACCEPTANCE_DATABASE = 'wekonnek_stage11_test';
+export const STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE =
+  'wekonnek_stage11_regression_test';
+
+/**
+ * Prior-stage DBs Stage 11 suites must never mutate (includes Stage 10 acceptance
+ * and Stage 10 regression, plus earlier historical/contaminated DBs).
+ */
+export const STAGE11_FORBIDDEN_DATABASES = new Set([
+  ...HISTORICAL_ACCEPTANCE_DATABASES,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE8_ACCEPTANCE_DATABASE,
+  STAGE9_ACCEPTANCE_DATABASE,
+  STAGE10_ACCEPTANCE_DATABASE,
+  'wekonnek_stage7_regression_test',
+  'wekonnek_stage8_regression_test',
+  'wekonnek_stage9_regression_test',
+  'wekonnek_stage10_regression_test',
+]);
+
 /**
  * Prior-stage DBs Stage 10 suites must never mutate (includes Stage 9 acceptance
  * and Stage 9 regression, plus earlier historical/contaminated DBs).
@@ -113,6 +137,8 @@ export const DISPOSABLE_CLEANUP_DATABASES = new Set([
   STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE10_ACCEPTANCE_DATABASE,
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_ACCEPTANCE_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 
 export function isCurrentSchemaRegressionMode(): boolean {
@@ -148,7 +174,7 @@ export function assertDisposableCleanupDatabase(database: string): void {
   assertNotHistoricalAcceptanceDatabase(database, 'cleanup');
   if (!DISPOSABLE_CLEANUP_DATABASES.has(database)) {
     throw new Error(
-      `cleanup refused: expected disposable Stage 7/8/9/10 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}), got ${database}`,
+      `cleanup refused: expected disposable Stage 7/8/9/10/11 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}), got ${database}`,
     );
   }
 }
@@ -177,7 +203,7 @@ export async function assertAllowedTestDatabase(
 
 /**
  * Allowed DBs for a stage suite under either historical acceptance or
- * current-schema regression mode. Stage 10 tip uses wekonnek_stage10_regression_test.
+ * current-schema regression mode. Stage 11 tip uses wekonnek_stage11_regression_test.
  */
 export function stageOrRegressionDatabases(
   historical: string | string[],
@@ -186,16 +212,17 @@ export function stageOrRegressionDatabases(
     Array.isArray(historical) ? historical : [historical],
   );
   if (isCurrentSchemaRegressionMode()) {
-    set.add(STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    set.add(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
   }
   return set;
 }
 
-/** True when connected to the disposable current-schema regression DB (Stage 10 tip). */
+/** True when connected to the disposable current-schema regression DB (Stage 11 tip). */
 export function isAllowedCurrentSchemaRegressionDatabase(
   database: string,
 ): boolean {
   return (
+    database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE ||

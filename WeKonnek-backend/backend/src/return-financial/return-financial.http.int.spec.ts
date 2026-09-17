@@ -258,87 +258,12 @@ describeIf('Stage 9 Return Financial HTTP (wekonnek_stage9_test)', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE return_financial_settlements DISABLE TRIGGER USER;
-        ALTER TABLE rider_advance_collection_restrictions DISABLE TRIGGER USER;
-        ALTER TABLE return_financial_determinations DISABLE TRIGGER USER;
-        ALTER TABLE rider_advance_settlements DISABLE TRIGGER USER;
-      `);
-      try {
-        await prisma.returnFinancialSettlement.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.returnFinancialObligation.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.riderAdvanceCollectionRestriction.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.returnFinancialDetermination.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.returnFinancialTermsAcceptance.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.riderAdvance.deleteMany({ where: { wkOrderId: orderId } });
-        await prisma.custodyEvent.deleteMany({ where: { wkOrderId: orderId } });
-        const agreements = await prisma.agreement.findMany({
-          where: { wkOrderId: orderId },
-        });
-        for (const ag of agreements) {
-          await prisma.agreement.update({
-            where: { id: ag.id },
-            data: { currentVersionId: null },
-          });
-          await prisma.agreementParty.deleteMany({
-            where: { agreementId: ag.id },
-          });
-          await prisma.agreementVersion.deleteMany({
-            where: { agreementId: ag.id },
-          });
-        }
-        await prisma.agreement.deleteMany({ where: { wkOrderId: orderId } });
-        await prisma.orderDomainEvent.deleteMany({
-          where: { wkOrderId: orderId },
-        });
-        await prisma.riderAssignment.deleteMany({
-          where: { fulfillmentId },
-        });
-        await prisma.orderFulfillment.delete({ where: { id: fulfillmentId } });
-        await prisma.orderItem.deleteMany({ where: { orderId } });
-        await prisma.wkOrder.delete({ where: { id: orderId } });
-        await prisma.merchantPaymentMethod.deleteMany({
-          where: { merchantId: { in: [merchantId, foreignMerchantId] } },
-        });
-        await prisma.merchant.deleteMany({
-          where: { id: { in: [merchantId, foreignMerchantId] } },
-        });
-        await prisma.user.deleteMany({
-          where: {
-            id: {
-              in: [
-                customer.id,
-                creditor.id,
-                returnRider.id,
-                deliveryRider.id,
-                merchantUser.id,
-                foreignMerchantUser.id,
-                foreign.id,
-                coordinator.id,
-              ],
-            },
-          },
-        });
-      } finally {
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE return_financial_settlements ENABLE TRIGGER USER;
-          ALTER TABLE rider_advance_collection_restrictions ENABLE TRIGGER USER;
-          ALTER TABLE return_financial_determinations ENABLE TRIGGER USER;
-          ALTER TABLE rider_advance_settlements ENABLE TRIGGER USER;
-        `);
-      }
-    }
+    // Stage 9 financial history is append-only / terminal-immutable. Do not
+    // DISABLE TRIGGER or DELETE protected rows; leave suite fixtures orphaned.
+    void orderId;
+    void fulfillmentId;
+    void merchantId;
+    void foreignMerchantId;
     await app?.close();
   });
 

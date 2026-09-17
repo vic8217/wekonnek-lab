@@ -11,6 +11,7 @@ import {
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE4_ENV_PRESENT = loadStageTestEnv('.env.stage4.test');
@@ -74,8 +75,8 @@ describeIf('Stage 4A Rider Advance PostgreSQL (wekonnek_stage4_test)', () => {
       database === 'wekonnek_stage4_test' && user === 'wekonnek_stage4_test';
     const okRegression =
       isCurrentSchemaRegressionMode() &&
-      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE))) &&
-      (user === 'victor' || user === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || user === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE)));
+      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE))) &&
+      (user === 'victor' || user === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || user === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE || user === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE)));
     if (!okHistorical && !okRegression) {
       throw new Error(
         `Stage 4 tests require wekonnek_stage4_test or stage7 regression identity; got database=${database} user=${user}`,

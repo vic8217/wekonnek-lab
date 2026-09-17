@@ -1,12 +1,13 @@
 /**
  * Stage 10 redelivery authorization — PostgreSQL acceptance.
  * Requires backend/.env.stage10.test → wekonnek_stage10_test
- * (or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → wekonnek_stage10_regression_test).
+ * (or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → wekonnek_stage11_regression_test).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
   STAGE10_ACCEPTANCE_DATABASE,
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE10_FORBIDDEN_DATABASES,
   isCurrentSchemaRegressionMode,
 } from '../test-support/test-database-guard';
@@ -63,9 +64,10 @@ const ALLOWED_DB_USERS = new Set([
   'victor',
   'wekonnek_stage10_test',
   'wekonnek_stage10_regression_test',
+  'wekonnek_stage11_regression_test',
 ]);
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE
   : STAGE10_ACCEPTANCE_DATABASE;
 
 function errCode(e: unknown): string | undefined {
@@ -412,142 +414,11 @@ describeIf(`Stage 10 Redelivery PostgreSQL (${EXPECTED_DB})`, () => {
     };
 
     cleanup = async () => {
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.redelivery_authorizations DISABLE TRIGGER stage10_redelivery_append_only_del_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.redelivery_authorizations DISABLE TRIGGER stage10_redelivery_terminal_immutable_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.delivery_attempts DISABLE TRIGGER stage8_delivery_attempts_append_only_upd_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.delivery_attempts DISABLE TRIGGER stage8_delivery_attempts_append_only_del_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.operational_case_events DISABLE TRIGGER stage8_operational_case_events_append_only_upd_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.operational_case_events DISABLE TRIGGER stage8_operational_case_events_append_only_del_trg`,
-      );
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE IF EXISTS public.return_financial_settlements DISABLE TRIGGER USER;
-        ALTER TABLE IF EXISTS public.rider_advance_collection_restrictions DISABLE TRIGGER USER;
-        ALTER TABLE IF EXISTS public.return_financial_determinations DISABLE TRIGGER USER;
-        ALTER TABLE IF EXISTS public.return_financial_obligations DISABLE TRIGGER USER;
-        ALTER TABLE IF EXISTS public.rider_advance_settlements DISABLE TRIGGER USER;
-      `).catch(() => undefined);
-      try {
-        await prisma.returnFinancialSettlement.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.returnFinancialObligation.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.riderAdvanceCollectionRestriction.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.returnFinancialDetermination.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.returnFinancialTermsAcceptance.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.redeliveryAuthorization.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.operationalCaseEvent.deleteMany({
-          where: { operationalCase: { wkOrderId: order.id } },
-        });
-        await prisma.operationalCase.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.deliveryAttemptEvidence.deleteMany({
-          where: { deliveryAttempt: { wkOrderId: order.id } },
-        });
-        await prisma.deliveryAttempt.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.customerDeliveryHandoffToken.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderCustodyHandoffToken.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.riderAdvanceSettlement.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.riderAdvance.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.agreementParty.deleteMany({
-          where: { agreement: { wkOrderId: order.id } },
-        }).catch(() => undefined);
-        await prisma.agreementVersion.deleteMany({
-          where: { agreement: { wkOrderId: order.id } },
-        }).catch(() => undefined);
-        await prisma.agreement.deleteMany({
-          where: { wkOrderId: order.id },
-        }).catch(() => undefined);
-        await prisma.custodyEvent.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.orderDomainEvent.deleteMany({
-          where: { wkOrderId: order.id },
-        });
-        await prisma.riderAssignment.deleteMany({
-          where: { fulfillmentId: fulfillment.id },
-        });
-        await prisma.orderFulfillment.delete({
-          where: { id: fulfillment.id },
-        });
-        await prisma.orderItem.deleteMany({ where: { orderId: order.id } });
-        await prisma.merchantPaymentMethod.deleteMany({
-          where: { merchantId: merchant.id },
-        });
-        await prisma.wkOrder.delete({ where: { id: order.id } });
-        await prisma.merchant.delete({ where: { id: merchant.id } });
-        await prisma.user.deleteMany({
-          where: {
-            id: {
-              in: [
-                customer.id,
-                rider.id,
-                riderB.id,
-                admin.id,
-                merchantUser.id,
-                foreign.id,
-              ],
-            },
-          },
-        });
-      } finally {
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.redelivery_authorizations ENABLE TRIGGER stage10_redelivery_append_only_del_trg`,
-        );
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.redelivery_authorizations ENABLE TRIGGER stage10_redelivery_terminal_immutable_trg`,
-        );
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.delivery_attempts ENABLE TRIGGER stage8_delivery_attempts_append_only_upd_trg`,
-        );
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.delivery_attempts ENABLE TRIGGER stage8_delivery_attempts_append_only_del_trg`,
-        );
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.operational_case_events ENABLE TRIGGER stage8_operational_case_events_append_only_upd_trg`,
-        );
-        await prisma.$executeRawUnsafe(
-          `ALTER TABLE public.operational_case_events ENABLE TRIGGER stage8_operational_case_events_append_only_del_trg`,
-        );
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE IF EXISTS public.return_financial_settlements ENABLE TRIGGER USER;
-          ALTER TABLE IF EXISTS public.rider_advance_collection_restrictions ENABLE TRIGGER USER;
-          ALTER TABLE IF EXISTS public.return_financial_determinations ENABLE TRIGGER USER;
-          ALTER TABLE IF EXISTS public.return_financial_obligations ENABLE TRIGGER USER;
-          ALTER TABLE IF EXISTS public.rider_advance_settlements ENABLE TRIGGER USER;
-        `).catch(() => undefined);
-      }
+      // Append-only Stage 8/10 history must remain. Do not DISABLE TRIGGER or
+      // delete delivery_attempts / operational_case_events / redelivery rows.
+      // Isolation: unique UUID fixtures; full-suite repeats use a fresh
+      // disposable Stage 11 current-schema DB cloned from wekonnek_stage11_test.
+      return;
     };
 
     return { ...ids, customer, rider, riderB, admin, merchantUser, foreign, order };
@@ -1142,31 +1013,9 @@ describeIf(`Stage 10 Redelivery PostgreSQL (${EXPECTED_DB})`, () => {
       'REDELIVERY_CUSTOMER_AUTH_REQUIRED',
     );
 
-    await prisma.$executeRawUnsafe(
-      `ALTER TABLE public.delivery_attempts DISABLE TRIGGER stage8_delivery_attempts_append_only_del_trg`,
-    );
-    await prisma.$executeRawUnsafe(
-      `ALTER TABLE public.redelivery_authorizations DISABLE TRIGGER stage10_redelivery_append_only_del_trg`,
-    );
-    try {
-      await prisma.redeliveryAuthorization.deleteMany({
-        where: { wkOrderId: order2.id },
-      });
-      await prisma.deliveryAttempt.deleteMany({ where: { wkOrderId: order2.id } });
-      await prisma.riderAssignment.deleteMany({
-        where: { fulfillmentId: ful2.id },
-      });
-      await prisma.orderFulfillment.delete({ where: { id: ful2.id } });
-      await prisma.orderItem.deleteMany({ where: { orderId: order2.id } });
-      await prisma.wkOrder.delete({ where: { id: order2.id } });
-    } finally {
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.delivery_attempts ENABLE TRIGGER stage8_delivery_attempts_append_only_del_trg`,
-      );
-      await prisma.$executeRawUnsafe(
-        `ALTER TABLE public.redelivery_authorizations ENABLE TRIGGER stage10_redelivery_append_only_del_trg`,
-      );
-    }
+    // Leave order2 fixture orphaned — no delete of append-only delivery_attempts.
+    void order2;
+    void ful2;
   });
 
   it('ordinary Stage 5A confirm does not invent SUCCESSFUL_HANDOFF without ACTIVATED redelivery', async () => {
@@ -1246,26 +1095,8 @@ describeIf(`Stage 10 Redelivery PostgreSQL (${EXPECTED_DB})`, () => {
       },
     });
     cleanup = async () => {
-      await prisma.customerDeliveryHandoffToken.deleteMany({
-        where: { wkOrderId: order.id },
-      });
-      await prisma.deliveryAttempt.deleteMany({
-        where: { wkOrderId: order.id },
-      });
-      await prisma.custodyEvent.deleteMany({ where: { wkOrderId: order.id } });
-      await prisma.orderDomainEvent.deleteMany({
-        where: { wkOrderId: order.id },
-      });
-      await prisma.riderAssignment.deleteMany({
-        where: { fulfillmentId: fulfillment.id },
-      });
-      await prisma.orderFulfillment.delete({ where: { id: fulfillment.id } });
-      await prisma.orderItem.deleteMany({ where: { orderId: order.id } });
-      await prisma.wkOrder.delete({ where: { id: order.id } });
-      await prisma.merchant.delete({ where: { id: merchant.id } });
-      await prisma.user.deleteMany({
-        where: { id: { in: [customer.id, rider.id, merchantUser.id] } },
-      });
+      // Append-only isolation: no delete of delivery_attempts (or parent graph).
+      return;
     };
 
     const issued = await delivery.issueForOrder({

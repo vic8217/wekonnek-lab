@@ -57,6 +57,7 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/docs/stage8-current-schema-regression.md
 !backend/docs/stage9-current-schema-regression.md
 !backend/docs/stage10-current-schema-regression.md
+!backend/docs/stage11-current-schema-regression.md
 !backend/.env.stage2.test.example
 !backend/.env.stage3.test.example
 !backend/.env.stage4.test.example
@@ -66,6 +67,8 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/.env.stage9.regression.test.example
 !backend/.env.stage10.test.example
 !backend/.env.stage10.regression.test.example
+!backend/.env.stage11.test.example
+!backend/.env.stage11.regression.test.example
 !backend/benchmark-fixtures/
 !backend/benchmark-fixtures/vertex-poc-v1/
 !backend/benchmark-fixtures/vertex-poc-v1/dataset.json

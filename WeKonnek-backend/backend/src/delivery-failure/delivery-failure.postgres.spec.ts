@@ -10,6 +10,7 @@ import {
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_FORBIDDEN_DATABASES,
   isCurrentSchemaRegressionMode,
 } from '../test-support/test-database-guard';
@@ -62,9 +63,10 @@ const ALLOWED_DB_USERS = new Set([
   'wekonnek_stage8_regression_test',
   'wekonnek_stage9_regression_test',
   'wekonnek_stage10_regression_test',
+  'wekonnek_stage11_regression_test',
 ]);
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE
   : STAGE8_ACCEPTANCE_DATABASE;
 
 function errCode(e: unknown): string | undefined {
@@ -267,97 +269,10 @@ describeIf(
       };
 
       cleanup = async () => {
-        // Append-only triggers block DELETE; disable Stage 8/5B guards for disposable fixture cleanup.
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE operational_case_events DISABLE TRIGGER USER;
-          ALTER TABLE delivery_attempt_evidences DISABLE TRIGGER USER;
-          ALTER TABLE delivery_attempts DISABLE TRIGGER USER;
-          ALTER TABLE rider_advance_settlements DISABLE TRIGGER USER;
-        `);
-        try {
-          await prisma.operationalCaseEvent.deleteMany({
-            where: { operationalCase: { wkOrderId: order.id } },
-          });
-          await prisma.operationalCase.deleteMany({ where: { wkOrderId: order.id } });
-          await prisma.deliveryAttemptEvidence.deleteMany({
-            where: { deliveryAttempt: { wkOrderId: order.id } },
-          });
-          await prisma.deliveryAttempt.deleteMany({ where: { wkOrderId: order.id } });
-          await prisma.customerDeliveryHandoffToken.deleteMany({
-            where: { wkOrderId: order.id },
-          });
-          await prisma.riderCustodyHandoffToken.deleteMany({
-            where: { wkOrderId: order.id },
-          });
-          await prisma.pickupHandoffToken.deleteMany({
-            where: { wkOrderId: order.id },
-          });
-          await prisma.merchantReturnHandoffToken.deleteMany({
-            where: { wkOrderId: order.id },
-          });
-          await prisma.custodyEventEvidence.deleteMany({
-            where: { custodyEvent: { wkOrderId: order.id } },
-          });
-          await prisma.custodyEvent.deleteMany({ where: { wkOrderId: order.id } });
-          await prisma.riderAdvanceSettlement.deleteMany({
-            where: { wkOrderId: order.id },
-          });
-          await prisma.riderAdvance.deleteMany({ where: { wkOrderId: order.id } });
-          const agreements = await prisma.agreement.findMany({
-            where: { wkOrderId: order.id },
-            select: { id: true },
-          });
-          for (const ag of agreements) {
-            await prisma.agreement.update({
-              where: { id: ag.id },
-              data: { currentVersionId: null },
-            });
-            await prisma.agreementAcceptance.deleteMany({
-              where: { agreementVersion: { agreementId: ag.id } },
-            });
-            await prisma.agreementEvidence.deleteMany({
-              where: { agreementId: ag.id },
-            });
-            await prisma.agreementParty.deleteMany({
-              where: { agreementId: ag.id },
-            });
-            await prisma.agreementVersion.deleteMany({
-              where: { agreementId: ag.id },
-            });
-          }
-          await prisma.agreement.deleteMany({ where: { wkOrderId: order.id } });
-          await prisma.orderDomainEvent.deleteMany({ where: { wkOrderId: order.id } });
-          await prisma.riderAssignment.deleteMany({
-            where: { fulfillmentId: fulfillment.id },
-          });
-          await prisma.orderFulfillment.delete({ where: { id: fulfillment.id } });
-          await prisma.orderItem.deleteMany({ where: { orderId: order.id } });
-          await prisma.wkOrder.delete({ where: { id: order.id } });
-          await prisma.merchantPaymentMethod.deleteMany({
-            where: { merchantId: merchant.id },
-          });
-          await prisma.merchant.delete({ where: { id: merchant.id } });
-          await prisma.user.deleteMany({
-            where: {
-              id: {
-                in: [
-                  customer.id,
-                  rider.id,
-                  riderB.id,
-                  admin.id,
-                  merchantUser.id,
-                ],
-              },
-            },
-          });
-        } finally {
-          await prisma.$executeRawUnsafe(`
-            ALTER TABLE delivery_attempts ENABLE TRIGGER USER;
-            ALTER TABLE delivery_attempt_evidences ENABLE TRIGGER USER;
-            ALTER TABLE operational_case_events ENABLE TRIGGER USER;
-            ALTER TABLE rider_advance_settlements ENABLE TRIGGER USER;
-          `);
-        }
+        // Append-only Stage 8 history must remain. Do not DISABLE TRIGGER or
+        // delete delivery_attempts / operational_case_events. Isolation: unique
+        // UUID fixtures; suite repeats use a fresh disposable Stage 11 DB.
+        return;
       };
 
       return { ...ids, customer, rider, riderB, admin, merchantUser, order, fulfillment, assignment };

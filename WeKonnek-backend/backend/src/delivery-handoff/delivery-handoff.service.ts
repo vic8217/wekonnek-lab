@@ -19,6 +19,7 @@ import { CustodyEventService } from '../agreements/custody-event.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { withSerializableRetry } from '../prisma/serializable-retry';
 import { assertPossessionDependentRiderAuthority } from '../rider-custody-handoff/possession-authority';
 import {
   DEFAULT_DELIVERY_HANDOFF_TTL_SECONDS,
@@ -398,18 +399,31 @@ export class DeliveryHandoffService {
       }
     }
 
-    const resolved = await this.resolveCapability(input, true);
-    if (!resolved.ok) return this.deny(resolved);
+    // Whole-operation Serializable retry: re-resolve capability + re-lock on each attempt.
+    return withSerializableRetry(async () => {
+      const resolved = await this.resolveCapability(input, true);
+      if (!resolved.ok) return this.deny(resolved);
 
-    return this.prisma.$transaction(
-      async (tx) => {
-        await tx.$queryRaw`
-          SELECT id FROM "customer_delivery_handoff_tokens" WHERE id = ${resolved.token.id}::uuid FOR UPDATE
-        `;
-        const token = await tx.customerDeliveryHandoffToken.findUniqueOrThrow({
-          where: { id: resolved.token.id },
-          include: { fulfillment: true },
-        });
+      return this.prisma.$transaction(
+        async (tx) => {
+          // Canonical lock order (compatible with Stage 10/11):
+          // order (if marketplace) → fulfillment → delivery token.
+          if (resolved.token.wkOrderId != null) {
+            await tx.$queryRaw`
+              SELECT id FROM "orders" WHERE id = ${resolved.token.wkOrderId} FOR UPDATE
+            `;
+          }
+          await tx.$queryRaw`
+            SELECT id FROM "order_fulfillments"
+            WHERE id = ${resolved.token.fulfillmentId}::uuid FOR UPDATE
+          `;
+          await tx.$queryRaw`
+            SELECT id FROM "customer_delivery_handoff_tokens" WHERE id = ${resolved.token.id}::uuid FOR UPDATE
+          `;
+          const token = await tx.customerDeliveryHandoffToken.findUniqueOrThrow({
+            where: { id: resolved.token.id },
+            include: { fulfillment: true },
+          });
 
         if (token.customerId !== input.actorUserId) {
           return this.deny({
@@ -610,6 +624,7 @@ export class DeliveryHandoffService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    });
   }
 
   async revoke(input: {

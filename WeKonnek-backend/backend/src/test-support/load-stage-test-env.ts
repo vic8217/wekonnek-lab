@@ -1,9 +1,9 @@
 /**
- * Load stage-specific dotenv, preferring Stage 10 current-schema regression
+ * Load stage-specific dotenv, preferring Stage 11 current-schema regression
  * when WEKONNEK_CURRENT_SCHEMA_REGRESSION=1.
  *
- * Stage 10 is the current schema tip: regression mode always loads
- * `.env.stage10.regression.test` (wekonnek_stage10_regression_test).
+ * Stage 11 is the current schema tip: regression mode always loads
+ * `.env.stage11.regression.test` (wekonnek_stage11_regression_test).
  */
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'fs';
@@ -32,14 +32,19 @@ export const STAGE10_REGRESSION_ENV = resolve(
   '.env.stage10.regression.test',
 );
 
+export const STAGE11_REGRESSION_ENV = resolve(
+  BACKEND_ROOT,
+  '.env.stage11.regression.test',
+);
+
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
   if (isCurrentSchemaRegressionMode()) {
-    if (!existsSync(STAGE10_REGRESSION_ENV)) {
+    if (!existsSync(STAGE11_REGRESSION_ENV)) {
       throw new Error(
-        `WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 but missing ${STAGE10_REGRESSION_ENV}`,
+        `WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 but missing ${STAGE11_REGRESSION_ENV}`,
       );
     }
-    loadEnv({ path: STAGE10_REGRESSION_ENV, override: true });
+    loadEnv({ path: STAGE11_REGRESSION_ENV, override: true });
     return true;
   }
   const stagePath = resolve(BACKEND_ROOT, stageEnvFileName);

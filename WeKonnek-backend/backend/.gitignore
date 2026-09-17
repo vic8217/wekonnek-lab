@@ -21,4 +21,6 @@ node_modules
 .env.stage9.regression.test
 .env.stage10.test
 .env.stage10.regression.test
+.env.stage11.test
+.env.stage11.regression.test
 i18n/

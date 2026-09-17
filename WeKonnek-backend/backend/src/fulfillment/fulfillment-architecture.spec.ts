@@ -25,7 +25,10 @@ describe('Stage 0A fulfillment state machine', () => {
       'delivered',
       'delivery_failed',
     ]);
-    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toEqual(['returning']);
+    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toEqual([
+      'returning',
+      'in_transit',
+    ]);
     expect(FULFILLMENT_TRANSITIONS.returning).toEqual(['returned']);
   });
 

@@ -16,6 +16,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { withSerializableRetry } from '../prisma/serializable-retry';
 import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
 import {
   assertOperationAllowed,
@@ -48,9 +49,11 @@ export class RiderAssignmentService {
   ) {}
 
   async assign(input: AssignRiderInput) {
-    return this.prisma.$transaction(
-      async (tx) => this.assignInTx(tx, input),
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    return withSerializableRetry(() =>
+      this.prisma.$transaction(
+        async (tx) => this.assignInTx(tx, input),
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
     );
   }
 

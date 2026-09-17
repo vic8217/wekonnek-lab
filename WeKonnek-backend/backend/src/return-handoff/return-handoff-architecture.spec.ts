@@ -126,9 +126,13 @@ describe('Stage 6 return handoff architecture', () => {
     });
   });
 
-  it('documents redelivery as future product decision (out of Stage 6)', () => {
-    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toEqual(['returning']);
-    expect(FULFILLMENT_TRANSITIONS.delivery_failed).not.toContain('in_transit');
+  it('documents delivery_failed legal exits after Stage 10 (live SM authoritative)', () => {
+    // Ordinary return path remains; Stage 10 authorized redelivery adds in_transit.
+    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toEqual([
+      'returning',
+      'in_transit',
+    ]);
+    expect(FULFILLMENT_TRANSITIONS.delivery_failed).toContain('in_transit');
   });
 
   it('documents derived COMPLETE is never persisted', () => {
