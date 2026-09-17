@@ -71,6 +71,7 @@ import { RiderCustodyHandoffModule } from './rider-custody-handoff/rider-custody
 import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
 import { DeliveryFailureModule } from './delivery-failure/delivery-failure.module';
 import { ReturnFinancialModule } from './return-financial/return-financial.module';
+import { RedeliveryModule } from './redelivery/redelivery.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { ReturnFinancialModule } from './return-financial/return-financial.modul
     OrderOperationalStateModule,
     DeliveryFailureModule,
     ReturnFinancialModule,
+    RedeliveryModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

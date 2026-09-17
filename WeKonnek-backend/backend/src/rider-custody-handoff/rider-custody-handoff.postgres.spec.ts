@@ -9,6 +9,7 @@ import {
   STAGE7_ACCEPTANCE_DATABASE,
   STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE7_ENV_PRESENT = loadStageTestEnv('.env.stage7.test');
@@ -42,7 +43,7 @@ const describeIf = STAGE7_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE
   : STAGE7_ACCEPTANCE_DATABASE;
 const ALLOWED_DB_USERS = new Set([
   'victor',

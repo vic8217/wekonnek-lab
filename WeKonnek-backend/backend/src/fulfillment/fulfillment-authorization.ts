@@ -142,6 +142,7 @@ const RIDER_ALLOWED_TARGETS: ReadonlySet<string> = new Set([
   'in_transit',
   // Stage 5A: 'delivered' removed — customer handoff only (INTERNAL_SERVICE).
   // Stage 8: 'delivery_failed' removed — delivery-failure report path only (INTERNAL_SERVICE).
+  // Stage 10: delivery_failed→in_transit is NOT rider-allowed (USE_REDELIVERY_ACTIVATION).
   'returning',
   // Stage 6: 'returned' removed — merchant return handoff only (INTERNAL_SERVICE).
 ]);

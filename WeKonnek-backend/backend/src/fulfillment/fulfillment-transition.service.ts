@@ -153,6 +153,23 @@ export class FulfillmentTransitionService {
       });
     }
 
+    // Stage 10: marketplace wkOrder path — delivery_failed → in_transit only via
+    // Stage 10 redelivery activation (INTERNAL_SERVICE / SYSTEM_ADMIN / SYSTEM).
+    if (
+      from === 'delivery_failed' &&
+      target === 'in_transit' &&
+      fulfillment.wkOrderId != null &&
+      input.actor.type !== 'INTERNAL_SERVICE' &&
+      input.actor.type !== 'SYSTEM_ADMIN' &&
+      input.actor.type !== 'SYSTEM'
+    ) {
+      throw new ForbiddenException({
+        code: 'USE_REDELIVERY_ACTIVATION',
+        message:
+          'Marketplace redelivery must be activated via the Stage 10 redelivery authorization path',
+      });
+    }
+
     const operation =
       target === 'cancelled' ? 'cancel' : ('transition' as const);
 

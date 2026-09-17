@@ -521,6 +521,59 @@ export class DeliveryHandoffService {
           },
         });
 
+        // Stage 10: SUCCESSFUL_HANDOFF DeliveryAttempt only for ACTIVATED redelivery legs.
+        const activatedRedelivery = await tx.redeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: token.fulfillmentId,
+            status: 'ACTIVATED',
+          },
+          orderBy: { activatedAt: 'desc' },
+        });
+        if (activatedRedelivery) {
+          const existingSuccess = await tx.deliveryAttempt.findFirst({
+            where: {
+              fulfillmentId: token.fulfillmentId,
+              attemptNumber: activatedRedelivery.targetAttemptNumber,
+              outcome: 'SUCCESSFUL_HANDOFF',
+            },
+          });
+          if (!existingSuccess) {
+            const assignment = await tx.riderAssignment.findFirst({
+              where: {
+                fulfillmentId: token.fulfillmentId,
+                riderId: token.deliveryRiderId,
+                status: 'ACTIVE',
+                assignmentVersion: token.assignmentVersion,
+              },
+            });
+            if (assignment) {
+              const custodian =
+                token.fulfillment.physicalCustodianRiderId ??
+                token.deliveryRiderId;
+              await tx.deliveryAttempt.create({
+                data: {
+                  id: randomUUID(),
+                  wkOrderId: token.wkOrderId,
+                  fulfillmentId: token.fulfillmentId,
+                  attemptNumber: activatedRedelivery.targetAttemptNumber,
+                  riderId: token.deliveryRiderId,
+                  riderAssignmentId: assignment.id,
+                  assignmentVersion: token.assignmentVersion,
+                  physicalCustodianRiderId: custodian,
+                  outcome: 'SUCCESSFUL_HANDOFF',
+                  occurredAt: now,
+                  reportedAt: now,
+                  reportedByActorType: 'CUSTOMER',
+                  reportedByActorId: input.actorUserId,
+                  notes: 'stage10_redelivery_successful_handoff',
+                  correlationId: input.correlationId,
+                  requestPayloadHash: `stage10:${activatedRedelivery.id}`,
+                },
+              });
+            }
+          }
+        }
+
         await this.events.record({
           tx,
           aggregateType: 'ORDER_FULFILLMENT',
@@ -540,6 +593,8 @@ export class DeliveryHandoffService {
             paymentUnchanged: true,
             riderAdvanceUnchanged: true,
             reimbursementNotSettled: true,
+            stage10SuccessfulHandoff: Boolean(activatedRedelivery),
+            redeliveryAuthorizationId: activatedRedelivery?.id ?? null,
           },
         });
 

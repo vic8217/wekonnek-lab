@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CustomerDeliveryHandoffTokenStatus,
   DeliveryAttemptCustomerResponse,
   DeliveryAttemptEvidenceKind,
   DeliveryAttemptLocationProvenance,
@@ -24,6 +25,7 @@ import { AuthActorService } from '../fulfillment/auth-actor.service';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MAX_DELIVERY_ATTEMPTS } from '../redelivery/redelivery.policy';
 
 const FAILURE_REASON_CODES = new Set<string>(
   Object.values(DeliveryFailureReasonCode),
@@ -418,6 +420,55 @@ export class DeliveryFailureService {
             'delivery_failed',
           );
 
+          // Stage 10: revoke ACTIVE Stage 5A delivery tokens on failure.
+          const activeTokens = await tx.customerDeliveryHandoffToken.findMany({
+            where: {
+              fulfillmentId: locked.id,
+              status: CustomerDeliveryHandoffTokenStatus.ACTIVE,
+            },
+          });
+          for (const token of activeTokens) {
+            await tx.customerDeliveryHandoffToken.update({
+              where: { id: token.id },
+              data: {
+                status: CustomerDeliveryHandoffTokenStatus.REVOKED,
+                revokedAt: now,
+                revokeReason: 'stage8_delivery_failure',
+              },
+            });
+          }
+
+          // After attempt MAX failed → ops recovery required on the case.
+          if (attemptNumber >= MAX_DELIVERY_ATTEMPTS) {
+            await tx.operationalCase.update({
+              where: { id: caseId },
+              data: {
+                currentDisposition:
+                  OperationalDisposition.OPERATIONS_RECOVERY_REQUIRED,
+              },
+            });
+            await tx.operationalCaseEvent.create({
+              data: {
+                id: randomUUID(),
+                operationalCaseId: caseId,
+                eventType: OperationalCaseEventType.DISPOSITION_SELECTED,
+                fromStatus: OperationalCaseStatus.OPEN,
+                toStatus: OperationalCaseStatus.OPEN,
+                disposition:
+                  OperationalDisposition.OPERATIONS_RECOVERY_REQUIRED,
+                actorType: 'INTERNAL_SERVICE',
+                actorId: input.actorUserId,
+                reason: 'stage10_redelivery_attempt_limit_reached',
+                correlationId: input.correlationId,
+                metadata: {
+                  attemptNumber,
+                  maxDeliveryAttempts: MAX_DELIVERY_ATTEMPTS,
+                  code: 'REDELIVERY_ATTEMPT_LIMIT_REACHED',
+                },
+              },
+            });
+          }
+
           await this.events.record({
             tx,
             aggregateType: 'ORDER_FULFILLMENT',
@@ -438,6 +489,8 @@ export class DeliveryFailureService {
               customerResponse,
               customerResponseProvenance: 'RIDER_REPORTED',
               operationalCaseId: caseId,
+              deliveryTokensRevoked: activeTokens.length,
+              attemptLimitReached: attemptNumber >= MAX_DELIVERY_ATTEMPTS,
             },
           });
 

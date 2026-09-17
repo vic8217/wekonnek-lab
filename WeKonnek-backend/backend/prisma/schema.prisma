@@ -182,6 +182,7 @@ model Merchant {
   returnFinancialTermsAcceptances ReturnFinancialTermsAcceptance[]
   returnFinancialObligations      ReturnFinancialObligation[]
   returnFinancialObligationsAsDebtor ReturnFinancialObligation[] @relation("ReturnFinancialObligationDebtorMerchant")
+  redeliveryAuthorizations RedeliveryAuthorization[]
 
   @@index([userId])
   @@index([categoryId])
@@ -996,6 +997,7 @@ model WkOrder {
   returnFinancialSettlements    ReturnFinancialSettlement[]
   returnFinancialTermsAcceptances ReturnFinancialTermsAcceptance[]
   riderAdvanceCollectionRestrictions RiderAdvanceCollectionRestriction[]
+  redeliveryAuthorizations RedeliveryAuthorization[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1331,6 +1333,8 @@ model User {
   returnFinancialSettlementsClaimed ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementClaimedBy")
   returnFinancialSettlementsAcked   ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementAckedBy")
   returnFinancialSettlementsRejected ReturnFinancialSettlement[] @relation("ReturnFinancialSettlementRejectedBy")
+  redeliveryAuthorizationsAsCustomer RedeliveryAuthorization[] @relation("RedeliveryAuthorizationCustomer")
+  redeliveryAuthorizationsRequestedBy RedeliveryAuthorization[] @relation("RedeliveryAuthorizationRequestedBy")
 
   @@map("users")
 }
@@ -2865,6 +2869,7 @@ model OrderFulfillment {
   deliveryAttempts    DeliveryAttempt[]
   operationalCases    OperationalCase[]
   returnFinancialDeterminations ReturnFinancialDetermination[]
+  redeliveryAuthorizations RedeliveryAuthorization[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3740,7 +3745,7 @@ enum OperationalCaseEventType {
   CASE_CANCELLED
 }
 
-/// Append-oriented delivery attempt record (Stage 8 writes FAILED only).
+/// Append-oriented delivery attempt record (Stage 8 writes FAILED; Stage 10 may write SUCCESSFUL_HANDOFF on ACTIVATED redelivery legs).
 model DeliveryAttempt {
   id                         String                           @id @default(uuid()) @db.Uuid
   wkOrderId                  Int                              @map("wk_order_id")
@@ -3828,6 +3833,7 @@ model OperationalCase {
   deliveryAttempt DeliveryAttempt?       @relation(fields: [deliveryAttemptId], references: [id], onDelete: SetNull)
   events          OperationalCaseEvent[]
   returnFinancialDeterminations ReturnFinancialDetermination[]
+  redeliveryAuthorizations RedeliveryAuthorization[]
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, caseType, status])
@@ -4115,4 +4121,75 @@ model RiderAdvanceCollectionRestriction {
   @@index([wkOrderId])
   @@index([returnFinancialDeterminationId])
   @@map("rider_advance_collection_restrictions")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 10 — Redelivery Authorization
+// ═══════════════════════════════════════════════════════
+
+enum RedeliveryAuthorizationStatus {
+  REQUESTED
+  CONFIRMED
+  ACTIVATED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+enum RedeliveryAddressMode {
+  SAME_AS_ORDER
+}
+
+enum RedeliveryCustomerAuthMethod {
+  CUSTOMER_JWT
+  ADMIN_RECOVERY
+}
+
+model RedeliveryAuthorization {
+  id                          String                         @id @default(uuid()) @db.Uuid
+  wkOrderId                   Int                            @map("wk_order_id")
+  fulfillmentId               String                         @map("fulfillment_id") @db.Uuid
+  customerId                  String                         @map("customer_id") @db.Uuid
+  merchantId                  Int                            @map("merchant_id")
+  targetAttemptNumber         Int                            @map("target_attempt_number")
+  addressMode                 RedeliveryAddressMode          @default(SAME_AS_ORDER) @map("address_mode")
+  addressSnapshot             Json                           @map("address_snapshot")
+  windowStart                 DateTime                       @map("window_start") @db.Timestamptz
+  windowEnd                   DateTime                       @map("window_end") @db.Timestamptz
+  timezone                    String                         @default("Asia/Manila") @db.VarChar(64)
+  customerAuthActorType       OrderDomainActorType?          @map("customer_auth_actor_type")
+  customerAuthActorId         String?                        @map("customer_auth_actor_id") @db.Uuid
+  customerAuthMethod          RedeliveryCustomerAuthMethod?  @map("customer_auth_method")
+  customerAuthorizedAt        DateTime?                      @map("customer_authorized_at") @db.Timestamptz
+  status                      RedeliveryAuthorizationStatus  @default(REQUESTED)
+  priorOperationalCaseId      String?                        @map("prior_operational_case_id") @db.Uuid
+  correlationId               String?                        @map("correlation_id") @db.VarChar(64)
+  requestIdempotencyKey       String?                        @map("request_idempotency_key") @db.VarChar(64)
+  requestPayloadHash          String?                        @map("request_payload_hash") @db.VarChar(64)
+  confirmIdempotencyKey       String?                        @map("confirm_idempotency_key") @db.VarChar(64)
+  confirmPayloadHash          String?                        @map("confirm_payload_hash") @db.VarChar(64)
+  activateIdempotencyKey      String?                        @map("activate_idempotency_key") @db.VarChar(64)
+  activatePayloadHash         String?                        @map("activate_payload_hash") @db.VarChar(64)
+  requestedByActorType        OrderDomainActorType           @map("requested_by_actor_type")
+  requestedByActorId          String                         @map("requested_by_actor_id") @db.Uuid
+  createdAt                   DateTime                       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime                       @updatedAt @map("updated_at") @db.Timestamptz
+  activatedAt                 DateTime?                      @map("activated_at") @db.Timestamptz
+  cancelledAt                 DateTime?                      @map("cancelled_at") @db.Timestamptz
+  expiredAt                   DateTime?                      @map("expired_at") @db.Timestamptz
+  cancelReason                String?                        @map("cancel_reason") @db.VarChar(2000)
+  rejectReason                String?                        @map("reject_reason") @db.VarChar(2000)
+
+  wkOrder             WkOrder           @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment         OrderFulfillment  @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  customer            User              @relation("RedeliveryAuthorizationCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  merchant            Merchant          @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  priorOperationalCase OperationalCase? @relation(fields: [priorOperationalCaseId], references: [id], onDelete: SetNull)
+  requestedByUser     User              @relation("RedeliveryAuthorizationRequestedBy", fields: [requestedByActorId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId, status])
+  @@index([fulfillmentId, status])
+  @@index([customerId, requestIdempotencyKey])
+  @@index([customerId, confirmIdempotencyKey])
+  @@map("redelivery_authorizations")
 }

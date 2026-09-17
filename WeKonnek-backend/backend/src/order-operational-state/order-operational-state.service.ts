@@ -18,8 +18,10 @@ import {
   RiderAdvanceStatus,
   UserRole,
   DeliveryAttemptOutcome,
+  RedeliveryAuthorizationStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { MAX_DELIVERY_ATTEMPTS } from '../redelivery/redelivery.policy';
 
 export type DerivedOperationalState =
   | 'ACTIVE'
@@ -301,6 +303,75 @@ export class OrderOperationalStateService {
         if (failedAttempt === 0) {
           flags.push('DELIVERY_FAILED_WITHOUT_ATTEMPT');
         }
+        if (failedAttempt >= MAX_DELIVERY_ATTEMPTS) {
+          flags.push('REDELIVERY_ATTEMPT_LIMIT_REACHED');
+          if (!flags.includes('OPERATIONS_RECOVERY_REQUIRED')) {
+            flags.push('OPERATIONS_RECOVERY_REQUIRED');
+          }
+        }
+      }
+
+      // Stage 10 redelivery flags
+      const openRedelivery = await this.prisma.redeliveryAuthorization.findFirst({
+        where: {
+          fulfillmentId: fulfillment.id,
+          status: {
+            in: [
+              RedeliveryAuthorizationStatus.REQUESTED,
+              RedeliveryAuthorizationStatus.CONFIRMED,
+            ],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (openRedelivery) {
+        if (openRedelivery.status === RedeliveryAuthorizationStatus.REQUESTED) {
+          flags.push('REDELIVERY_REQUEST_PENDING');
+        }
+        if (openRedelivery.status === RedeliveryAuthorizationStatus.CONFIRMED) {
+          flags.push('REDELIVERY_SCHEDULED');
+        }
+        if (openRedelivery.windowEnd.getTime() < Date.now()) {
+          flags.push('REDELIVERY_WINDOW_EXPIRED');
+        }
+      }
+      const activatedRedelivery =
+        await this.prisma.redeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: fulfillment.id,
+            status: RedeliveryAuthorizationStatus.ACTIVATED,
+          },
+          orderBy: { activatedAt: 'desc' },
+        });
+      if (
+        activatedRedelivery &&
+        physicalStatus === FulfillmentStatus.in_transit
+      ) {
+        flags.push('REDELIVERY_IN_PROGRESS');
+      }
+      if (fulfillment.pendingCustodyIncomingRiderId) {
+        if (!flags.includes('REDELIVERY_CUSTODY_TRANSFER_REQUIRED')) {
+          // Surface Stage 10-specific alias when delivery_failed and redelivery relevant
+          if (
+            physicalStatus === FulfillmentStatus.delivery_failed ||
+            openRedelivery
+          ) {
+            flags.push('REDELIVERY_CUSTODY_TRANSFER_REQUIRED');
+          }
+        }
+      }
+      if (physicalStatus === FulfillmentStatus.returning) {
+        flags.push('RETURN_PATH_SELECTED');
+      }
+      const finalizedDet =
+        await this.prisma.returnFinancialDetermination.findFirst({
+          where: {
+            wkOrderId,
+            status: ReturnFinancialDeterminationStatus.FINALIZED,
+          },
+        });
+      if (finalizedDet) {
+        flags.push('RETURN_FINANCIAL_RESOLUTION_ACTIVE');
       }
     }
 

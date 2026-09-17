@@ -30,7 +30,8 @@ export const FULFILLMENT_TRANSITIONS: Record<
   // Stage 5A: secured delivery via customer handoff; failed-delivery branch.
   in_transit: ['delivered', 'delivery_failed'],
   delivered: [],
-  delivery_failed: ['returning'],
+  // Stage 10: delivery_failed → in_transit via INTERNAL_SERVICE redelivery activation only.
+  delivery_failed: ['returning', 'in_transit'],
   returning: ['returned'],
   returned: [],
   cancelled: [],
@@ -178,6 +179,27 @@ export const TRANSITION_CATALOG: readonly TransitionDefinition[] = [
     sideEffects: ['Update status', 'Emit domain event', 'Optional RETURN_INITIATED custody'],
     idempotency: 'Already returning → no-op success',
     failure: 'Forbidden / BadRequest',
+  },
+  {
+    from: 'delivery_failed',
+    to: 'in_transit',
+    // Stage 10: RIDER/CUSTOMER blocked — redelivery activation uses INTERNAL_SERVICE only.
+    authorizedActorTypes: ['SYSTEM_ADMIN', 'INTERNAL_SERVICE', 'SYSTEM'],
+    preconditions: [
+      'Stage 10 RedeliveryAuthorization confirmed/activating',
+      'SAME_AS_ORDER address; attempt under MAX_DELIVERY_ATTEMPTS',
+      'No pending Stage 7 custody transfer',
+      'No Stage 9 determination / open return obligations / terminal return',
+    ],
+    sideEffects: [
+      'Update status',
+      'Emit domain event',
+      'Resolve prior DELIVERY_FAILURE case with redelivery provenance',
+      'Revoke ACTIVE Stage 5A delivery tokens',
+      'Does NOT invent SUCCESSFUL_HANDOFF (that is Stage 5A confirm on ACTIVATED legs)',
+    ],
+    idempotency: 'Already in_transit → no-op success',
+    failure: 'Forbidden for rider/customer generic path; BadRequest if illegal',
   },
   {
     from: 'returning',

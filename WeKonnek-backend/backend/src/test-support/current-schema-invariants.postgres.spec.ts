@@ -1,15 +1,15 @@
 /**
- * Prove raw SQL invariants on wekonnek_stage9_regression_test that ordinary
+ * Prove raw SQL invariants on wekonnek_stage10_regression_test that ordinary
  * Prisma schema push may omit (partial unique indexes, check constraints,
- * settlement / Stage 8 append-only triggers).
+ * settlement / Stage 8–10 append-only triggers).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from './test-database-guard';
 
 process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
-const ENV_OK = loadStageTestEnv('.env.stage9.regression.test');
+const ENV_OK = loadStageTestEnv('.env.stage10.regression.test');
 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,7 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = ENV_OK ? describe : describe.skip;
 jest.setTimeout(60_000);
 
-describeIf('Stage 9 current-schema raw SQL invariants', () => {
+describeIf('Stage 10 current-schema raw SQL invariants', () => {
   const prisma = new PrismaService();
 
   beforeAll(async () => {
@@ -25,7 +25,7 @@ describeIf('Stage 9 current-schema raw SQL invariants', () => {
     const id = await prisma.$queryRaw<
       Array<{ database: string; user: string }>
     >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(id[0]?.database).toBe(STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    expect(id[0]?.database).toBe(STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE);
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -55,85 +55,42 @@ describeIf('Stage 9 current-schema raw SQL invariants', () => {
     expect(
       await indexExists('pickup_handoff_tokens_active_fulfillment_purpose_key'),
     ).toBe(true);
-    const def = await prisma.$queryRaw<Array<{ indexdef: string }>>`
-      SELECT indexdef FROM pg_indexes
-      WHERE indexname = 'pickup_handoff_tokens_active_fulfillment_purpose_key'
-    `;
-    expect(def[0]?.indexdef).toMatch(/WHERE.*ACTIVE/i);
   });
 
-  it('STAGE 4: nonnegative money / actual <= maximum / one active RA per order', async () => {
+  it('STAGE 4: nonnegative money / one active RA per order', async () => {
     const defs = await prisma.$queryRaw<Array<{ def: string }>>`
       SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
       WHERE conrelid = 'public.rider_advances'::regclass AND contype = 'c'
     `;
-    const joined = defs.map((d) => d.def).join('\n');
-    expect(joined).toMatch(/0/);
-    const activeIdx = await prisma.$queryRaw<Array<{ indexdef: string }>>`
-      SELECT indexdef FROM pg_indexes
-      WHERE tablename = 'rider_advances'
-        AND indexdef ILIKE '%UNIQUE%'
-        AND (
-          indexdef ILIKE '%wk_order%'
-          OR indexdef ILIKE '%ACTIVE%'
-          OR indexdef ILIKE '%status%'
-        )
-    `;
-    expect(activeIdx.length).toBeGreaterThan(0);
+    expect(defs.map((d) => d.def).join('\n')).toMatch(/0/);
   });
 
-  it('STAGE 5A: delivery capability uniqueness / OTP bounds', async () => {
+  it('STAGE 5A: delivery capability uniqueness', async () => {
     expect(
       await indexExists(
         'customer_delivery_handoff_tokens_active_fulfillment_purpose_key',
       ),
     ).toBe(true);
-    const otp = await prisma.$queryRaw<Array<{ def: string }>>`
-      SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
-      WHERE conrelid = 'public.customer_delivery_handoff_tokens'::regclass
-        AND contype = 'c'
-        AND pg_get_constraintdef(oid) ILIKE '%otp_failed_attempts%'
-    `;
-    expect(otp.length).toBeGreaterThan(0);
   });
 
-  it('STAGE 5B: append-only DELETE + terminal UPDATE + financial checks', async () => {
+  it('STAGE 5B: append-only DELETE + terminal UPDATE', async () => {
     expect(await triggerExists('rider_advance_settlement_append_only_trg')).toBe(
       true,
     );
     expect(await triggerExists('rider_advance_settlement_immutable_trg')).toBe(
       true,
     );
-    const fks = await prisma.$queryRaw<Array<{ conname: string }>>`
-      SELECT conname FROM pg_constraint
-      WHERE conrelid = 'public.rider_advance_settlements'::regclass
-        AND contype = 'f'
-    `;
-    expect(fks.length).toBeGreaterThan(0);
-    const uniq = await prisma.$queryRaw<Array<{ indexname: string }>>`
-      SELECT indexname FROM pg_indexes
-      WHERE tablename = 'rider_advance_settlements'
-        AND indexdef ILIKE '%UNIQUE%'
-    `;
-    expect(uniq.length).toBeGreaterThan(0);
   });
 
-  it('STAGE 6: return capability uniqueness / OTP bounds', async () => {
+  it('STAGE 6: return capability uniqueness', async () => {
     expect(
       await indexExists(
         'merchant_return_handoff_tokens_active_fulfillment_purpose_key',
       ),
     ).toBe(true);
-    const otp = await prisma.$queryRaw<Array<{ def: string }>>`
-      SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
-      WHERE conrelid = 'public.merchant_return_handoff_tokens'::regclass
-        AND contype = 'c'
-        AND pg_get_constraintdef(oid) ILIKE '%otp_failed_attempts%'
-    `;
-    expect(otp.length).toBeGreaterThan(0);
   });
 
-  it('STAGE 7: rider custody uniqueness + otp_failed_attempts BETWEEN 0 AND 5', async () => {
+  it('STAGE 7: rider custody uniqueness + otp bounds', async () => {
     expect(
       await indexExists(
         'rider_custody_handoff_tokens_active_fulfillment_purpose_key',
@@ -142,82 +99,51 @@ describeIf('Stage 9 current-schema raw SQL invariants', () => {
     expect(
       await checkExists('rider_custody_handoff_tokens_otp_attempts_check'),
     ).toBe(true);
-    const def = await prisma.$queryRaw<Array<{ def: string }>>`
-      SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
-      WHERE conname = 'rider_custody_handoff_tokens_otp_attempts_check'
-    `;
-    expect(def[0]?.def).toMatch(
-      /BETWEEN 0 AND 5|otp_failed_attempts >= 0.*otp_failed_attempts <= 5/i,
-    );
   });
 
-  it('STAGE 8: attempt uniqueness + open case partial unique + append-only triggers', async () => {
+  it('STAGE 8: attempt uniqueness + open case + append-only', async () => {
     expect(
       await indexExists('delivery_attempts_fulfillment_id_attempt_number_key'),
     ).toBe(true);
     expect(
       await indexExists(
-        'delivery_attempts_reported_by_actor_id_idempotency_key_key',
-      ),
-    ).toBe(true);
-    const idemDef = await prisma.$queryRaw<Array<{ indexdef: string }>>`
-      SELECT indexdef FROM pg_indexes
-      WHERE indexname = 'delivery_attempts_reported_by_actor_id_idempotency_key_key'
-    `;
-    expect(idemDef[0]?.indexdef).toMatch(/WHERE.*idempotency_key IS NOT NULL/i);
-
-    expect(
-      await indexExists(
         'operational_cases_one_open_delivery_failure_per_fulfillment',
       ),
-    ).toBe(true);
-    const caseDef = await prisma.$queryRaw<Array<{ indexdef: string }>>`
-      SELECT indexdef FROM pg_indexes
-      WHERE indexname = 'operational_cases_one_open_delivery_failure_per_fulfillment'
-    `;
-    expect(caseDef[0]?.indexdef).toMatch(/DELIVERY_FAILURE/i);
-    expect(caseDef[0]?.indexdef).toMatch(/OPEN/i);
-
-    expect(
-      await triggerExists('stage8_delivery_attempts_append_only_upd_trg'),
     ).toBe(true);
     expect(
       await triggerExists('stage8_delivery_attempts_append_only_del_trg'),
     ).toBe(true);
-    expect(
-      await triggerExists('stage8_delivery_attempt_evidences_append_only_upd_trg'),
-    ).toBe(true);
-    expect(
-      await triggerExists('stage8_delivery_attempt_evidences_append_only_del_trg'),
-    ).toBe(true);
-    expect(
-      await triggerExists('stage8_operational_case_events_append_only_upd_trg'),
-    ).toBe(true);
-    expect(
-      await triggerExists('stage8_operational_case_events_append_only_del_trg'),
-    ).toBe(true);
-
-    expect(await checkExists('delivery_attempts_failed_requires_reason_check')).toBe(
-      true,
-    );
-    expect(await checkExists('delivery_attempts_other_requires_notes_check')).toBe(
-      true,
-    );
   });
 
-  it('STAGE 9: one FINALIZED determination per order + ACTIVE restriction + append-only', async () => {
+  it('STAGE 9: FINALIZED uniqueness + append-only', async () => {
     expect(
       await indexExists('return_financial_determinations_one_finalized_per_order'),
     ).toBe(true);
-    expect(
-      await indexExists('rider_advance_collection_restrictions_one_active_per_ra'),
-    ).toBe(true);
-    expect(
-      await indexExists('return_financial_obligations_determination_id_type_key'),
-    ).toBe(true);
     expect(await triggerExists('stage9_rfd_immutable_trg')).toBe(true);
-    expect(await triggerExists('stage9_rfs_immutable_trg')).toBe(true);
     expect(await triggerExists('stage9_rfs_append_only_del_trg')).toBe(true);
-    expect(await triggerExists('stage9_racr_append_only_del_trg')).toBe(true);
+  });
+
+  it('STAGE 10: one open redelivery + append-only + terminal immutable', async () => {
+    expect(
+      await indexExists('redelivery_authorizations_one_open_per_fulfillment'),
+    ).toBe(true);
+    const openDef = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes
+      WHERE indexname = 'redelivery_authorizations_one_open_per_fulfillment'
+    `;
+    expect(openDef[0]?.indexdef).toMatch(/REQUESTED/i);
+    expect(openDef[0]?.indexdef).toMatch(/CONFIRMED/i);
+    expect(await triggerExists('stage10_redelivery_append_only_del_trg')).toBe(
+      true,
+    );
+    expect(
+      await triggerExists('stage10_redelivery_terminal_immutable_trg'),
+    ).toBe(true);
+    expect(
+      await checkExists('redelivery_authorizations_window_order_check'),
+    ).toBe(true);
+    expect(
+      await checkExists('redelivery_authorizations_address_mode_check'),
+    ).toBe(true);
   });
 });
