@@ -184,6 +184,9 @@ model Merchant {
   returnFinancialObligationsAsDebtor ReturnFinancialObligation[] @relation("ReturnFinancialObligationDebtorMerchant")
   redeliveryAuthorizations RedeliveryAuthorization[]
   operationsRecoveries     OperationsRecovery[]
+  exceptionLiabilityAllocations  LiabilityAllocation[]          @relation("LiabilityAllocationMerchant")
+  exceptionObligationsAsDebtor   ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationDebtorMerchant")
+  exceptionObligationsAsCreditor ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationCreditorMerchant")
 
   @@index([userId])
   @@index([categoryId])
@@ -1000,6 +1003,9 @@ model WkOrder {
   riderAdvanceCollectionRestrictions RiderAdvanceCollectionRestriction[]
   redeliveryAuthorizations RedeliveryAuthorization[]
   operationsRecoveries     OperationsRecovery[]
+  economicLosses                EconomicLoss[]
+  exceptionClaims               ExceptionClaim[]
+  exceptionFinancialObligations ExceptionFinancialObligation[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1339,6 +1345,10 @@ model User {
   redeliveryAuthorizationsRequestedBy RedeliveryAuthorization[] @relation("RedeliveryAuthorizationRequestedBy")
   operationsRecoveriesAsCustomer OperationsRecovery[] @relation("OperationsRecoveryCustomer")
   operationsRecoveriesOpenedBy   OperationsRecovery[] @relation("OperationsRecoveryOpenedBy")
+  exceptionClaimsOpenedBy        ExceptionClaim[]               @relation("ExceptionClaimOpenedBy")
+  exceptionLiabilityAllocations  LiabilityAllocation[]          @relation("LiabilityAllocationUser")
+  exceptionObligationsAsDebtor   ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationDebtorUser")
+  exceptionObligationsAsCreditor ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationCreditorUser")
 
   @@map("users")
 }
@@ -2875,6 +2885,8 @@ model OrderFulfillment {
   returnFinancialDeterminations ReturnFinancialDetermination[]
   redeliveryAuthorizations RedeliveryAuthorization[]
   operationsRecoveries OperationsRecovery[]
+  economicLosses      EconomicLoss[]
+  exceptionClaims     ExceptionClaim[]
 
   @@index([status, createdAt])
   @@index([activeRiderId, status])
@@ -3688,6 +3700,9 @@ enum DeliveryAttemptOutcome {
 enum DeliveryFailureReasonCode {
   CUSTOMER_UNREACHABLE
   CUSTOMER_REFUSED
+  /// Additive Stage12 Trust Trade: refusal alleging goods ≠ authoritative order terms.
+  /// Operational allegation only — never automatic liability / refund / receipt.
+  CUSTOMER_REFUSED_ITEM_NOT_AS_ORDERED
   ADDRESS_ISSUE
   CUSTOMER_REQUESTED_RESCHEDULE
   MERCHANT_REQUESTED_RETURN
@@ -4057,6 +4072,7 @@ model ReturnFinancialObligation {
   determination  ReturnFinancialDetermination @relation(fields: [determinationId], references: [id], onDelete: Restrict)
   wkOrder        WkOrder                      @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
   merchant       Merchant                     @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  economicLossCoverages EconomicLossCoverage[] @relation("EconomicLossCoverageStage9Obligation")
   creditorUser   User                         @relation("ReturnFinancialObligationCreditor", fields: [creditorUserId], references: [id], onDelete: Restrict)
   debtorUser     User?                        @relation("ReturnFinancialObligationDebtorUser", fields: [debtorUserId], references: [id], onDelete: Restrict)
   debtorMerchant Merchant?                    @relation("ReturnFinancialObligationDebtorMerchant", fields: [debtorMerchantId], references: [id], onDelete: Restrict)
@@ -4224,6 +4240,8 @@ enum OperationsRecoveryTrigger {
   RIDER_UNAVAILABLE
   GOODS_REPORTED_LOST
   GOODS_REPORTED_DAMAGED
+  /// Additive Stage12 Trust Trade: customer refused citing non-conformance.
+  CUSTOMER_REFUSED_NON_CONFORMANCE
   ADMIN_RECOVERY_REQUIRED
   OTHER
 }
@@ -4328,6 +4346,8 @@ model OperationsRecovery {
   events                OperationsRecoveryEvent[]
   evidence              OperationsRecoveryEvidence[]
   verifications         OperationsRecoveryVerification[]
+  economicLosses        EconomicLoss[]
+  exceptionClaims       ExceptionClaim[]
 
   @@index([wkOrderId, status])
   @@index([fulfillmentId, status])
@@ -4396,4 +4416,479 @@ model OperationsRecoveryVerification {
 
   @@index([operationsRecoveryId, createdAt])
   @@map("operations_recovery_verifications")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 12 — Exception Financial Liability & Claims
+// Additive only. Frozen parent = Stage 11. Stage 9 financial/custody
+// behavior is never modified; Stage 12 defers to Stage 9 via gates.
+// ═══════════════════════════════════════════════════════
+
+enum EconomicLossKind {
+  GOODS_LOST
+  GOODS_DAMAGED
+  GOODS_NOT_RETURNED
+  /// Trust Trade: goods presented differ from authoritative order terms.
+  GOODS_NON_CONFORMING
+  RIDER_ADVANCE_UNRECOVERED
+  CUSTOMER_PAYMENT_UNRECOVERED
+  OTHER
+}
+
+enum EconomicLossCoverageSourceKind {
+  STAGE9_OBLIGATION
+  STAGE12_OBLIGATION
+  EXTERNAL_RECOVERY
+  ADMIN_WRITE_OFF
+}
+
+enum ExceptionClaimType {
+  GOODS_LOSS
+  GOODS_DAMAGE
+  NON_RETURN
+  /// Canonical Trust Trade non-conformance claim (reason codes refine).
+  GOODS_NON_CONFORMANCE
+  UNRECOVERED_ADVANCE
+  UNRECOVERED_PAYMENT
+  OTHER
+}
+
+/**
+ * Reason codes for ExceptionClaimType.GOODS_NON_CONFORMANCE.
+ * Selecting a reason is an allegation taxonomy — never automatic liability.
+ */
+enum GoodsNonConformanceReasonCode {
+  WRONG_ITEM
+  WRONG_VARIANT
+  WRONG_SIZE
+  WRONG_COLOR
+  WRONG_QUANTITY
+  MISSING_ITEM
+  MATERIAL_SPEC_MISMATCH
+  OTHER_NON_CONFORMANCE
+}
+
+enum ExceptionClaimStatus {
+  OPEN
+  EVIDENCE_REVIEW
+  VERIFIED
+  DETERMINATION_PROPOSED
+  FINALIZED
+  REJECTED
+  WITHDRAWN
+  CANCELLED
+}
+
+enum ClaimEvidenceVisibility {
+  ADMIN_ONLY
+  CLAIM_PARTIES
+  ALL_ORDER_PARTIES
+}
+
+enum ClaimEvidenceKind {
+  PHOTO_REFERENCE
+  DOCUMENT_REFERENCE
+  STATEMENT
+  CUSTODY_TRAIL_REFERENCE
+  SYSTEM_RECORD
+  /// Immutable snapshot of authoritative WkOrder / OrderItem terms.
+  ORDER_TERMS_SNAPSHOT
+  DELIVERY_ATTEMPT_REFERENCE
+  OPERATIONS_RECOVERY_REFERENCE
+  OTHER
+}
+
+enum ClaimVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  INCONCLUSIVE
+}
+
+enum VerifiedFactType {
+  GOODS_LOST_CONFIRMED
+  GOODS_DAMAGED_CONFIRMED
+  CUSTODY_LAST_HOLDER_CONFIRMED
+  RETURN_NOT_COMPLETED_CONFIRMED
+  PAYMENT_NOT_COLLECTED_CONFIRMED
+  PARTY_NEGLIGENCE_CONFIRMED
+  NO_PARTY_FAULT_CONFIRMED
+  /// Evidence establishes presented goods materially differ from order terms.
+  GOODS_NON_CONFORMANCE_CONFIRMED
+  /// Evidence establishes presented goods conform to authoritative order terms.
+  GOODS_CONFORMANCE_CONFIRMED
+  /// Allegation of non-conformance cannot be established from evidence.
+  NON_CONFORMANCE_ALLEGATION_UNSUPPORTED
+  OTHER
+}
+
+enum LiabilityDeterminationStatus {
+  DRAFT
+  PROPOSED
+  FINALIZED
+  CANCELLED
+  SUPERSEDED
+}
+
+/**
+ * Stage 12 never allocates liability to the platform. PLATFORM is intentionally
+ * absent from the enum and additionally rejected by a DB trigger.
+ */
+enum ExceptionLiablePartyType {
+  CUSTOMER
+  MERCHANT
+  RIDER
+}
+
+enum ExceptionFinancialObligationStatus {
+  OPEN
+  PARTIALLY_SETTLED
+  SETTLED
+  CANCELLED
+  WRITTEN_OFF
+}
+
+enum ExceptionLiabilityPolicyStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+}
+
+enum ExceptionClaimEventType {
+  CLAIM_OPENED
+  EVIDENCE_ADDED
+  EVIDENCE_VERIFIED
+  FACT_CONCLUDED
+  DETERMINATION_CREATED
+  DETERMINATION_PROPOSED
+  DETERMINATION_FINALIZED
+  ADJUSTMENT_CREATED
+  COVERAGE_IMPORTED
+  OBLIGATION_CREATED
+  CLAIM_REJECTED
+  CLAIM_WITHDRAWN
+  CLAIM_CANCELLED
+  NOTE_ADDED
+}
+
+model ExceptionLiabilityPolicyVersion {
+  id              String                         @id @default(uuid()) @db.Uuid
+  versionNumber   Int                            @unique @map("version_number")
+  policyHash      String                         @unique @map("policy_hash") @db.VarChar(64)
+  canonicalPolicy Json                           @map("canonical_policy")
+  status          ExceptionLiabilityPolicyStatus @default(DRAFT)
+  activatedAt     DateTime?                      @map("activated_at") @db.Timestamptz
+  createdAt       DateTime                       @default(now()) @map("created_at") @db.Timestamptz
+
+  claims         ExceptionClaim[]
+  determinations LiabilityDetermination[]
+
+  @@index([status, activatedAt])
+  @@map("exception_liability_policy_versions")
+}
+
+model EconomicLoss {
+  id                   String               @id @default(uuid()) @db.Uuid
+  economicLossKey      String               @unique @map("economic_loss_key") @db.VarChar(200)
+  wkOrderId            Int                  @map("wk_order_id")
+  fulfillmentId        String               @map("fulfillment_id") @db.Uuid
+  operationsRecoveryId String?              @map("operations_recovery_id") @db.Uuid
+  lossKind             EconomicLossKind     @map("loss_kind")
+  subjectRef           String               @map("subject_ref") @db.VarChar(200)
+  currency             String               @default("PHP") @db.VarChar(3)
+  grossLossAmount      Decimal              @map("gross_loss_amount") @db.Decimal(14, 2)
+  /**
+   * Fees are never auto-included in compensableAmount; recorded separately.
+   */
+  feeComponentAmount   Decimal              @default(0) @map("fee_component_amount") @db.Decimal(14, 2)
+  compensableAmount    Decimal              @map("compensable_amount") @db.Decimal(14, 2)
+  notes                String?              @db.VarChar(2000)
+  createdByActorType   OrderDomainActorType @map("created_by_actor_type")
+  createdByActorId     String               @map("created_by_actor_id") @db.Uuid
+  correlationId        String?              @map("correlation_id") @db.VarChar(64)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder            WkOrder                        @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment        OrderFulfillment               @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  operationsRecovery OperationsRecovery?            @relation(fields: [operationsRecoveryId], references: [id], onDelete: SetNull)
+  coverages          EconomicLossCoverage[]
+  claims             ExceptionClaim[]
+  determinations     LiabilityDetermination[]
+  obligations        ExceptionFinancialObligation[]
+
+  @@unique([wkOrderId, lossKind, subjectRef])
+  @@index([wkOrderId])
+  @@index([fulfillmentId])
+  @@map("economic_losses")
+}
+
+/**
+ * Append-only ledger of amounts already covered against an EconomicLoss.
+ */
+model EconomicLossCoverage {
+  id                 String                         @id @default(uuid()) @db.Uuid
+  economicLossId     String                         @map("economic_loss_id") @db.Uuid
+  sourceKind         EconomicLossCoverageSourceKind @map("source_kind")
+  sourceRef          String                         @map("source_ref") @db.VarChar(200)
+  stage9ObligationId String?                        @map("stage9_obligation_id") @db.Uuid
+  subjectRefSnapshot String                         @map("subject_ref_snapshot") @db.VarChar(200)
+  amount             Decimal                        @db.Decimal(14, 2)
+  currency           String                         @default("PHP") @db.VarChar(3)
+  notes              String?                        @db.VarChar(2000)
+  createdByActorType OrderDomainActorType           @map("created_by_actor_type")
+  createdByActorId   String                         @map("created_by_actor_id") @db.Uuid
+  correlationId      String?                        @map("correlation_id") @db.VarChar(64)
+  createdAt          DateTime                       @default(now()) @map("created_at") @db.Timestamptz
+
+  economicLoss     EconomicLoss               @relation(fields: [economicLossId], references: [id], onDelete: Restrict)
+  stage9Obligation ReturnFinancialObligation? @relation("EconomicLossCoverageStage9Obligation", fields: [stage9ObligationId], references: [id], onDelete: Restrict)
+
+  @@unique([economicLossId, sourceKind, sourceRef])
+  @@index([economicLossId, createdAt])
+  @@map("economic_loss_coverages")
+}
+
+model ExceptionClaim {
+  id                   String               @id @default(uuid()) @db.Uuid
+  wkOrderId            Int                  @map("wk_order_id")
+  fulfillmentId        String               @map("fulfillment_id") @db.Uuid
+  operationsRecoveryId String               @map("operations_recovery_id") @db.Uuid
+  economicLossId       String               @map("economic_loss_id") @db.Uuid
+  policyVersionId      String               @map("policy_version_id") @db.Uuid
+  policyHash           String               @map("policy_hash") @db.VarChar(64)
+  claimType                   ExceptionClaimType              @map("claim_type")
+  /// Required when claimType=GOODS_NON_CONFORMANCE. Allegation taxonomy only.
+  nonConformanceReasonCode    GoodsNonConformanceReasonCode?  @map("non_conformance_reason_code")
+  status                      ExceptionClaimStatus            @default(OPEN)
+  subjectRef                  String                          @map("subject_ref") @db.VarChar(200)
+  currency             String               @default("PHP") @db.VarChar(3)
+  claimedAmount        Decimal?             @map("claimed_amount") @db.Decimal(14, 2)
+  notes                String?              @db.VarChar(2000)
+  openedByActorType    OrderDomainActorType @map("opened_by_actor_type")
+  openedByActorId      String               @map("opened_by_actor_id") @db.Uuid
+  correlationId        String               @map("correlation_id") @db.VarChar(64)
+  openIdempotencyKey   String?              @map("open_idempotency_key") @db.VarChar(64)
+  openPayloadHash      String?              @map("open_payload_hash") @db.VarChar(64)
+  terminalReason       String?              @map("terminal_reason") @db.VarChar(2000)
+  finalizedAt          DateTime?            @map("finalized_at") @db.Timestamptz
+  rejectedAt           DateTime?            @map("rejected_at") @db.Timestamptz
+  withdrawnAt          DateTime?            @map("withdrawn_at") @db.Timestamptz
+  cancelledAt          DateTime?            @map("cancelled_at") @db.Timestamptz
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder            WkOrder                         @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  fulfillment        OrderFulfillment                @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
+  operationsRecovery OperationsRecovery              @relation(fields: [operationsRecoveryId], references: [id], onDelete: Restrict)
+  economicLoss       EconomicLoss                    @relation(fields: [economicLossId], references: [id], onDelete: Restrict)
+  policyVersion      ExceptionLiabilityPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  openedByUser       User                            @relation("ExceptionClaimOpenedBy", fields: [openedByActorId], references: [id], onDelete: Restrict)
+  events             ExceptionClaimEvent[]
+  evidence           ExceptionClaimEvidence[]
+  verifications      ExceptionClaimVerification[]
+  verifiedFacts      VerifiedFact[]
+  determinations     LiabilityDetermination[]
+  obligations        ExceptionFinancialObligation[]
+
+  @@index([wkOrderId, status])
+  @@index([economicLossId, status])
+  @@index([operationsRecoveryId])
+  @@map("exception_claims")
+}
+
+model ExceptionClaimEvent {
+  id               String                  @id @default(uuid()) @db.Uuid
+  exceptionClaimId String                  @map("exception_claim_id") @db.Uuid
+  eventType        ExceptionClaimEventType @map("event_type")
+  fromStatus       ExceptionClaimStatus?   @map("from_status")
+  toStatus         ExceptionClaimStatus?   @map("to_status")
+  actorType        OrderDomainActorType    @map("actor_type")
+  actorId          String                  @map("actor_id") @db.Uuid
+  reason           String?                 @db.VarChar(2000)
+  correlationId    String?                 @map("correlation_id") @db.VarChar(64)
+  metadata         Json?
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz
+
+  exceptionClaim ExceptionClaim @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+
+  @@index([exceptionClaimId, createdAt])
+  @@map("exception_claim_events")
+}
+
+model ExceptionClaimEvidence {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  exceptionClaimId     String                  @map("exception_claim_id") @db.Uuid
+  evidenceKind         ClaimEvidenceKind       @map("evidence_kind")
+  visibility           ClaimEvidenceVisibility @default(ADMIN_ONLY)
+  storageReference     String?                 @map("storage_reference") @db.VarChar(1000)
+  contentHash          String?                 @map("content_hash") @db.VarChar(64)
+  contentType          String?                 @map("content_type") @db.VarChar(120)
+  notes                String?                 @db.VarChar(2000)
+  metadata             Json?
+  submittedByActorType OrderDomainActorType    @map("submitted_by_actor_type")
+  submittedByActorId   String                  @map("submitted_by_actor_id") @db.Uuid
+  idempotencyKey       String?                 @map("idempotency_key") @db.VarChar(64)
+  payloadHash          String?                 @map("payload_hash") @db.VarChar(64)
+  correlationId        String?                 @map("correlation_id") @db.VarChar(64)
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz
+
+  exceptionClaim ExceptionClaim               @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+  verifications  ExceptionClaimVerification[]
+
+  @@index([exceptionClaimId, createdAt])
+  @@map("exception_claim_evidence")
+}
+
+model ExceptionClaimVerification {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  exceptionClaimId    String                  @map("exception_claim_id") @db.Uuid
+  evidenceId          String                  @map("evidence_id") @db.Uuid
+  verificationStatus  ClaimVerificationStatus @map("verification_status")
+  notes               String?                 @db.VarChar(2000)
+  metadata            Json?
+  verifiedByActorType OrderDomainActorType    @map("verified_by_actor_type")
+  verifiedByActorId   String                  @map("verified_by_actor_id") @db.Uuid
+  idempotencyKey      String?                 @map("idempotency_key") @db.VarChar(64)
+  payloadHash         String?                 @map("payload_hash") @db.VarChar(64)
+  correlationId       String?                 @map("correlation_id") @db.VarChar(64)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz
+
+  exceptionClaim ExceptionClaim         @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+  evidence       ExceptionClaimEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@index([exceptionClaimId, createdAt])
+  @@index([evidenceId, createdAt])
+  @@map("exception_claim_verifications")
+}
+
+/**
+ * Immutable SYSTEM_ADMIN conclusion derived from VERIFIED evidence.
+ */
+model VerifiedFact {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  exceptionClaimId      String                    @map("exception_claim_id") @db.Uuid
+  factType              VerifiedFactType          @map("fact_type")
+  subjectRef            String                    @map("subject_ref") @db.VarChar(200)
+  attributedPartyType   ExceptionLiablePartyType? @map("attributed_party_type")
+  attributedPartyUserId String?                   @map("attributed_party_user_id") @db.Uuid
+  attributedMerchantId  Int?                      @map("attributed_merchant_id")
+  supportingEvidenceId  String?                   @map("supporting_evidence_id") @db.Uuid
+  statement             String                    @db.VarChar(2000)
+  metadata              Json?
+  concludedByActorType  OrderDomainActorType      @map("concluded_by_actor_type")
+  concludedByActorId    String                    @map("concluded_by_actor_id") @db.Uuid
+  idempotencyKey        String?                   @map("idempotency_key") @db.VarChar(64)
+  payloadHash           String?                   @map("payload_hash") @db.VarChar(64)
+  correlationId         String?                   @map("correlation_id") @db.VarChar(64)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz
+
+  exceptionClaim ExceptionClaim        @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+  allocations    LiabilityAllocation[]
+
+  @@index([exceptionClaimId, createdAt])
+  @@map("verified_facts")
+}
+
+model LiabilityDetermination {
+  id                          String                       @id @default(uuid()) @db.Uuid
+  exceptionClaimId            String                       @map("exception_claim_id") @db.Uuid
+  economicLossId              String                       @map("economic_loss_id") @db.Uuid
+  policyVersionId             String                       @map("policy_version_id") @db.Uuid
+  policyHash                  String                       @map("policy_hash") @db.VarChar(64)
+  status                      LiabilityDeterminationStatus @default(DRAFT)
+  currency                    String                       @default("PHP") @db.VarChar(3)
+  totalLiabilityAmount        Decimal                      @default(0) @map("total_liability_amount") @db.Decimal(14, 2)
+  compensableAmountSnapshot   Decimal?                     @map("compensable_amount_snapshot") @db.Decimal(14, 2)
+  priorCoverageAmountSnapshot Decimal?                     @map("prior_coverage_amount_snapshot") @db.Decimal(14, 2)
+  remainingAmountSnapshot     Decimal?                     @map("remaining_amount_snapshot") @db.Decimal(14, 2)
+  stage9DeterminationId       String?                      @map("stage9_determination_id") @db.Uuid
+  adjustmentOfDeterminationId String?                      @map("adjustment_of_determination_id") @db.Uuid
+  reason                      String?                      @db.VarChar(2000)
+  createdByActorType          OrderDomainActorType         @map("created_by_actor_type")
+  createdByActorId            String                       @map("created_by_actor_id") @db.Uuid
+  proposedByActorType         OrderDomainActorType?        @map("proposed_by_actor_type")
+  proposedByActorId           String?                      @map("proposed_by_actor_id") @db.Uuid
+  proposedAt                  DateTime?                    @map("proposed_at") @db.Timestamptz
+  finalizedByActorType        OrderDomainActorType?        @map("finalized_by_actor_type")
+  finalizedByActorId          String?                      @map("finalized_by_actor_id") @db.Uuid
+  finalizedAt                 DateTime?                    @map("finalized_at") @db.Timestamptz
+  cancelledAt                 DateTime?                    @map("cancelled_at") @db.Timestamptz
+  correlationId               String?                      @map("correlation_id") @db.VarChar(64)
+  createIdempotencyKey        String?                      @map("create_idempotency_key") @db.VarChar(64)
+  createPayloadHash           String?                      @map("create_payload_hash") @db.VarChar(64)
+  proposeIdempotencyKey       String?                      @map("propose_idempotency_key") @db.VarChar(64)
+  proposePayloadHash          String?                      @map("propose_payload_hash") @db.VarChar(64)
+  finalizeIdempotencyKey      String?                      @map("finalize_idempotency_key") @db.VarChar(64)
+  finalizePayloadHash         String?                      @map("finalize_payload_hash") @db.VarChar(64)
+  createdAt                   DateTime                     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime                     @updatedAt @map("updated_at") @db.Timestamptz
+
+  exceptionClaim ExceptionClaim                  @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+  economicLoss   EconomicLoss                    @relation(fields: [economicLossId], references: [id], onDelete: Restrict)
+  policyVersion  ExceptionLiabilityPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  adjustmentOf   LiabilityDetermination?         @relation("LiabilityDeterminationAdjustment", fields: [adjustmentOfDeterminationId], references: [id], onDelete: Restrict)
+  adjustments    LiabilityDetermination[]        @relation("LiabilityDeterminationAdjustment")
+  allocations    LiabilityAllocation[]
+  obligations    ExceptionFinancialObligation[]
+
+  @@index([exceptionClaimId, status])
+  @@index([economicLossId, status])
+  @@map("liability_determinations")
+}
+
+model LiabilityAllocation {
+  id                       String                   @id @default(uuid()) @db.Uuid
+  liabilityDeterminationId String                   @map("liability_determination_id") @db.Uuid
+  partyType                ExceptionLiablePartyType @map("party_type")
+  partyUserId              String?                  @map("party_user_id") @db.Uuid
+  partyMerchantId          Int?                     @map("party_merchant_id")
+  amount                   Decimal                  @db.Decimal(14, 2)
+  currency                 String                   @default("PHP") @db.VarChar(3)
+  verifiedFactId           String?                  @map("verified_fact_id") @db.Uuid
+  basis                    String?                  @db.VarChar(2000)
+  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+
+  liabilityDetermination LiabilityDetermination @relation(fields: [liabilityDeterminationId], references: [id], onDelete: Restrict)
+  partyUser              User?                  @relation("LiabilityAllocationUser", fields: [partyUserId], references: [id], onDelete: Restrict)
+  partyMerchant          Merchant?              @relation("LiabilityAllocationMerchant", fields: [partyMerchantId], references: [id], onDelete: Restrict)
+  verifiedFact           VerifiedFact?          @relation(fields: [verifiedFactId], references: [id], onDelete: Restrict)
+
+  @@index([liabilityDeterminationId])
+  @@map("liability_allocations")
+}
+
+model ExceptionFinancialObligation {
+  id                       String                             @id @default(uuid()) @db.Uuid
+  liabilityDeterminationId String                             @map("liability_determination_id") @db.Uuid
+  exceptionClaimId         String                             @map("exception_claim_id") @db.Uuid
+  economicLossId           String                             @map("economic_loss_id") @db.Uuid
+  wkOrderId                Int                                @map("wk_order_id")
+  debtorType               ExceptionLiablePartyType           @map("debtor_type")
+  debtorUserId             String?                            @map("debtor_user_id") @db.Uuid
+  debtorMerchantId         Int?                               @map("debtor_merchant_id")
+  creditorType             ExceptionLiablePartyType           @map("creditor_type")
+  creditorUserId           String?                            @map("creditor_user_id") @db.Uuid
+  creditorMerchantId       Int?                               @map("creditor_merchant_id")
+  principal                Decimal                            @db.Decimal(14, 2)
+  currency                 String                             @default("PHP") @db.VarChar(3)
+  status                   ExceptionFinancialObligationStatus @default(OPEN)
+  reason                   String?                            @db.VarChar(2000)
+  correlationId            String?                            @map("correlation_id") @db.VarChar(64)
+  createdAt                DateTime                           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime                           @updatedAt @map("updated_at") @db.Timestamptz
+
+  liabilityDetermination LiabilityDetermination @relation(fields: [liabilityDeterminationId], references: [id], onDelete: Restrict)
+  exceptionClaim         ExceptionClaim         @relation(fields: [exceptionClaimId], references: [id], onDelete: Restrict)
+  economicLoss           EconomicLoss           @relation(fields: [economicLossId], references: [id], onDelete: Restrict)
+  wkOrder                WkOrder                @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  debtorUser             User?                  @relation("ExceptionFinancialObligationDebtorUser", fields: [debtorUserId], references: [id], onDelete: Restrict)
+  debtorMerchant         Merchant?              @relation("ExceptionFinancialObligationDebtorMerchant", fields: [debtorMerchantId], references: [id], onDelete: Restrict)
+  creditorUser           User?                  @relation("ExceptionFinancialObligationCreditorUser", fields: [creditorUserId], references: [id], onDelete: Restrict)
+  creditorMerchant       Merchant?              @relation("ExceptionFinancialObligationCreditorMerchant", fields: [creditorMerchantId], references: [id], onDelete: Restrict)
+
+  @@index([wkOrderId, status])
+  @@index([liabilityDeterminationId])
+  @@index([exceptionClaimId, status])
+  @@map("exception_financial_obligations")
 }

@@ -4,14 +4,7 @@
  * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
-import {
-  isCurrentSchemaRegressionMode,
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-} from '../test-support/test-database-guard';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 
 const STAGE6_ENV_PRESENT = loadStageTestEnv('.env.stage6.test');
 
@@ -44,22 +37,6 @@ import { hashReturnSecret } from './return-token';
 const describeIf = STAGE6_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set([
-  'victor',
-  'wekonnek_stage6_test',
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-]);
-const FORBIDDEN_DB_USERS = new Set([
-  'wekonnek_stage2_test',
-  'wekonnek_stage3_test',
-  'wekonnek_stage4_test',
-  'wekonnek_stage5_test',
-  'wekonnek_stage5b_test',
-]);
 
 describeIf(
   'Stage 6 Return Handoff PostgreSQL (wekonnek_stage6_test)',
@@ -110,25 +87,11 @@ describeIf(
 
     beforeAll(async () => {
       await prisma.$connect();
-      const target = await prisma.$queryRaw<
-        Array<{ database: string; user: string }>
-      >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-      const database = target[0]?.database;
-      const user = target[0]?.user;
-      const okHistorical = database === 'wekonnek_stage6_test';
-      const okRegression =
-        isCurrentSchemaRegressionMode() &&
-        (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE)));
-      if (
-        (!okHistorical && !okRegression) ||
-        !user ||
-        FORBIDDEN_DB_USERS.has(user) ||
-        !ALLOWED_DB_USERS.has(user)
-      ) {
-        throw new Error(
-          `Stage 6 tests require wekonnek_stage6_test or stage7 regression identity; got database=${database} user=${user}`,
-        );
-      }
+      await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 6 return handoff',
+        historicalDatabases: ['wekonnek_stage6_test'],
+        historicalUsers: new Set(['victor', 'wekonnek_stage6_test']),
+      });
     });
 
     afterEach(async () => {
@@ -352,17 +315,13 @@ describeIf(
     }
 
     it('reports dedicated DB identity', async () => {
-      const rows = await prisma.$queryRaw<
-        Array<{ database: string; user: string }>
-      >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-      expect(
-        rows[0]?.database === 'wekonnek_stage6_test' ||
-          rows[0]?.database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE ||
-          rows[0]?.database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE ||
-          rows[0]?.database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE ||
-          rows[0]?.database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||
-          rows[0]?.database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-      ).toBe(true);
+      const id = await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 6 return handoff identity probe',
+        historicalDatabases: ['wekonnek_stage6_test'],
+        historicalUsers: new Set(['victor', 'wekonnek_stage6_test']),
+      });
+      expect(id.database).toBeTruthy();
+      expect(id.user).toBeTruthy();
     });
 
     it('enforces one ACTIVE return token per fulfillment/purpose', async () => {

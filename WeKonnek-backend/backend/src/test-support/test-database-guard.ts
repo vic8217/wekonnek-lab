@@ -61,6 +61,33 @@ export const STAGE11_ACCEPTANCE_DATABASE = 'wekonnek_stage11_test';
 export const STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE =
   'wekonnek_stage11_regression_test';
 
+export const STAGE12_ACCEPTANCE_DATABASE = 'wekonnek_stage12_test';
+export const STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE =
+  'wekonnek_stage12_regression_test';
+
+/**
+ * Prior-stage DBs Stage 12 suites must never mutate (Stage 11 becomes a frozen
+ * parent once Stage 12 opens, alongside earlier historical/contaminated DBs).
+ */
+export const STAGE12_FORBIDDEN_DATABASES = new Set([
+  ...HISTORICAL_ACCEPTANCE_DATABASES,
+  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE8_ACCEPTANCE_DATABASE,
+  STAGE9_ACCEPTANCE_DATABASE,
+  STAGE10_ACCEPTANCE_DATABASE,
+  STAGE11_ACCEPTANCE_DATABASE,
+  'wekonnek_stage7_regression_test',
+  'wekonnek_stage8_regression_test',
+  'wekonnek_stage9_regression_test',
+  'wekonnek_stage10_regression_test',
+  'wekonnek_stage11_regression_test',
+]);
+
 /**
  * Prior-stage DBs Stage 11 suites must never mutate (includes Stage 10 acceptance
  * and Stage 10 regression, plus earlier historical/contaminated DBs).
@@ -139,7 +166,17 @@ export const DISPOSABLE_CLEANUP_DATABASES = new Set([
   STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE11_ACCEPTANCE_DATABASE,
   STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE12_ACCEPTANCE_DATABASE,
+  STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
+
+/** Terra/Cursor ephemeral Stage 12 acceptance DBs. */
+const STAGE12_EPHEMERAL_DISPOSABLE_RE =
+  /^wekonnek_stage12_(terra|cursor)_[a-z0-9][a-z0-9_]*$/;
+
+export function isStage12TerraDisposableDatabase(database: string): boolean {
+  return STAGE12_EPHEMERAL_DISPOSABLE_RE.test(database);
+}
 
 export function isCurrentSchemaRegressionMode(): boolean {
   return process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION === '1';
@@ -172,11 +209,15 @@ export function assertNotHistoricalAcceptanceDatabase(
 
 export function assertDisposableCleanupDatabase(database: string): void {
   assertNotHistoricalAcceptanceDatabase(database, 'cleanup');
-  if (!DISPOSABLE_CLEANUP_DATABASES.has(database)) {
-    throw new Error(
-      `cleanup refused: expected disposable Stage 7/8/9/10/11 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}), got ${database}`,
-    );
+  if (
+    DISPOSABLE_CLEANUP_DATABASES.has(database) ||
+    isStage12TerraDisposableDatabase(database)
+  ) {
+    return;
   }
+  throw new Error(
+    `cleanup refused: expected disposable Stage 7/8/9/10/11/12 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*), got ${database}`,
+  );
 }
 
 export async function assertAllowedTestDatabase(
@@ -203,7 +244,8 @@ export async function assertAllowedTestDatabase(
 
 /**
  * Allowed DBs for a stage suite under either historical acceptance or
- * current-schema regression mode. Stage 11 tip uses wekonnek_stage11_regression_test.
+ * current-schema regression mode. Stage 12 is the tip, so regression mode adds
+ * wekonnek_stage12_regression_test.
  */
 export function stageOrRegressionDatabases(
   historical: string | string[],
@@ -212,16 +254,19 @@ export function stageOrRegressionDatabases(
     Array.isArray(historical) ? historical : [historical],
   );
   if (isCurrentSchemaRegressionMode()) {
+    set.add(STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    // Stage 11 remains accepted while its regression DB is still provisioned.
     set.add(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
   }
   return set;
 }
 
-/** True when connected to the disposable current-schema regression DB (Stage 11 tip). */
+/** True when connected to the disposable current-schema regression DB (Stage 12 tip). */
 export function isAllowedCurrentSchemaRegressionDatabase(
   database: string,
 ): boolean {
   return (
+    database === STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE ||

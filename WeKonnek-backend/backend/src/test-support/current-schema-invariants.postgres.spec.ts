@@ -1,15 +1,16 @@
 /**
- * Prove raw SQL invariants on wekonnek_stage11_regression_test that ordinary
- * Prisma schema push may omit (partial unique indexes, check constraints,
- * settlement / Stage 8–11 append-only triggers).
+ * Prove raw SQL invariants on the selected Stage 12 tip regression DB
+ * (default wekonnek_stage12_regression_test, or WEKONNEK_ACCEPTANCE_DATABASE_URL
+ * pointing at an approved disposable regression/terra DB).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-} from './test-database-guard';
+  assertPrismaConnectedToStage12AcceptanceDb,
+  resolveStage12ExpectedDatabase,
+} from './acceptance-database';
 
 process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
-const ENV_OK = loadStageTestEnv('.env.stage11.regression.test');
+const ENV_OK = loadStageTestEnv('.env.stage12.regression.test');
 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,15 +18,18 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = ENV_OK ? describe : describe.skip;
 jest.setTimeout(60_000);
 
-describeIf('Stage 11 current-schema raw SQL invariants', () => {
+const EXPECTED_DB = resolveStage12ExpectedDatabase();
+
+describeIf(`Current-schema raw SQL invariants (${EXPECTED_DB})`, () => {
   const prisma = new PrismaService();
 
   beforeAll(async () => {
     await prisma.$connect();
-    const id = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(id[0]?.database).toBe(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    await assertPrismaConnectedToStage12AcceptanceDb(
+      prisma,
+      EXPECTED_DB,
+      'Current-schema raw SQL invariants',
+    );
   });
 
   afterAll(async () => prisma.onModuleDestroy());
@@ -165,6 +169,22 @@ describeIf('Stage 11 current-schema raw SQL invariants', () => {
     ).toBe(true);
     expect(
       await triggerExists('stage11_ore_verifications_append_only_del_trg'),
+    ).toBe(true);
+  });
+
+  it('STAGE 12: economic loss identity + coverage ceiling + claim append-only', async () => {
+    expect(await indexExists('economic_losses_order_kind_subject_key')).toBe(
+      true,
+    );
+    expect(await indexExists('exception_claims_one_active_per_economic_loss')).toBe(
+      true,
+    );
+    expect(await triggerExists('stage12_coverage_ceiling_trg')).toBe(true);
+    expect(
+      await triggerExists('stage12_exception_claim_terminal_immutable_trg'),
+    ).toBe(true);
+    expect(
+      await triggerExists('stage12_obligation_reject_platform_trg'),
     ).toBe(true);
   });
 });

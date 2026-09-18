@@ -5,14 +5,7 @@
  * Does NOT fall back to stage0/stage1/stage2/stage3 databases.
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
-import {
-  isCurrentSchemaRegressionMode,
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-} from '../test-support/test-database-guard';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 
 const STAGE4_ENV_PRESENT = loadStageTestEnv('.env.stage4.test');
 
@@ -66,22 +59,11 @@ describeIf('Stage 4A Rider Advance PostgreSQL (wekonnek_stage4_test)', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    const database = target[0]?.database;
-    const user = target[0]?.user;
-    const okHistorical =
-      database === 'wekonnek_stage4_test' && user === 'wekonnek_stage4_test';
-    const okRegression =
-      isCurrentSchemaRegressionMode() &&
-      (database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (database === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE || database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE))) &&
-      (user === 'victor' || user === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE || (user === STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE || user === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE || user === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE)));
-    if (!okHistorical && !okRegression) {
-      throw new Error(
-        `Stage 4 tests require wekonnek_stage4_test or stage7 regression identity; got database=${database} user=${user}`,
-      );
-    }
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 4A rider advance',
+      historicalDatabases: ['wekonnek_stage4_test'],
+      historicalUsers: new Set(['wekonnek_stage4_test']),
+    });
   });
 
   afterEach(async () => {

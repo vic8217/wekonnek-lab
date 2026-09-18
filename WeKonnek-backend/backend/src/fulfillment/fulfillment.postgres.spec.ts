@@ -1,8 +1,10 @@
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { isCurrentSchemaRegressionMode } from '../test-support/test-database-guard';
 
 if (isCurrentSchemaRegressionMode()) {
-  loadStageTestEnv('.env.stage7.regression.test');
+  loadStageTestEnv('.env.stage12.regression.test') ||
+    loadStageTestEnv('.env.stage7.regression.test');
 } else {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('dotenv').config();
@@ -49,18 +51,26 @@ describe('Stage 0A fulfillment concurrency (PostgreSQL)', () => {
 
   beforeAll(async () => {
     const url = process.env.DATABASE_URL ?? '';
-    if (!LOCAL_DB_HOST.test(url)) {
+    if (!LOCAL_DB_HOST.test(url) && !url.includes('host=/var/run/postgresql')) {
       throw new Error(
         'Stage 0A postgres tests refuse non-local DATABASE_URL',
       );
     }
     await prisma.$connect();
-    const target = await prisma.$queryRaw<Array<{ database: string }>>(
-      Prisma.sql`SELECT current_database() AS database`,
-    );
-    const database = target[0]?.database ?? '';
-    if (/prod/i.test(database)) {
-      throw new Error(`Refusing to run Stage 0A tests against ${database}`);
+    if (isCurrentSchemaRegressionMode()) {
+      await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 0A fulfillment',
+        historicalDatabases: ['wekonnek_stage0_test'],
+        historicalUsers: new Set(['victor', 'wekonnek_stage0_test']),
+      });
+    } else {
+      const target = await prisma.$queryRaw<Array<{ database: string }>>(
+        Prisma.sql`SELECT current_database() AS database`,
+      );
+      const database = target[0]?.database ?? '';
+      if (/prod/i.test(database) || database === 'postgres') {
+        throw new Error(`Refusing to run Stage 0A tests against ${database}`);
+      }
     }
   });
 

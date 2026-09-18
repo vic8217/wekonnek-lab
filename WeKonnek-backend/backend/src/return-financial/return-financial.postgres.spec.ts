@@ -5,12 +5,12 @@
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
-  STAGE9_ACCEPTANCE_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_FORBIDDEN_DATABASES,
+  assertLegacyPostgresSuiteIdentity,
+  resolveStage12ExpectedDatabase
+} from '../test-support/acceptance-database';
+import {
   isCurrentSchemaRegressionMode,
+  STAGE9_ACCEPTANCE_DATABASE
 } from '../test-support/test-database-guard';
 
 const STAGE9_ENV_PRESENT = loadStageTestEnv('.env.stage9.test');
@@ -53,15 +53,8 @@ import { ReturnFinancialTermsService } from './return-financial-terms.service';
 const describeIf = STAGE9_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(240_000);
 
-const ALLOWED_DB_USERS = new Set([
-  'victor',
-  'wekonnek_stage9_test',
-  'wekonnek_stage9_regression_test',
-  'wekonnek_stage10_regression_test',
-  'wekonnek_stage11_regression_test',
-]);
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? resolveStage12ExpectedDatabase()
   : STAGE9_ACCEPTANCE_DATABASE;
 
 function errCode(e: unknown): string | undefined {
@@ -114,23 +107,11 @@ describeIf(`Stage 9 Return Financial PostgreSQL (${EXPECTED_DB})`, () => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    const database = target[0]?.database;
-    const user = target[0]?.user;
-    if (
-      !database ||
-      STAGE9_FORBIDDEN_DATABASES.has(database) ||
-      database !== EXPECTED_DB ||
-      !user ||
-      !ALLOWED_DB_USERS.has(user)
-    ) {
-      throw new Error(
-        `Stage 9 tests require ${EXPECTED_DB}; got database=${database} user=${user}`,
-      );
-    }
-    await terms.ensureSeededTerms();
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 9 return financial',
+      historicalDatabases: [STAGE9_ACCEPTANCE_DATABASE],
+      historicalUsers: new Set(['victor', STAGE9_ACCEPTANCE_DATABASE]),
+    });
   });
 
   afterEach(async () => {

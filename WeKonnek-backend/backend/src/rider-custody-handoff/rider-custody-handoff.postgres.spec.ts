@@ -5,12 +5,12 @@
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import {
+  assertLegacyPostgresSuiteIdentity,
+  resolveStage12ExpectedDatabase,
+} from '../test-support/acceptance-database';
+import {
   isCurrentSchemaRegressionMode,
   STAGE7_ACCEPTANCE_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
 } from '../test-support/test-database-guard';
 
 const STAGE7_ENV_PRESENT = loadStageTestEnv('.env.stage7.test');
@@ -44,24 +44,8 @@ const describeIf = STAGE7_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
 const EXPECTED_DB = isCurrentSchemaRegressionMode()
-  ? STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE
+  ? resolveStage12ExpectedDatabase()
   : STAGE7_ACCEPTANCE_DATABASE;
-const ALLOWED_DB_USERS = new Set([
-  'victor',
-  STAGE7_ACCEPTANCE_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-]);
-const FORBIDDEN_DBS = new Set([
-  'wekonnek_stage2_test',
-  'wekonnek_stage3_test',
-  'wekonnek_stage4_test',
-  'wekonnek_stage5_test',
-  'wekonnek_stage5b_test',
-  'wekonnek_stage6_test',
-]);
 
 describeIf(
   `Stage 7 Rider Custody Handoff PostgreSQL (${EXPECTED_DB})`,
@@ -118,22 +102,11 @@ describeIf(
 
     beforeAll(async () => {
       await prisma.$connect();
-      const target = await prisma.$queryRaw<
-        Array<{ database: string; user: string }>
-      >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-      const database = target[0]?.database;
-      const user = target[0]?.user;
-      if (
-        !database ||
-        FORBIDDEN_DBS.has(database) ||
-        database !== EXPECTED_DB ||
-        !user ||
-        !ALLOWED_DB_USERS.has(user)
-      ) {
-        throw new Error(
-          `Stage 7 tests require ${EXPECTED_DB} identity; got database=${database} user=${user}`,
-        );
-      }
+      await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 7 rider custody handoff',
+        historicalDatabases: [STAGE7_ACCEPTANCE_DATABASE],
+        historicalUsers: new Set(['victor', STAGE7_ACCEPTANCE_DATABASE]),
+      });
     });
 
     afterEach(async () => {

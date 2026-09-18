@@ -23,6 +23,10 @@ import {
 import { randomUUID } from 'crypto';
 import { OrderDomainEventService } from '../fulfillment/order-domain-event.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  buildStage9EconomicScope,
+  evaluateStage9Stage12OverlapGuard,
+} from '../exception-financial/exception-financial.policy';
 import { RiderAdvanceCollectibilityService } from './rider-advance-collectibility.service';
 import { ReturnFinancialTermsService } from './return-financial-terms.service';
 
@@ -89,6 +93,92 @@ export class ReturnFinancialDeterminationService {
     if (actor?.role === UserRole.admin) return 'ADMIN';
     await this.assertMerchantOwner(merchantId, actorUserId);
     return 'MERCHANT';
+  }
+
+  /**
+   * Stage 12 integration guard (authorized Stage 9 change).
+   * After authoritative Stage 9 locks (determination → orders → fulfillment →
+   * RiderAdvance) and before any FINALIZED mutation / obligation / restriction:
+   * build Stage9EconomicScope, predicate-lock contained EconomicLoss rows
+   * (Serializable SIREAD protects phantoms), refuse if any positive effective
+   * Stage 12 STAGE12_OBLIGATION coverage is economically contained in the
+   * proposed whole-order principal. No auto-netting.
+   *
+   * On pre-Stage12 schemas (frozen Stage 9 acceptance DBs) `economic_losses`
+   * does not exist — no Stage 12 authority can exist, so the guard is a no-op.
+   */
+  private async assertNoOverlappingStage12Authority(
+    tx: Prisma.TransactionClient,
+    input: {
+      wkOrderId: number;
+      path: 'RIDER_ADVANCE' | 'ORDINARY_MERCHANT_PAYMENT';
+      grossPrincipal: Prisma.Decimal;
+      merchantToRiderAmount: Prisma.Decimal;
+      merchantToCustomerAmount: Prisma.Decimal;
+      riderAdvanceId: string | null;
+    },
+  ): Promise<void> {
+    if (
+      input.merchantToRiderAmount.lte(0) &&
+      input.merchantToCustomerAmount.lte(0)
+    ) {
+      return;
+    }
+
+    const present = await tx.$queryRaw<Array<{ present: boolean | null }>>`
+      SELECT to_regclass('public.economic_losses') IS NOT NULL AS present
+    `;
+    if (!present[0]?.present) return;
+
+    const scope = buildStage9EconomicScope({
+      wkOrderId: input.wkOrderId,
+      path: input.path,
+      grossPrincipal: input.grossPrincipal,
+      merchantToRiderAmount: input.merchantToRiderAmount,
+      merchantToCustomerAmount: input.merchantToCustomerAmount,
+      riderAdvanceId: input.riderAdvanceId,
+    });
+    if (scope.includedLossKinds.length === 0) return;
+
+    // Predicate lock under Serializable: even an empty result establishes
+    // SIREAD range protection against concurrent EconomicLoss inserts that
+    // match wk_order_id + included loss kinds (phantom containment race).
+    const kindList = scope.includedLossKinds.map((k) => k);
+    await tx.$queryRaw`
+      SELECT id FROM "economic_losses"
+      WHERE wk_order_id = ${input.wkOrderId}
+        AND loss_kind::text IN (${Prisma.join(kindList)})
+      ORDER BY id
+      FOR UPDATE
+    `;
+
+    const losses = await tx.economicLoss.findMany({
+      where: {
+        wkOrderId: input.wkOrderId,
+        lossKind: { in: scope.includedLossKinds },
+      },
+      orderBy: { id: 'asc' },
+      include: { coverages: true },
+    });
+
+    const gate = evaluateStage9Stage12OverlapGuard({
+      scope,
+      losses: losses.map((l) => ({
+        id: l.id,
+        lossKind: l.lossKind,
+        subjectRef: l.subjectRef,
+        coverages: l.coverages.map((c) => ({
+          sourceKind: c.sourceKind,
+          amount: c.amount,
+        })),
+      })),
+    });
+    if (!gate.ok) {
+      throw new ConflictException({
+        code: gate.code,
+        message: gate.message,
+      });
+    }
   }
 
   private async requireReturnEligibility(tx: Prisma.TransactionClient, wkOrderId: number) {
@@ -721,6 +811,19 @@ export class ReturnFinancialDeterminationService {
             merchantToRider = P.sub(R).toDecimalPlaces(2);
             merchantToCustomer = R;
           }
+
+          // Cross-stage authority check BEFORE any Stage 9 FINALIZED mutation.
+          await this.assertNoOverlappingStage12Authority(tx, {
+            wkOrderId: order.id,
+            path:
+              det.path === PATH_ORDINARY
+                ? 'ORDINARY_MERCHANT_PAYMENT'
+                : 'RIDER_ADVANCE',
+            grossPrincipal: snapshotPrincipal ?? MONEY(0),
+            merchantToRiderAmount: merchantToRider,
+            merchantToCustomerAmount: merchantToCustomer,
+            riderAdvanceId: raId,
+          });
 
           const now = new Date();
           const updated = await tx.returnFinancialDetermination.update({

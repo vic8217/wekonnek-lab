@@ -23,9 +23,13 @@ import {
   OperationsRecoveryDisposition,
   OperationsRecoveryTrigger,
   OperationsRecoveryEventType,
+  ExceptionClaimStatus,
+  ExceptionFinancialObligationStatus,
+  LiabilityDeterminationStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_DELIVERY_ATTEMPTS } from '../redelivery/redelivery.policy';
+import { EXCEPTION_CLAIM_ACTIVE_STATUSES } from '../exception-financial/exception-financial.policy';
 
 export type DerivedOperationalState =
   | 'ACTIVE'
@@ -490,6 +494,64 @@ export class OrderOperationalStateService {
         })) > 0
       ) {
         flags.push('PENDING_CUSTODY_TRANSFER_CLEARED');
+      }
+
+      // Stage 12 exception financial liability flags — derived read-only from
+      // Stage 12 tables. Stage 11 semantics above are untouched.
+      const activeClaim = await this.prisma.exceptionClaim.findFirst({
+        where: {
+          fulfillmentId: fulfillment.id,
+          status: { in: EXCEPTION_CLAIM_ACTIVE_STATUSES },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (activeClaim) {
+        flags.push('CLAIM_OPEN');
+        if (
+          activeClaim.status === ExceptionClaimStatus.DETERMINATION_PROPOSED
+        ) {
+          flags.push('LIABILITY_DETERMINATION_PROPOSED');
+        }
+      }
+      const finalizedLiability =
+        await this.prisma.liabilityDetermination.findFirst({
+          where: {
+            status: LiabilityDeterminationStatus.FINALIZED,
+            exceptionClaim: { fulfillmentId: fulfillment.id },
+          },
+          orderBy: { finalizedAt: 'desc' },
+        });
+      if (finalizedLiability) {
+        flags.push('LIABILITY_DETERMINED');
+      }
+      const pendingExceptionObligations =
+        await this.prisma.exceptionFinancialObligation.count({
+          where: {
+            wkOrderId,
+            status: {
+              in: [
+                ExceptionFinancialObligationStatus.OPEN,
+                ExceptionFinancialObligationStatus.PARTIALLY_SETTLED,
+              ],
+            },
+          },
+        });
+      if (pendingExceptionObligations > 0) {
+        flags.push('EXCEPTION_OBLIGATION_PENDING');
+      }
+      const uncoveredLoss = await this.prisma.economicLoss.findFirst({
+        where: { fulfillmentId: fulfillment.id },
+        include: { coverages: { select: { amount: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (uncoveredLoss) {
+        const covered = uncoveredLoss.coverages.reduce(
+          (acc, c) => acc.add(MONEY(c.amount)),
+          MONEY(0),
+        );
+        if (MONEY(uncoveredLoss.compensableAmount).gt(covered)) {
+          flags.push('ECONOMIC_LOSS_UNCOVERED');
+        }
       }
     }
 

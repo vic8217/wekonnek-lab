@@ -6,15 +6,8 @@
  * Historical stage5b/stage6 acceptance DBs are frozen / contaminated and refused.
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
-import {
-  DISPOSABLE_CLEANUP_DATABASES,
-  STAGE7_ACCEPTANCE_DATABASE,
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-} from '../test-support/test-database-guard';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
+import { STAGE7_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 import { RiderAdvanceCollectibilityService } from '../return-financial/rider-advance-collectibility.service';
 
 const STAGE5B_ENV_PRESENT =
@@ -46,24 +39,6 @@ import { truncateSettlementsForStage5bTest } from './stage5b-test-cleanup';
 const describeIf = STAGE5B_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set([
-  'victor',
-  STAGE7_ACCEPTANCE_DATABASE,
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE8_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE9_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE,
-  STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
-]);
-const FORBIDDEN_DB_USERS = new Set([
-  'wekonnek_stage2_test',
-  'wekonnek_stage3_test',
-  'wekonnek_stage4_test',
-  'wekonnek_stage5_test',
-  'wekonnek_stage5b_test',
-  'wekonnek_stage6_test',
-]);
-const ALLOWED_DATABASES = DISPOSABLE_CLEANUP_DATABASES;
 
 function errCode(err: unknown): string | undefined {
   if (
@@ -104,24 +79,11 @@ describeIf(
 
     beforeAll(async () => {
       await prisma.$connect();
-      const target = await prisma.$queryRaw<
-        Array<{ database: string; user: string }>
-      >(
-        Prisma.sql`SELECT current_database() AS database, current_user AS user`,
-      );
-      const database = target[0]?.database;
-      const user = target[0]?.user;
-      if (
-        !database ||
-        !ALLOWED_DATABASES.has(database) ||
-        !user ||
-        FORBIDDEN_DB_USERS.has(user) ||
-        !ALLOWED_DB_USERS.has(user)
-      ) {
-        throw new Error(
-          `Stage 5B tests require wekonnek_stage7_test|wekonnek_stage7_regression_test identity; got database=${database} user=${user}`,
-        );
-      }
+      await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 5B rider advance settlement',
+        historicalDatabases: [STAGE7_ACCEPTANCE_DATABASE],
+        historicalUsers: new Set(['victor', STAGE7_ACCEPTANCE_DATABASE]),
+      });
     });
 
     afterEach(async () => {
@@ -317,14 +279,19 @@ describeIf(
       return ack.riderAdvance;
     }
 
-    it('reports dedicated DB identity wekonnek_stage7_test|wekonnek_stage7_regression_test', async () => {
+    it('reports dedicated disposable Stage 7 / current-schema acceptance identity', async () => {
       const row = await prisma.$queryRaw<
         Array<{ database: string; user: string }>
       >(
         Prisma.sql`SELECT current_database() AS database, current_user AS user`,
       );
-      expect(ALLOWED_DATABASES.has(row[0].database)).toBe(true);
-      expect(ALLOWED_DB_USERS.has(row[0].user)).toBe(true);
+      const id = await assertLegacyPostgresSuiteIdentity(prisma, {
+        label: 'Stage 5B identity probe',
+        historicalDatabases: [STAGE7_ACCEPTANCE_DATABASE],
+        historicalUsers: new Set(['victor', STAGE7_ACCEPTANCE_DATABASE]),
+      });
+      expect(id.database).toBe(row[0].database);
+      expect(id.user).toBe(row[0].user);
     });
 
     it('1) cash 980 against principal 980 -> REIMBURSED + completion once', async () => {
