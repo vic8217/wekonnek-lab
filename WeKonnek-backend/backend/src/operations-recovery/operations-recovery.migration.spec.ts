@@ -9,7 +9,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
 const enabled = loadStageTestEnv('.env.stage11.test');
-const describeIf = enabled ? describe : describe.skip;
+/**
+ * Destructive Stage 11 rollback stays on Stage 11 acceptance DB only.
+ * Skip under tip current-schema regression (Stage12/13A tip DBs).
+ */
+const tipUrl = process.env.DATABASE_URL ?? '';
+const onTipRegression =
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION === '1' ||
+  /wekonnek_stage12_/.test(tipUrl) ||
+  /wekonnek_stage13a_/.test(tipUrl);
+const describeIf = enabled && !onTipRegression ? describe : describe.skip;
 
 describeIf('Stage 11 migration rollback/reapply', () => {
   const prisma = new PrismaService();
@@ -23,7 +32,11 @@ describeIf('Stage 11 migration rollback/reapply', () => {
     const db = await prisma.$queryRaw<Array<{ database: string }>>(
       Prisma.sql`SELECT current_database() AS database`,
     );
-    expect(db[0]?.database).toBe(STAGE11_ACCEPTANCE_DATABASE);
+    if (db[0]?.database !== STAGE11_ACCEPTANCE_DATABASE) {
+      throw new Error(
+        `Stage 11 migration rollback refused on ${db[0]?.database}; expected ${STAGE11_ACCEPTANCE_DATABASE}`,
+      );
+    }
   });
 
   afterAll(async () => {

@@ -2,12 +2,13 @@
  * Load Stage N PostgreSQL acceptance env without mutating production/dev
  * DATABASE_URL for day-to-day `nest start`.
  *
- * Order (fail-closed for Stage 12 acceptance override):
+ * Order (fail-closed for Stage 13A / 12 acceptance override):
  * 1. Snapshot WEKONNEK_ACCEPTANCE_DATABASE_URL / DESTRUCTIVE_OK if present
  * 2. Load .env then stage env file when present (may set DATABASE_URL)
  * 3. If explicit override → restore and apply (always wins)
  * 4. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load tip
- *    `.env.stage12.regression.test` so legacy Stage0–11 suites do not stay
+ *    `.env.stage13a.regression.test` when present, else
+ *    `.env.stage12.regression.test` so legacy Stage0–12 suites do not stay
  *    bound to their historical stage DB URL
  *
  * Explicit Terra/Cursor override always wins over dotenv.
@@ -27,6 +28,10 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   const stagePath = resolve(backendRoot, stageEnvFileName);
   const tipRegressionPath = resolve(
     backendRoot,
+    '.env.stage13a.regression.test',
+  );
+  const stage12TipRegressionPath = resolve(
+    backendRoot,
     '.env.stage12.regression.test',
   );
   const overrideSnap = snapshotAcceptanceOverrideEnv();
@@ -36,7 +41,10 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   if (
     !existsSync(stagePath) &&
     !hasOverride &&
-    !(isCurrentSchemaRegressionMode() && existsSync(tipRegressionPath))
+    !(
+      isCurrentSchemaRegressionMode() &&
+      (existsSync(tipRegressionPath) || existsSync(stage12TipRegressionPath))
+    )
   ) {
     return false;
   }
@@ -56,6 +64,8 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     // Tip current-schema DB must win over stage-specific historical URLs.
     if (existsSync(tipRegressionPath)) {
       loadDotenv({ path: tipRegressionPath, override: true });
+    } else if (existsSync(stage12TipRegressionPath)) {
+      loadDotenv({ path: stage12TipRegressionPath, override: true });
     } else {
       const legacyTip = resolve(backendRoot, '.env.stage7.regression.test');
       if (existsSync(legacyTip)) {
@@ -65,13 +75,19 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }
-    return existsSync(stagePath) || existsSync(tipRegressionPath);
+    return (
+      existsSync(stagePath) ||
+      existsSync(tipRegressionPath) ||
+      existsSync(stage12TipRegressionPath)
+    );
   }
 
   if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
     if (
       stageEnvFileName === '.env.stage12.test' ||
-      stageEnvFileName === '.env.stage12.regression.test'
+      stageEnvFileName === '.env.stage12.regression.test' ||
+      stageEnvFileName === '.env.stage13a.test' ||
+      stageEnvFileName === '.env.stage13a.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

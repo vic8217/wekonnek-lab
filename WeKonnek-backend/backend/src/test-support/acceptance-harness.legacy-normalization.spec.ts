@@ -20,6 +20,8 @@ import {
 import {
   STAGE12_ACCEPTANCE_DATABASE,
   STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE13A_ACCEPTANCE_DATABASE,
+  STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE7_ACCEPTANCE_DATABASE,
 } from './test-database-guard';
 import { loadStageTestEnv } from './load-stage-test-env';
@@ -263,11 +265,14 @@ describe('Legacy Stage0–11 current-schema harness normalization', () => {
   });
 
   it('default tip regression target without override', () => {
+    delete process.env.DATABASE_URL;
+    delete process.env[ACCEPTANCE_DATABASE_URL_ENV];
     process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
     process.env[ACCEPTANCE_DESTRUCTIVE_OK_ENV] = '1';
     expect(resolveStage12ExpectedDatabase()).toBe(
-      STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
+      STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE,
     );
     expect(STAGE12_ACCEPTANCE_DATABASE).toBe('wekonnek_stage12_test');
+    expect(STAGE13A_ACCEPTANCE_DATABASE).toBe('wekonnek_stage13a_test');
   });
 });

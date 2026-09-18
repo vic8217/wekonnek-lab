@@ -1006,6 +1006,7 @@ model WkOrder {
   economicLosses                EconomicLoss[]
   exceptionClaims               ExceptionClaim[]
   exceptionFinancialObligations ExceptionFinancialObligation[]
+  exceptionFinancialSettlements ExceptionFinancialSettlement[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1349,6 +1350,11 @@ model User {
   exceptionLiabilityAllocations  LiabilityAllocation[]          @relation("LiabilityAllocationUser")
   exceptionObligationsAsDebtor   ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationDebtorUser")
   exceptionObligationsAsCreditor ExceptionFinancialObligation[] @relation("ExceptionFinancialObligationCreditorUser")
+  exceptionSettlementsClaimed    ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementClaimedBy")
+  exceptionSettlementsAcked      ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementAckedBy")
+  exceptionSettlementsRejected   ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementRejectedBy")
+  exceptionSettlementsCancelled  ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementCancelledBy")
+  exceptionSettlementEvidenceUploaded ExceptionFinancialSettlementEvidence[] @relation("ExceptionFinancialSettlementEvidenceUploadedBy")
 
   @@map("users")
 }
@@ -4548,6 +4554,29 @@ enum ExceptionFinancialObligationStatus {
   WRITTEN_OFF
 }
 
+/// Stage 13A — external settlement methods for ExceptionFinancialObligation.
+/// WeKonnek records settlement; it does not take custody of funds.
+enum ExceptionFinancialSettlementMethod {
+  CASH
+  DIRECT_TRANSFER
+  BANK_TRANSFER
+  MERCHANT_QR
+}
+
+enum ExceptionFinancialSettlementStatus {
+  CLAIMED
+  ACKNOWLEDGED
+  REJECTED
+  CANCELLED
+}
+
+enum ExceptionFinancialSettlementEvidenceKind {
+  TRANSFER_RECEIPT
+  BANK_REFERENCE
+  QR_RECEIPT
+  CASH_RECEIPT_REFERENCE
+}
+
 enum ExceptionLiabilityPolicyStatus {
   DRAFT
   ACTIVE
@@ -4858,6 +4887,9 @@ model LiabilityAllocation {
   @@map("liability_allocations")
 }
 
+/// Stage13 prerequisite integrity hardening: after INSERT, economic identity
+/// (principal, parties, currency, source bindings, reason, relation identity)
+/// is immutable at PostgreSQL. status remains a non-authoritative ops mirror.
 model ExceptionFinancialObligation {
   id                       String                             @id @default(uuid()) @db.Uuid
   liabilityDeterminationId String                             @map("liability_determination_id") @db.Uuid
@@ -4872,6 +4904,11 @@ model ExceptionFinancialObligation {
   creditorMerchantId       Int?                               @map("creditor_merchant_id")
   principal                Decimal                            @db.Decimal(14, 2)
   currency                 String                             @default("PHP") @db.VarChar(3)
+  /// DB-constrained derived settlement mirror (OPEN / PARTIALLY_SETTLED /
+  /// SETTLED must match Σ ACK vs principal). CANCELLED / WRITTEN_OFF are
+  /// reserved enum values with no current authoritative writer; Stage13
+  /// treats them as non-executable if ever present. Financial authority is
+  /// Σ ACKNOWLEDGED acknowledgedAmount vs principal (derived).
   status                   ExceptionFinancialObligationStatus @default(OPEN)
   reason                   String?                            @db.VarChar(2000)
   correlationId            String?                            @map("correlation_id") @db.VarChar(64)
@@ -4886,9 +4923,85 @@ model ExceptionFinancialObligation {
   debtorMerchant         Merchant?              @relation("ExceptionFinancialObligationDebtorMerchant", fields: [debtorMerchantId], references: [id], onDelete: Restrict)
   creditorUser           User?                  @relation("ExceptionFinancialObligationCreditorUser", fields: [creditorUserId], references: [id], onDelete: Restrict)
   creditorMerchant       Merchant?              @relation("ExceptionFinancialObligationCreditorMerchant", fields: [creditorMerchantId], references: [id], onDelete: Restrict)
+  settlements            ExceptionFinancialSettlement[]
 
   @@index([wkOrderId, status])
   @@index([liabilityDeterminationId])
   @@index([exceptionClaimId, status])
   @@map("exception_financial_obligations")
+}
+
+/// Stage 13A external settlement ledger for ExceptionFinancialObligation.
+/// Only ACKNOWLEDGED acknowledgedAmount reduces remaining principal.
+model ExceptionFinancialSettlement {
+  id                      String                              @id @default(uuid()) @db.Uuid
+  obligationId            String                              @map("obligation_id") @db.Uuid
+  wkOrderId               Int                                 @map("wk_order_id")
+  /// Audit snapshots — server-derived from obligation; never client-chosen.
+  debtorTypeSnapshot      ExceptionLiablePartyType            @map("debtor_type_snapshot")
+  debtorUserIdSnapshot    String?                             @map("debtor_user_id_snapshot") @db.Uuid
+  debtorMerchantIdSnapshot Int?                               @map("debtor_merchant_id_snapshot")
+  creditorTypeSnapshot    ExceptionLiablePartyType            @map("creditor_type_snapshot")
+  creditorUserIdSnapshot  String?                             @map("creditor_user_id_snapshot") @db.Uuid
+  creditorMerchantIdSnapshot Int?                             @map("creditor_merchant_id_snapshot")
+  method                  ExceptionFinancialSettlementMethod
+  status                  ExceptionFinancialSettlementStatus  @default(CLAIMED)
+  currency                String                              @default("PHP") @db.VarChar(3)
+  claimedAmount           Decimal?                            @map("claimed_amount") @db.Decimal(14, 2)
+  acknowledgedAmount      Decimal?                            @map("acknowledged_amount") @db.Decimal(14, 2)
+  externalReference       String?                             @map("external_reference") @db.VarChar(120)
+  claimedByType           OrderDomainActorType                @map("claimed_by_type")
+  claimedById             String                              @map("claimed_by_id") @db.Uuid
+  claimedAt               DateTime                            @map("claimed_at") @db.Timestamptz
+  acknowledgedByType      OrderDomainActorType?               @map("acknowledged_by_type")
+  acknowledgedById        String?                             @map("acknowledged_by_id") @db.Uuid
+  acknowledgedAt          DateTime?                           @map("acknowledged_at") @db.Timestamptz
+  rejectedByType          OrderDomainActorType?               @map("rejected_by_type")
+  rejectedById            String?                             @map("rejected_by_id") @db.Uuid
+  rejectedAt              DateTime?                           @map("rejected_at") @db.Timestamptz
+  cancelledByType         OrderDomainActorType?               @map("cancelled_by_type")
+  cancelledById           String?                             @map("cancelled_by_id") @db.Uuid
+  cancelledAt             DateTime?                           @map("cancelled_at") @db.Timestamptz
+  rejectionReason         String?                             @map("rejection_reason") @db.VarChar(255)
+  claimIdempotencyKey     String?                             @map("claim_idempotency_key") @db.VarChar(64)
+  ackIdempotencyKey       String?                             @map("ack_idempotency_key") @db.VarChar(64)
+  cashIdempotencyKey      String?                             @map("cash_idempotency_key") @db.VarChar(64)
+  rejectIdempotencyKey    String?                             @map("reject_idempotency_key") @db.VarChar(64)
+  cancelIdempotencyKey    String?                             @map("cancel_idempotency_key") @db.VarChar(64)
+  payloadFingerprint      String?                             @map("payload_fingerprint") @db.VarChar(64)
+  correlationId           String?                             @map("correlation_id") @db.VarChar(64)
+  createdAt               DateTime                            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime                            @updatedAt @map("updated_at") @db.Timestamptz
+
+  obligation       ExceptionFinancialObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+  wkOrder          WkOrder                      @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  claimedByUser    User                         @relation("ExceptionFinancialSettlementClaimedBy", fields: [claimedById], references: [id], onDelete: Restrict)
+  acknowledgedByUser User?                      @relation("ExceptionFinancialSettlementAckedBy", fields: [acknowledgedById], references: [id], onDelete: Restrict)
+  rejectedByUser   User?                        @relation("ExceptionFinancialSettlementRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
+  cancelledByUser  User?                        @relation("ExceptionFinancialSettlementCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  evidence         ExceptionFinancialSettlementEvidence[]
+
+  @@index([obligationId, status])
+  @@index([wkOrderId, status])
+  @@map("exception_financial_settlements")
+}
+
+/// Append-only evidence for Stage13A settlements. Never changes settlement status.
+model ExceptionFinancialSettlementEvidence {
+  id                String                                   @id @default(uuid()) @db.Uuid
+  settlementId      String                                   @map("settlement_id") @db.Uuid
+  kind              ExceptionFinancialSettlementEvidenceKind
+  storageReference  String                                   @map("storage_reference") @db.VarChar(1000)
+  note              String?                                  @db.VarChar(2000)
+  uploadedByType    OrderDomainActorType                     @map("uploaded_by_type")
+  uploadedById      String                                   @map("uploaded_by_id") @db.Uuid
+  correlationId     String?                                  @map("correlation_id") @db.VarChar(64)
+  idempotencyKey    String?                                  @map("idempotency_key") @db.VarChar(64)
+  createdAt         DateTime                                 @default(now()) @map("created_at") @db.Timestamptz
+
+  settlement   ExceptionFinancialSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  uploadedByUser User                       @relation("ExceptionFinancialSettlementEvidenceUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([settlementId, createdAt])
+  @@map("exception_financial_settlement_evidence")
 }

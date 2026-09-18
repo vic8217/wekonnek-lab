@@ -21,8 +21,6 @@ export const HISTORICAL_ACCEPTANCE_DATABASES = new Set([
   'wekonnek_stage5_test',
   'wekonnek_stage5b_test',
   'wekonnek_stage6_test',
-  'wekonnek_stage7_test',
-  'wekonnek_stage8_test',
 ]);
 
 /**
@@ -65,6 +63,10 @@ export const STAGE12_ACCEPTANCE_DATABASE = 'wekonnek_stage12_test';
 export const STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE =
   'wekonnek_stage12_regression_test';
 
+export const STAGE13A_ACCEPTANCE_DATABASE = 'wekonnek_stage13a_test';
+export const STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE =
+  'wekonnek_stage13a_regression_test';
+
 /**
  * Prior-stage DBs Stage 12 suites must never mutate (Stage 11 becomes a frozen
  * parent once Stage 12 opens, alongside earlier historical/contaminated DBs).
@@ -86,6 +88,17 @@ export const STAGE12_FORBIDDEN_DATABASES = new Set([
   'wekonnek_stage9_regression_test',
   'wekonnek_stage10_regression_test',
   'wekonnek_stage11_regression_test',
+]);
+
+/**
+ * Prior-stage DBs Stage 13A suites must never mutate (Stage 12 becomes a frozen
+ * parent once Stage 13A opens, alongside earlier historical/contaminated DBs).
+ */
+export const STAGE13A_FORBIDDEN_DATABASES = new Set([
+  ...STAGE12_FORBIDDEN_DATABASES,
+  STAGE12_ACCEPTANCE_DATABASE,
+  STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  'wekonnek_stage12_regression_test',
 ]);
 
 /**
@@ -168,14 +181,24 @@ export const DISPOSABLE_CLEANUP_DATABASES = new Set([
   STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE12_ACCEPTANCE_DATABASE,
   STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE13A_ACCEPTANCE_DATABASE,
+  STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 
 /** Terra/Cursor ephemeral Stage 12 acceptance DBs. */
 const STAGE12_EPHEMERAL_DISPOSABLE_RE =
   /^wekonnek_stage12_(terra|cursor)_[a-z0-9][a-z0-9_]*$/;
 
+/** Terra/Cursor ephemeral Stage 13A acceptance DBs. */
+const STAGE13A_EPHEMERAL_DISPOSABLE_RE =
+  /^wekonnek_stage13a_(terra|cursor)_[a-z0-9][a-z0-9_]*$/;
+
 export function isStage12TerraDisposableDatabase(database: string): boolean {
   return STAGE12_EPHEMERAL_DISPOSABLE_RE.test(database);
+}
+
+export function isStage13aTerraDisposableDatabase(database: string): boolean {
+  return STAGE13A_EPHEMERAL_DISPOSABLE_RE.test(database);
 }
 
 export function isCurrentSchemaRegressionMode(): boolean {
@@ -211,12 +234,13 @@ export function assertDisposableCleanupDatabase(database: string): void {
   assertNotHistoricalAcceptanceDatabase(database, 'cleanup');
   if (
     DISPOSABLE_CLEANUP_DATABASES.has(database) ||
-    isStage12TerraDisposableDatabase(database)
+    isStage12TerraDisposableDatabase(database) ||
+    isStage13aTerraDisposableDatabase(database)
   ) {
     return;
   }
   throw new Error(
-    `cleanup refused: expected disposable Stage 7/8/9/10/11/12 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*), got ${database}`,
+    `cleanup refused: expected disposable Stage 7/8/9/10/11/12/13A DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*|wekonnek_stage13a_(terra|cursor)_*), got ${database}`,
   );
 }
 
@@ -244,8 +268,9 @@ export async function assertAllowedTestDatabase(
 
 /**
  * Allowed DBs for a stage suite under either historical acceptance or
- * current-schema regression mode. Stage 12 is the tip, so regression mode adds
- * wekonnek_stage12_regression_test.
+ * current-schema regression mode. Stage 13A is the tip, so regression mode adds
+ * wekonnek_stage13a_regression_test (Stage 12 tip remains accepted while
+ * provisioned).
  */
 export function stageOrRegressionDatabases(
   historical: string | string[],
@@ -254,6 +279,7 @@ export function stageOrRegressionDatabases(
     Array.isArray(historical) ? historical : [historical],
   );
   if (isCurrentSchemaRegressionMode()) {
+    set.add(STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE);
     set.add(STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE);
     // Stage 11 remains accepted while its regression DB is still provisioned.
     set.add(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
@@ -261,11 +287,12 @@ export function stageOrRegressionDatabases(
   return set;
 }
 
-/** True when connected to the disposable current-schema regression DB (Stage 12 tip). */
+/** True when connected to the disposable current-schema regression DB (Stage 13A tip). */
 export function isAllowedCurrentSchemaRegressionDatabase(
   database: string,
 ): boolean {
   return (
+    database === STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||

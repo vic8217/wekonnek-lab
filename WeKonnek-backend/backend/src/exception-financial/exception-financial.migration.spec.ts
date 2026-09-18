@@ -8,13 +8,24 @@ import {
   assertPrismaConnectedToStage12AcceptanceDb,
   resolveStage12ExpectedDatabase,
 } from '../test-support/acceptance-database';
+import { STAGE12_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 import { execSync } from 'child_process';
 import { resolve } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 
 const enabled = loadStageTestEnv('.env.stage12.test');
-const describeIf = enabled ? describe : describe.skip;
 const EXPECTED_DB = resolveStage12ExpectedDatabase();
+/**
+ * Destructive Stage 12 rollback/reapply is confined to the Stage 12 acceptance
+ * DB (or Stage12 terra/cursor ephemerals). Never run on Stage13A tip —
+ * rolling back Stage 12 drops ExceptionFinancialObligation parents that
+ * Stage13A settlements reference.
+ */
+const allowDestructiveRollback =
+  EXPECTED_DB === STAGE12_ACCEPTANCE_DATABASE ||
+  /^wekonnek_stage12_(terra|cursor)_/.test(EXPECTED_DB);
+const describeIf =
+  enabled && allowDestructiveRollback ? describe : describe.skip;
 
 describeIf(`Stage 12 migration rollback/reapply (${EXPECTED_DB})`, () => {
   const prisma = new PrismaService();
