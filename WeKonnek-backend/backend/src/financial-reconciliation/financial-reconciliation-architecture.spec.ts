@@ -1,5 +1,6 @@
 /**
- * Stage13B-1 architecture locks: read-only, no HTTP, no writer injection.
+ * Stage13B-1/13B-2/13B-3A architecture locks: read-only adapters/detectors,
+ * dedicated GET-only HTTP projection, no writer injection.
  */
 import { readdirSync, readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -116,8 +117,27 @@ describe('Stage13B-1 financial-reconciliation architecture', () => {
     expect(src).not.toMatch(/riderAdvance\.findFirst/);
   });
 
-  it('creates no HTTP controller or route', () => {
+  it('allows only the dedicated Stage13B-3 GET controller and remains write-free', () => {
     for (const { name, src } of productSources()) {
+      if (name === 'financial-reconciliation.controller.ts') {
+        expect(src).toMatch(/@Controller\s*\(/);
+        expect(src).toMatch(
+          /@Get\s*\(\s*['"]orders\/:wkOrderId\/financial-reconciliation['"]\s*\)/,
+        );
+        expect(src).toMatch(
+          /@Get\s*\(\s*['"]financial-obligations\/:rail\/:obligationId['"]\s*\)/,
+        );
+        expect(src).not.toMatch(/@(Post|Patch|Put|Delete)\s*\(/);
+        expect(src).toMatch(/Cache-Control['"]\s*,\s*['"]no-store['"]/);
+        expect(src).not.toMatch(/availableActions|actionLinks/);
+        expect(src).not.toMatch(/admin\/search|financial-reconciliation\/search/);
+        expect(src).toContain('this.reconciliation.forOrder(wkOrderId)');
+        expect(src).toContain(
+          'this.reconciliation.forObligation(rail, obligationId)',
+        );
+        expect(src).not.toMatch(/\$transaction/);
+        continue;
+      }
       expect(name).not.toMatch(/controller/i);
       expect(src).not.toMatch(/@Controller\s*\(/);
       expect(src).not.toMatch(/@(Get|Post|Patch|Put|Delete)\s*\(/);
@@ -126,7 +146,35 @@ describe('Stage13B-1 financial-reconciliation architecture', () => {
       resolve(DIR, 'financial-reconciliation.module.ts'),
       'utf8',
     );
-    expect(moduleSrc).toMatch(/controllers:\s*\[\s*\]/);
+    expect(moduleSrc).toMatch(
+      /controllers:\s*\[\s*FinancialReconciliationController\s*\]/,
+    );
+
+    const policySrc = readFileSync(
+      resolve(DIR, 'financial-reconciliation.http-policy.ts'),
+      'utf8',
+    );
+    expect(policySrc).toContain('groupDirectionalItems(visibleItems)');
+    expect(policySrc).toContain('itemVisibleToActor');
+    expect(policySrc).toContain('findingVisibleToParticipant');
+    expect(policySrc).toContain('relatedItemVisibleToParticipant');
+    expect(policySrc).not.toContain('AuthActorService');
+    expect(policySrc).not.toMatch(/MerchantStaff/);
+    expect(policySrc).not.toMatch(/availableActions|actionLinks/);
+    expect(policySrc).not.toMatch(/\$executeRaw|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM/i);
+
+    const controllerSrc = readFileSync(
+      resolve(DIR, 'financial-reconciliation.controller.ts'),
+      'utf8',
+    );
+    expect(controllerSrc).toContain('JwtAuthGuard');
+    expect(controllerSrc).toContain('ownedMerchantIds');
+    expect(controllerSrc).toContain('prisma.merchant.findMany');
+    expect(controllerSrc).not.toContain('AuthActorService');
+    expect(controllerSrc).not.toMatch(/MerchantStaff/);
+    expect(controllerSrc).not.toMatch(
+      /RiderAdvanceSettlementService|ExceptionFinancialSettlementService|ReturnFinancialSettlementService/,
+    );
   });
 
   it('does not inject or import financial writer services', () => {

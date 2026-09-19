@@ -132,7 +132,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage13b1.test' ||
       stageEnvFileName === '.env.stage13b1.regression.test' ||
       stageEnvFileName === '.env.stage13b2.test' ||
-      stageEnvFileName === '.env.stage13b2.regression.test'
+      stageEnvFileName === '.env.stage13b2.regression.test' ||
+      stageEnvFileName === '.env.stage13b3.test' ||
+      stageEnvFileName === '.env.stage13b3.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

@@ -39,4 +39,8 @@ node_modules
 .env.stage13b2.regression.test
 !.env.stage13b2.test.example
 !.env.stage13b2.regression.test.example
+.env.stage13b3.test
+.env.stage13b3.regression.test
+!.env.stage13b3.test.example
+!.env.stage13b3.regression.test.example
 i18n/
