@@ -40,7 +40,74 @@ function isCurrentSchemaDisposableUrl(url: string | undefined): boolean {
   }
 }
 
+function isStage14aDisposableUrl(url: string | undefined): boolean {
+  if (!url || url.trim() === '') return false;
+  try {
+    const database = parseAcceptanceDatabaseUrl(url).database;
+    return isStage14aAcceptanceDatabase(database);
+  } catch {
+    return false;
+  }
+}
+
+export function isStage14aAcceptanceDatabase(database: string): boolean {
+  return (
+    database.startsWith('wekonnek_stage14a_') &&
+    isCurrentSchemaDisposableDatabase(database)
+  );
+}
+
+/**
+ * Stage14A acceptance routing is dedicated. It never falls through to
+ * Stage13B-3B / 13B-3 / 13A regression tip files, and a generic
+ * WEKONNEK_ACCEPTANCE_DATABASE_URL wins only when it already names
+ * wekonnek_stage14a_*.
+ */
+export function loadStage14aTestEnv(): boolean {
+  const backendRoot = resolve(__dirname, '../..');
+  const stagePath = resolve(backendRoot, '.env.stage14a.test');
+  const overrideSnap = snapshotAcceptanceOverrideEnv();
+  const overrideUrl = overrideSnap.url;
+  const incomingDatabaseUrl = process.env.DATABASE_URL;
+  const overrideIs14a = isStage14aDisposableUrl(overrideUrl);
+  const incomingIs14a = isStage14aDisposableUrl(incomingDatabaseUrl);
+
+  if (!existsSync(stagePath) && !overrideIs14a && !incomingIs14a) {
+    return false;
+  }
+
+  loadDotenv({ path: resolve(backendRoot, '.env') });
+  if (existsSync(stagePath)) {
+    loadDotenv({ path: stagePath, override: true });
+  }
+
+  if (overrideIs14a && overrideUrl) {
+    restoreAcceptanceOverrideEnv(overrideSnap);
+    applyAcceptanceDatabaseOverride();
+  } else if (isStage14aDisposableUrl(process.env.WEKONNEK_ACCEPTANCE_DATABASE_URL)) {
+    applyAcceptanceDatabaseOverride();
+  } else if (!isStage14aDisposableUrl(process.env.DATABASE_URL) && incomingIs14a && incomingDatabaseUrl) {
+    process.env.DATABASE_URL = incomingDatabaseUrl;
+  }
+
+  if (!isStage14aDisposableUrl(process.env.DATABASE_URL)) {
+    return false;
+  }
+
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+    process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+  }
+  return true;
+}
+
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
+  if (
+    stageEnvFileName === '.env.stage14a.test' ||
+    stageEnvFileName === '.env.stage14a.regression.test'
+  ) {
+    return loadStage14aTestEnv();
+  }
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
   const tip13b3bRegressionPath = resolve(
@@ -162,7 +229,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage13b3.test' ||
       stageEnvFileName === '.env.stage13b3.regression.test' ||
       stageEnvFileName === '.env.stage13b3b.test' ||
-      stageEnvFileName === '.env.stage13b3b.regression.test'
+      stageEnvFileName === '.env.stage13b3b.regression.test' ||
+      stageEnvFileName === '.env.stage14a.test' ||
+      stageEnvFileName === '.env.stage14a.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

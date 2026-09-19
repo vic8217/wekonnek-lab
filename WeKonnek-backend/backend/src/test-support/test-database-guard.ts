@@ -254,7 +254,7 @@ const DISPOSABLE_SUFFIX_MAX_CHARS = 160;
  * after that marker. Does not special-case executor names (terra/cursor/repair)
  * or the word `final`.
  */
-const CURRENT_SCHEMA_STAGE_TOKEN = '(?:13[a-z][0-9]{0,3}|1[2-9]|[2-9][0-9])';
+const CURRENT_SCHEMA_STAGE_TOKEN = '(?:1[3-9][a-z][0-9]{0,3}|1[2-9]|[2-9][0-9])';
 const CURRENT_SCHEMA_DISPOSABLE_RE = new RegExp(
   `^wekonnek_stage(${CURRENT_SCHEMA_STAGE_TOKEN})_([a-z][a-z0-9_]{0,${DISPOSABLE_SUFFIX_MAX_CHARS - 1}})$`,
 );

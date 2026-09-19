@@ -33,6 +33,7 @@ import {
   queueEmptyCopy,
   queueEmptyKind,
   railLabel,
+  reviewStatusLabel,
   searchParamsFromQuery,
   serializeDateWindow,
   serializeQueueFilters,
@@ -244,6 +245,12 @@ test('invalid custom dates are rejected', () => {
   assert.equal(serializeDateWindow('custom', '', '', now).ok, false);
   assert.equal(serializeDateWindow('custom', 'not-a-date', '2026-09-19', now).ok, false);
   assert.equal(serializeDateWindow('custom', '2026-09-19', '2026-13-40', now).ok, false);
+});
+
+test('review status labels never say financially correct or resolved', () => {
+  assert.equal(reviewStatusLabel('CLOSED_REVIEW_ONLY'), 'Closed — review only');
+  assert.equal(reviewStatusLabel('CLOSED_CONDITION_CLEARED'), 'Closed — condition cleared');
+  assert.equal(/financially correct|resolved|settled/i.test(reviewStatusLabel('OPEN')), false);
 });
 
 test('queue filter serialization omits empty filters and requires rail with obligation', () => {
@@ -591,4 +598,42 @@ test('detail page guards refresh and initial load with generation ownership', as
   assert.equal(src.includes('isCurrentGeneration'), true);
   assert.equal(src.includes('nextGeneration'), true);
   assert.equal(src.includes('setLoading(false)'), true);
+  assert.equal(src.includes('Open follow-up'), true);
+  assert.equal(src.includes('View follow-up'), true);
+  assert.equal(src.includes('/admin/stage12'), false);
+});
+
+test('review list and detail pages are operational-only', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const list = readFileSync(
+    join(dir, '../app/admin/financial-reconciliation/reviews/page.tsx'),
+    'utf8',
+  );
+  const detail = readFileSync(
+    join(dir, '../app/admin/financial-reconciliation/reviews/[id]/page.tsx'),
+    'utf8',
+  );
+  for (const src of [list, detail]) {
+    assert.equal(src.includes('Mark paid'), false);
+    assert.equal(src.includes('Resolve financial'), false);
+    assert.equal(src.includes('Change balance'), false);
+    assert.equal(src.includes('Edit principal'), false);
+    assert.equal(src.includes('/admin/stage12'), false);
+    assert.equal(src.includes('/admin/stage9'), false);
+    assert.equal(src.includes('/admin/stage11'), false);
+    assert.equal(src.includes('FCM'), false);
+    assert.equal(src.includes('sendNotification'), false);
+  }
+  assert.equal(detail.includes('Financial reconciliation changed since this review was opened'), true);
+  assert.equal(detail.includes('Closing this follow-up does not remove the reconciliation finding'), true);
+  assert.equal(detail.includes('Escalate to engineering'), true);
+  assert.equal(detail.includes('Repair'), false);
+  assert.equal(detail.includes('Fix data'), false);
+  assert.equal(detail.includes('Override'), false);
+  assert.equal(list.includes('assignedAdminUserId'), true);
+  assert.equal(detail.includes('review && !closed'), true);
+  assert.equal(detail.includes('refreshFinancialReconciliationReview'), true);
 });

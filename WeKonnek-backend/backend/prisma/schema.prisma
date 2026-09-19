@@ -1007,6 +1007,7 @@ model WkOrder {
   exceptionClaims               ExceptionClaim[]
   exceptionFinancialObligations ExceptionFinancialObligation[]
   exceptionFinancialSettlements ExceptionFinancialSettlement[]
+  financialReconciliationReviews FinancialReconciliationReview[]
 
   @@index([userId])
   @@index([merchantId])
@@ -1355,6 +1356,9 @@ model User {
   exceptionSettlementsRejected   ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementRejectedBy")
   exceptionSettlementsCancelled  ExceptionFinancialSettlement[] @relation("ExceptionFinancialSettlementCancelledBy")
   exceptionSettlementEvidenceUploaded ExceptionFinancialSettlementEvidence[] @relation("ExceptionFinancialSettlementEvidenceUploadedBy")
+  financialReconciliationReviewsAssigned FinancialReconciliationReview[] @relation("FinancialReconciliationReviewAssignee")
+  financialReconciliationReviewsCreated FinancialReconciliationReview[] @relation("FinancialReconciliationReviewCreatedBy")
+  financialReconciliationReviewNotesAuthored FinancialReconciliationReviewNote[] @relation("FinancialReconciliationReviewNoteAuthor")
 
   @@map("users")
 }
@@ -5004,4 +5008,114 @@ model ExceptionFinancialSettlementEvidence {
 
   @@index([settlementId, createdAt])
   @@map("exception_financial_settlement_evidence")
+}
+
+// ═══════════════════════════════════════════════════════
+// Stage 14A — Financial reconciliation operational review
+// Operational metadata only. Never owns financial authority.
+// ═══════════════════════════════════════════════════════
+
+enum FinancialReconciliationReviewStatus {
+  OPEN
+  IN_REVIEW
+  WAITING_ON_PARTY
+  ESCALATED_ENGINEERING
+  CLOSED_CONDITION_CLEARED
+  CLOSED_REVIEW_ONLY
+  CLOSED_DUPLICATE
+}
+
+enum FinancialReconciliationReviewRoute {
+  ENGINEERING
+  WAITING_ON_PARTY
+  STAGE12_REVIEW
+  REVIEW_ONLY
+}
+
+enum FinancialReconciliationReviewWaitingParty {
+  CUSTOMER
+  MERCHANT
+  RIDER
+}
+
+enum FinancialReconciliationReviewEventType {
+  REVIEW_OPENED
+  ASSIGNED
+  UNASSIGNED
+  NOTE_ADDED
+  ROUTE_CLASSIFIED
+  WAITING_ON_PARTY
+  ESCALATED_ENGINEERING
+  LIVE_RECONCILIATION_REFRESHED
+  STALE_FINDING_REJECTED
+  CLOSED_CONDITION_CLEARED
+  CLOSED_REVIEW_ONLY
+  CLOSED_DUPLICATE
+  NEW_CASE_FROM_REAPPEARANCE
+}
+
+/// Operational follow-up over a live Stage13B finding. Not a financial ledger.
+model FinancialReconciliationReview {
+  id                      String                                   @id @default(uuid()) @db.Uuid
+  wkOrderId               Int                                      @map("wk_order_id")
+  findingKey              String                                   @map("finding_key") @db.VarChar(500)
+  findingCode             String                                   @map("finding_code") @db.VarChar(80)
+  openingFingerprint      String                                   @map("opening_fingerprint") @db.VarChar(64)
+  currentFingerprint      String?                                  @map("current_fingerprint") @db.VarChar(64)
+  status                  FinancialReconciliationReviewStatus
+  assignedAdminUserId     String?                                  @map("assigned_admin_user_id") @db.Uuid
+  routeClassification     FinancialReconciliationReviewRoute?      @map("route_classification")
+  waitingPartyType        FinancialReconciliationReviewWaitingParty? @map("waiting_party_type")
+  closeClassification     FinancialReconciliationReviewStatus?     @map("close_classification")
+  closeReason             String?                                  @map("close_reason") @db.VarChar(500)
+  priorReviewId           String?                                  @map("prior_review_id") @db.Uuid
+  rowVersion              Int                                      @default(1) @map("row_version")
+  createdByAdminUserId    String                                   @map("created_by_admin_user_id") @db.Uuid
+  createdAt               DateTime                                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime                                 @updatedAt @map("updated_at") @db.Timestamptz
+  closedAt                DateTime?                                @map("closed_at") @db.Timestamptz
+
+  wkOrder     WkOrder                        @relation(fields: [wkOrderId], references: [id], onDelete: Restrict)
+  assignedAdmin User?                        @relation("FinancialReconciliationReviewAssignee", fields: [assignedAdminUserId], references: [id], onDelete: Restrict)
+  createdByAdmin User                        @relation("FinancialReconciliationReviewCreatedBy", fields: [createdByAdminUserId], references: [id], onDelete: Restrict)
+  priorReview FinancialReconciliationReview? @relation("ReviewReappearance", fields: [priorReviewId], references: [id], onDelete: Restrict)
+  reappearances FinancialReconciliationReview[] @relation("ReviewReappearance")
+  events      FinancialReconciliationReviewEvent[]
+  notes       FinancialReconciliationReviewNote[]
+
+  @@index([wkOrderId, status])
+  @@index([assignedAdminUserId, status])
+  @@index([findingCode, createdAt])
+  @@index([createdAt])
+  @@map("financial_reconciliation_reviews")
+}
+
+model FinancialReconciliationReviewEvent {
+  id        String                                 @id @default(uuid()) @db.Uuid
+  reviewId  String                                 @map("review_id") @db.Uuid
+  type      FinancialReconciliationReviewEventType
+  payload   Json                                   @default("{}")
+  actorAdminUserId String                          @map("actor_admin_user_id") @db.Uuid
+  createdAt DateTime                               @default(now()) @map("created_at") @db.Timestamptz
+
+  review FinancialReconciliationReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+
+  @@index([reviewId, createdAt])
+  @@map("financial_reconciliation_review_events")
+}
+
+model FinancialReconciliationReviewNote {
+  id               String   @id @default(uuid()) @db.Uuid
+  reviewId         String   @map("review_id") @db.Uuid
+  authorAdminUserId String  @map("author_admin_user_id") @db.Uuid
+  body             String   @db.VarChar(2000)
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(64)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  review FinancialReconciliationReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  author User                          @relation("FinancialReconciliationReviewNoteAuthor", fields: [authorAdminUserId], references: [id], onDelete: Restrict)
+
+  @@unique([reviewId, idempotencyKey])
+  @@index([reviewId, createdAt])
+  @@map("financial_reconciliation_review_notes")
 }

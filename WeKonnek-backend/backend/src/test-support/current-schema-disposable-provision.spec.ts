@@ -132,6 +132,18 @@ describe('current-schema disposable provision policy', () => {
     );
   });
 
+  it('accepts Stage14A disposable names without using them as templates', () => {
+    expect(isRecognizedCurrentSchemaDisposableName('wekonnek_stage14a_cursor_test')).toBe(
+      true,
+    );
+    expect(isRecognizedCurrentSchemaDisposableName('wekonnek_stage14a_terra_test')).toBe(
+      true,
+    );
+    expect(CURRENT_SCHEMA_PROVISION_TEMPLATE_CANDIDATES).not.toContain(
+      'wekonnek_stage14a_cursor_test',
+    );
+  });
+
   it('rejects unrecognized remote/non-local admin hosts without connecting', () => {
     expect(() =>
       assertAdminConnectionIsLocal(

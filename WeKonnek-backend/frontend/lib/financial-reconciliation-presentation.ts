@@ -247,6 +247,31 @@ export function isFinancialReconciliationAdmin(
   return userType === 'admin';
 }
 
+export const REVIEW_STATUS_LABELS: Record<string, string> = {
+  OPEN: 'Open',
+  IN_REVIEW: 'In review',
+  WAITING_ON_PARTY: 'Waiting on party',
+  ESCALATED_ENGINEERING: 'Escalated to engineering',
+  CLOSED_CONDITION_CLEARED: 'Closed — condition cleared',
+  CLOSED_REVIEW_ONLY: 'Closed — review only',
+  CLOSED_DUPLICATE: 'Closed — duplicate',
+};
+
+export const REVIEW_ROUTE_LABELS: Record<string, string> = {
+  ENGINEERING: 'Engineering',
+  WAITING_ON_PARTY: 'Waiting on party',
+  STAGE12_REVIEW: 'Stage 12 review',
+  REVIEW_ONLY: 'Review only',
+};
+
+export function reviewStatusLabel(status: string): string {
+  return REVIEW_STATUS_LABELS[status] ?? status;
+}
+
+export function reviewRouteLabel(route: string): string {
+  return REVIEW_ROUTE_LABELS[route] ?? route;
+}
+
 export function railLabel(rail: string): string {
   return RAIL_LABELS[rail as FinancialRailId] ?? rail;
 }

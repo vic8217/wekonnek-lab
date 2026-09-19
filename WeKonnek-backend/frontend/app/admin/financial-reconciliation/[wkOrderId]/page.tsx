@@ -11,6 +11,10 @@ import {
   fetchOrderFinancialReconciliation,
 } from '@/lib/financial-reconciliation-api';
 import {
+  createFinancialReconciliationReview,
+  listFinancialReconciliationReviews,
+} from '@/lib/financial-reconciliation-review-api';
+import {
   FINANCIAL_RAILS,
   attentionBadges,
   directionLabel,
@@ -154,6 +158,9 @@ function DetailBody() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const [followUps, setFollowUps] = useState<Record<string, string>>({});
+  const [followUpBusy, setFollowUpBusy] = useState<string | null>(null);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
@@ -176,6 +183,22 @@ function DetailBody() {
       setDetail(next);
       setUpdatedAt(new Date().toLocaleString());
       setError(null);
+      try {
+        const reviews = await listFinancialReconciliationReviews({
+          wkOrderId: String(wkOrderId),
+          assignedTo: 'all',
+        });
+        if (!isCurrentGeneration(generationRef.current, generation)) return;
+        const open = Object.fromEntries(
+          reviews.items
+            .filter((item) => !item.status.startsWith('CLOSED_'))
+            .map((item) => [item.findingKey, item.id]),
+        );
+        setFollowUps(open);
+      } catch {
+        if (!isCurrentGeneration(generationRef.current, generation)) return;
+        setFollowUps({});
+      }
     } catch (err) {
       if (!isCurrentGeneration(generationRef.current, generation)) return;
       if (isAbortError(err)) return;
@@ -248,6 +271,9 @@ function DetailBody() {
       {!loading && detail && detail.findings.length > 0 && (
         <section className="space-y-3" aria-labelledby="findings-heading">
           <h2 id="findings-heading" className="text-lg font-semibold text-gray-900">Reconciliation Findings</h2>
+          {followUpError && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{followUpError}</p>
+          )}
           {detail.findings.map((finding) => (
             <article key={finding.findingKey} className="rounded-2xl border border-amber-200 bg-amber-50 p-5 space-y-2">
               <h3 className="font-semibold text-gray-900">{findingTitle(finding.code)}</h3>
@@ -268,6 +294,44 @@ function DetailBody() {
                 <summary className="cursor-pointer">Technical code</summary>
                 <p>{finding.code}</p>
               </details>
+              {followUps[finding.findingKey] ? (
+                <Link
+                  href={`/admin/financial-reconciliation/reviews/${followUps[finding.findingKey]}`}
+                  className="inline-block text-sm font-medium text-[#DB0002]"
+                >
+                  View follow-up
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled={followUpBusy === finding.findingKey}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 disabled:opacity-50"
+                  onClick={() => {
+                    setFollowUpBusy(finding.findingKey);
+                    setFollowUpError(null);
+                    void createFinancialReconciliationReview({
+                      wkOrderId,
+                      findingKey: finding.findingKey,
+                    })
+                      .then((result) => {
+                        setFollowUps((current) => ({
+                          ...current,
+                          [finding.findingKey]: result.review.id,
+                        }));
+                      })
+                      .catch((err) => {
+                        setFollowUpError(
+                          err instanceof FinancialReconciliationApiError
+                            ? err.message
+                            : 'Unable to open follow-up.',
+                        );
+                      })
+                      .finally(() => setFollowUpBusy(null));
+                  }}
+                >
+                  {followUpBusy === finding.findingKey ? 'Opening…' : 'Open follow-up'}
+                </button>
+              )}
             </article>
           ))}
         </section>
