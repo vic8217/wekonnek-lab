@@ -5,6 +5,8 @@ export * from './financial-reconciliation.module';
 export * from './financial-reconciliation.detectors';
 export * from './financial-reconciliation.http-dto';
 export * from './financial-reconciliation.http-policy';
+export * from './financial-reconciliation-search.dto';
+export * from './financial-reconciliation-search.policy';
 export * from './reconciliation-read-context';
 export * from './rider-advance-reimbursement.adapter';
 export * from './return-financial.adapter';

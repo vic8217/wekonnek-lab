@@ -137,6 +137,7 @@ export async function insertRiderAdvance(
     principal?: Prisma.Decimal.Value | null;
     status?: RiderAdvanceStatus;
     createdAt?: Date;
+    updatedAt?: Date;
     currency?: string;
   },
 ): Promise<string> {
@@ -192,6 +193,7 @@ export async function insertRiderAdvance(
         opts.principal == null ? null : toMoney(opts.principal),
       status: opts.status ?? RiderAdvanceStatus.REIMBURSEMENT_DUE,
       createdAt: opts.createdAt,
+      updatedAt: opts.updatedAt ?? opts.createdAt,
     },
   });
   return id;
@@ -264,6 +266,8 @@ export async function insertFinalizedReturnDetermination(
     creditorRiderId?: string;
     path?: string;
     currency?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
   },
 ): Promise<{ determinationId: string; riderObligationId: string; customerObligationId: string }> {
   const custody = await prisma.custodyEvent.create({
@@ -309,6 +313,8 @@ export async function insertFinalizedReturnDetermination(
         status === ReturnFinancialDeterminationStatus.FINALIZED
           ? fx.merchantUserId
           : null,
+      createdAt: opts.createdAt,
+      updatedAt: opts.updatedAt ?? opts.createdAt,
     },
   });
   let riderObligationId = '';

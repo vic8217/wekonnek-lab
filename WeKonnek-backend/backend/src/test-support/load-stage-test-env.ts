@@ -7,13 +7,13 @@
  * 2. Snapshot incoming DATABASE_URL when it already names an approved
  *    current-schema disposable DB (Terra/Cursor/repair identities)
  * 3. Load .env then stage env file when present (may set DATABASE_URL)
- * 4. If explicit override → restore and apply (always wins)
- * 5. Else if current-schema and incoming URL was an approved disposable
+ * 4. If explicit process override → restore and apply (always wins)
+ * 5. Else if the loaded stage env set WEKONNEK_ACCEPTANCE_DATABASE_URL →
+ *    apply it (stage-file pin wins over older-stage tip files)
+ * 6. Else if current-schema and incoming URL was an approved disposable
  *    identity → restore it (do not clobber with a tip env file)
- * 6. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load tip
- *    `.env.stage13b2.regression.test` when present, else
- *    `.env.stage13b1.regression.test`, else
- *    `.env.stage13a.regression.test`, else `.env.stage12.regression.test`
+ * 7. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load newest tip:
+ *    `.env.stage13b3b.regression.test`, else 13b3, 13b2, 13b1, 13a, 12
  *
  * Explicit Terra/Cursor override always wins over dotenv.
  */
@@ -43,6 +43,14 @@ function isCurrentSchemaDisposableUrl(url: string | undefined): boolean {
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
+  const tip13b3bRegressionPath = resolve(
+    backendRoot,
+    '.env.stage13b3b.regression.test',
+  );
+  const tip13b3RegressionPath = resolve(
+    backendRoot,
+    '.env.stage13b3.regression.test',
+  );
   const tip13b2RegressionPath = resolve(
     backendRoot,
     '.env.stage13b2.regression.test',
@@ -68,7 +76,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   );
   const currentSchemaTipPresent =
     isCurrentSchemaRegressionMode() &&
-    (existsSync(tip13b2RegressionPath) ||
+    (existsSync(tip13b3bRegressionPath) ||
+      existsSync(tip13b3RegressionPath) ||
+      existsSync(tip13b2RegressionPath) ||
       existsSync(tip13b1RegressionPath) ||
       existsSync(tipRegressionPath) ||
       existsSync(stage12TipRegressionPath));
@@ -93,9 +103,23 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     return true;
   }
 
+  // Stage env ACCEPTANCE_URL must pin DATABASE_URL. Older-stage current-schema
+  // tip files must not hijack Stage13B-3 / 13B-3B disposable targets.
+  if (process.env.WEKONNEK_ACCEPTANCE_DATABASE_URL?.trim()) {
+    applyAcceptanceDatabaseOverride();
+    if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+      process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+    }
+    return existsSync(stagePath);
+  }
+
   if (isCurrentSchemaRegressionMode()) {
     if (incomingCurrentSchemaDisposable && incomingDatabaseUrl) {
       process.env.DATABASE_URL = incomingDatabaseUrl;
+    } else if (existsSync(tip13b3bRegressionPath)) {
+      loadDotenv({ path: tip13b3bRegressionPath, override: true });
+    } else if (existsSync(tip13b3RegressionPath)) {
+      loadDotenv({ path: tip13b3RegressionPath, override: true });
     } else if (existsSync(tip13b2RegressionPath)) {
       loadDotenv({ path: tip13b2RegressionPath, override: true });
     } else if (existsSync(tip13b1RegressionPath)) {
@@ -115,6 +139,8 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     }
     return (
       existsSync(stagePath) ||
+      existsSync(tip13b3bRegressionPath) ||
+      existsSync(tip13b3RegressionPath) ||
       existsSync(tip13b2RegressionPath) ||
       existsSync(tip13b1RegressionPath) ||
       existsSync(tipRegressionPath) ||
@@ -134,7 +160,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage13b2.test' ||
       stageEnvFileName === '.env.stage13b2.regression.test' ||
       stageEnvFileName === '.env.stage13b3.test' ||
-      stageEnvFileName === '.env.stage13b3.regression.test'
+      stageEnvFileName === '.env.stage13b3.regression.test' ||
+      stageEnvFileName === '.env.stage13b3b.test' ||
+      stageEnvFileName === '.env.stage13b3b.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

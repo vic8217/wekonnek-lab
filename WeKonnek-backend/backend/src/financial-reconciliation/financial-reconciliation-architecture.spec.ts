@@ -130,12 +130,25 @@ describe('Stage13B-1 financial-reconciliation architecture', () => {
         expect(src).not.toMatch(/@(Post|Patch|Put|Delete)\s*\(/);
         expect(src).toMatch(/Cache-Control['"]\s*,\s*['"]no-store['"]/);
         expect(src).not.toMatch(/availableActions|actionLinks/);
-        expect(src).not.toMatch(/admin\/search|financial-reconciliation\/search/);
+        expect(src).not.toMatch(/admin\/financial-reconciliation/);
         expect(src).toContain('this.reconciliation.forOrder(wkOrderId)');
         expect(src).toContain(
           'this.reconciliation.forObligation(rail, obligationId)',
         );
         expect(src).not.toMatch(/\$transaction/);
+        continue;
+      }
+      if (name === 'financial-reconciliation-admin.controller.ts') {
+        expect(src).toMatch(/@Controller\s*\(/);
+        expect(src).toMatch(
+          /@Get\s*\(\s*['"]admin\/financial-reconciliation['"]\s*\)/,
+        );
+        expect(src).not.toMatch(/@(Post|Patch|Put|Delete)\s*\(/);
+        expect(src).toMatch(/Cache-Control['"]\s*,\s*['"]no-store['"]/);
+        expect(src).toContain('UserRole.admin');
+        expect(src).not.toMatch(/candidateScanMax/);
+        expect(src).not.toMatch(/availableActions|actionLinks/);
+        expect(src).not.toMatch(/\$queryRaw/);
         continue;
       }
       expect(name).not.toMatch(/controller/i);
@@ -146,8 +159,42 @@ describe('Stage13B-1 financial-reconciliation architecture', () => {
       resolve(DIR, 'financial-reconciliation.module.ts'),
       'utf8',
     );
-    expect(moduleSrc).toMatch(
-      /controllers:\s*\[\s*FinancialReconciliationController\s*\]/,
+    expect(moduleSrc).toContain('FinancialReconciliationController');
+    expect(moduleSrc).toContain('FinancialReconciliationAdminController');
+    expect(moduleSrc).toContain('FinancialReconciliationSearchService');
+    expect(moduleSrc).not.toMatch(/controllers:\s*\[\s*\]/);
+
+    const searchPolicy = readFileSync(
+      resolve(DIR, 'financial-reconciliation-search.policy.ts'),
+      'utf8',
+    );
+    expect(searchPolicy).toContain('CANDIDATE_SCAN_MAX = 50');
+    expect(searchPolicy).not.toMatch(/\$queryRaw|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM/i);
+    expect(searchPolicy).not.toContain('AuthActorService');
+    expect(searchPolicy).not.toMatch(/orderNetBalance/);
+
+    const searchService = readFileSync(
+      resolve(DIR, 'financial-reconciliation-search.service.ts'),
+      'utf8',
+    );
+    expect(searchService).toContain('this.reconciliation.forOrder');
+    expect(searchService).toContain('CANDIDATE_SCAN_MAX');
+    expect(searchService).not.toMatch(/\$queryRaw/);
+    expect(searchService).not.toMatch(/candidateScanMax/);
+    expect(searchService).not.toContain('AuthActorService');
+    expect(searchService).not.toMatch(/MerchantStaff/);
+
+    const searchDto = readFileSync(
+      resolve(DIR, 'financial-reconciliation-search.dto.ts'),
+      'utf8',
+    );
+    expect(searchDto).toContain('sourceActivityAt');
+    expect(searchDto).toContain('DISCOVERY CLOCK');
+    expect(searchDto).not.toMatch(
+      /originalPrincipal|settledAmount|remainingAmount|collectibleRemaining|orderNetBalance/,
+    );
+    expect(searchDto).not.toMatch(
+      /^\s*(lastFinancialActivityAt|financialActivityAt|lastSettlementAt)\s*:/m,
     );
 
     const policySrc = readFileSync(
