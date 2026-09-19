@@ -1,11 +1,17 @@
 /**
- * Stage13B-1 order-level read composer.
- * Prisma reads + pure adapters only. No writer services. No mutation.
+ * Stage13B-1/13B-2 order-level read composer.
+ * Prisma reads + pure adapters + pure detectors. No writer services. No mutation.
+ *
+ * forOrder: RepeatableRead snapshot across rails, then Stage13B-2 detectors.
+ * forObligation: single-rail item lookup only — no cross-rail detection and
+ * no shared snapshot. Callers that need findings must use forOrder.
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadExceptionFinancialItems } from './exception-financial.adapter';
-import { groupDirectionalItems } from './financial-reconciliation.policy';
+import { detectCrossRail } from './financial-reconciliation.detectors';
+import { composeOrderFinancialReconciliation } from './financial-reconciliation.policy';
 import {
   FinancialRailId,
   FinancialReconciliationItem,
@@ -14,6 +20,7 @@ import {
   RAIL_RETURN_FINANCIAL,
   RAIL_RIDER_ADVANCE_REIMBURSEMENT,
 } from './financial-reconciliation.types';
+import { loadReconciliationReadContext } from './reconciliation-read-context';
 import { loadReturnFinancialItems } from './return-financial.adapter';
 import { loadRiderAdvanceReimbursementItems } from './rider-advance-reimbursement.adapter';
 
@@ -22,30 +29,42 @@ export class FinancialReconciliationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async forOrder(wkOrderId: number): Promise<OrderFinancialReconciliation> {
-    const order = await this.prisma.wkOrder.findUnique({
-      where: { id: wkOrderId },
-      select: { id: true },
-    });
-    if (!order) {
-      throw new NotFoundException({
-        code: 'ORDER_NOT_FOUND',
-        message: 'Order not found',
-      });
-    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        const order = await tx.wkOrder.findUnique({
+          where: { id: wkOrderId },
+          select: { id: true },
+        });
+        if (!order) {
+          throw new NotFoundException({
+            code: 'ORDER_NOT_FOUND',
+            message: 'Order not found',
+          });
+        }
 
-    const [ra, ret, ex] = await Promise.all([
-      loadRiderAdvanceReimbursementItems(this.prisma, wkOrderId),
-      loadReturnFinancialItems(this.prisma, wkOrderId),
-      loadExceptionFinancialItems(this.prisma, wkOrderId),
-    ]);
-    const items = [...ra, ...ret, ...ex];
-    return {
-      wkOrderId,
-      items,
-      directionalGroups: groupDirectionalItems(items),
-    };
+        const [ra, ret, ex, ctx] = await Promise.all([
+          loadRiderAdvanceReimbursementItems(tx, wkOrderId),
+          loadReturnFinancialItems(tx, wkOrderId),
+          loadExceptionFinancialItems(tx, wkOrderId),
+          loadReconciliationReadContext(tx, wkOrderId),
+        ]);
+        const items = [...ra, ...ret, ...ex];
+        const detected = detectCrossRail(items, ctx);
+        return composeOrderFinancialReconciliation({
+          wkOrderId,
+          items,
+          findings: detected.findings,
+          relatedItems: detected.relatedItems,
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
+  /**
+   * Single-rail canonical item. Does not run Stage13B-2 detectors and does
+   * not wrap rails in RepeatableRead. Use forOrder for cross-rail findings.
+   */
   async forObligation(
     rail: FinancialRailId,
     obligationId: string,

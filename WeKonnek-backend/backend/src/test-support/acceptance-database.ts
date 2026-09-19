@@ -28,6 +28,9 @@ import {
   STAGE13B1_ACCEPTANCE_DATABASE,
   STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE13B1_FORBIDDEN_DATABASES,
+  STAGE13B2_ACCEPTANCE_DATABASE,
+  STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE13B2_FORBIDDEN_DATABASES,
   STAGE7_ACCEPTANCE_DATABASE,
   STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE8_ACCEPTANCE_DATABASE,
@@ -39,6 +42,9 @@ import {
   isStage13aTerraDisposableDatabase,
   isStage13b1EphemeralDisposableDatabase,
   isStage13b1TerraDisposableDatabase,
+  isStage13b2EphemeralDisposableDatabase,
+  isRecognizedCurrentSchemaDisposableName,
+  isSafeCurrentSchemaDisposableSuffix,
 } from './test-database-guard';
 
 export const ACCEPTANCE_DATABASE_URL_ENV = 'WEKONNEK_ACCEPTANCE_DATABASE_URL';
@@ -86,6 +92,12 @@ export const STAGE13A_CANONICAL_DISPOSABLE_DATABASES = new Set([
 export const STAGE13B1_CANONICAL_DISPOSABLE_DATABASES = new Set([
   STAGE13B1_ACCEPTANCE_DATABASE,
   STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE,
+]);
+
+/** Canonical shared Stage 13B-2 disposable DBs (Cursor default workflow). */
+export const STAGE13B2_CANONICAL_DISPOSABLE_DATABASES = new Set([
+  STAGE13B2_ACCEPTANCE_DATABASE,
+  STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 
 export type AcceptanceDatabaseParseResult = {
@@ -176,6 +188,9 @@ export {
   isStage13aTerraDisposableDatabase,
   isStage13b1EphemeralDisposableDatabase,
   isStage13b1TerraDisposableDatabase,
+  isStage13b2EphemeralDisposableDatabase,
+  isRecognizedCurrentSchemaDisposableName,
+  isSafeCurrentSchemaDisposableSuffix,
 };
 
 export function isStage13aDisposableAcceptanceDatabase(
@@ -200,6 +215,18 @@ export function isStage13b1DisposableAcceptanceDatabase(
   return false;
 }
 
+export function isStage13b2DisposableAcceptanceDatabase(
+  database: string,
+): boolean {
+  if (ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database)) return false;
+  if (STAGE13B2_FORBIDDEN_DATABASES.has(database)) return false;
+  if (STAGE13B2_CANONICAL_DISPOSABLE_DATABASES.has(database)) return true;
+  if (isStage13b2EphemeralDisposableDatabase(database)) return true;
+  if (database === STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE) return true;
+  if (database === STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE) return true;
+  return false;
+}
+
 /**
  * Stage 12 disposable gate — also admits Stage 13A canonical + ephemeral DBs.
  * Does NOT admit Stage 13B-1 names: those are current-schema-only (see
@@ -216,15 +243,31 @@ export function isStage12DisposableAcceptanceDatabase(database: string): boolean
 }
 
 /**
- * Centralized current-schema regression identity: Stage 12 / 13A / 13B-1
- * canonical disposable names plus narrow ephemeral slot names.
- * Not a wekonnek_* wildcard.
+ * Centralized current-schema regression identity.
+ * Named stage disposable grammar (canonical + ephemeral slots) plus the
+ * existing Stage 12 / 13A terra/cursor forms. Not a wekonnek_* wildcard.
  */
 export function isCurrentSchemaDisposableDatabase(database: string): boolean {
   if (ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database)) return false;
   if (isStage12DisposableAcceptanceDatabase(database)) return true;
   if (isStage13b1DisposableAcceptanceDatabase(database)) return true;
+  if (isStage13b2DisposableAcceptanceDatabase(database)) return true;
+  if (isRecognizedCurrentSchemaDisposableName(database)) return true;
   return false;
+}
+
+/**
+ * Fail-closed current-schema acceptance: explicit mode, NODE_ENV=test,
+ * destructive opt-in, and a recognized disposable name.
+ * Host locality is enforced separately on the connection URL.
+ */
+export function isApprovedCurrentSchemaAcceptanceDatabase(
+  database: string,
+): boolean {
+  if (!isCurrentSchemaRegressionMode()) return false;
+  if (process.env.NODE_ENV !== 'test') return false;
+  if (!isDestructiveAcceptanceOptIn()) return false;
+  return isCurrentSchemaDisposableDatabase(database);
 }
 
 /**
@@ -311,6 +354,34 @@ export function assertSafeStage13b1AcceptanceDatabase(
 }
 
 /**
+ * Fail-closed Stage 13B-2 gate — frozen Stage13B-1 acceptance and earlier DBs denied.
+ */
+export function assertSafeStage13b2AcceptanceDatabase(
+  database: string,
+  operation: string,
+): void {
+  if (
+    ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database) ||
+    STAGE13B2_FORBIDDEN_DATABASES.has(database)
+  ) {
+    throw new Error(
+      `${operation} refused: database ${database} is permanently forbidden for Stage 13B-2 destructive acceptance`,
+    );
+  }
+  if (!isStage13b2DisposableAcceptanceDatabase(database)) {
+    throw new Error(
+      `${operation} refused: database ${database} is not an approved Stage 13B-2 disposable acceptance target ` +
+        `(allowed: ${STAGE13B2_ACCEPTANCE_DATABASE}, ${STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE}, wekonnek_stage13b2_<slot>_(test|regression), ${STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE}, ${STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE})`,
+    );
+  }
+  if (!isDestructiveAcceptanceOptIn()) {
+    throw new Error(
+      `${operation} refused: ${ACCEPTANCE_DESTRUCTIVE_OK_ENV}=1 is required for destructive Stage 13B-2 acceptance against ${database}`,
+    );
+  }
+}
+
+/**
  * Fail-closed current-schema regression gate.
  * Requires explicit flag, NODE_ENV=test, approved disposable naming, and
  * destructive opt-in. Does not weaken historical Stage 12/13A gates.
@@ -337,7 +408,7 @@ export function assertSafeCurrentSchemaRegressionDatabase(
   if (!isCurrentSchemaDisposableDatabase(database)) {
     throw new Error(
       `${operation} refused: database ${database} is not an approved current-schema disposable target ` +
-        `(allowed: Stage12/13A/13B-1 canonical names or wekonnek_stage12_(terra|cursor)_* / wekonnek_stage13a_(terra|cursor)_* / wekonnek_stage13b1_<slot>_(test|regression))`,
+        `(allowed: wekonnek_stage{token}_{suffix} where suffix has a complete test|regression token plus Stage12/13A terra/cursor forms)`,
     );
   }
   if (!isDestructiveAcceptanceOptIn()) {
@@ -507,6 +578,14 @@ export function applyAcceptanceDatabaseOverride(): string | null {
       'acceptance database override',
     );
   } else if (
+    STAGE13B2_CANONICAL_DISPOSABLE_DATABASES.has(parsed.database) ||
+    isStage13b2EphemeralDisposableDatabase(parsed.database)
+  ) {
+    assertSafeStage13b2AcceptanceDatabase(
+      parsed.database,
+      'acceptance database override',
+    );
+  } else if (
     STAGE13B1_CANONICAL_DISPOSABLE_DATABASES.has(parsed.database) ||
     isStage13b1EphemeralDisposableDatabase(parsed.database)
   ) {
@@ -671,6 +750,34 @@ export function resolveStage13b1ExpectedDatabase(): string {
   return STAGE13B1_ACCEPTANCE_DATABASE;
 }
 
+/**
+ * Expected Stage 13B-2 suite database: explicit override wins, else current-schema
+ * living tip, else shared 13B-2 acceptance.
+ */
+export function resolveStage13b2ExpectedDatabase(): string {
+  const override = getExplicitAcceptanceDatabaseUrl();
+  if (override) {
+    const parsed = parseAcceptanceDatabaseUrl(override);
+    assertSafeLocalAcceptanceHost(parsed, 'resolveStage13b2ExpectedDatabase');
+    if (isCurrentSchemaRegressionMode()) {
+      assertSafeCurrentSchemaRegressionDatabase(
+        parsed.database,
+        'resolveStage13b2ExpectedDatabase',
+      );
+    } else {
+      assertSafeStage13b2AcceptanceDatabase(
+        parsed.database,
+        'resolveStage13b2ExpectedDatabase',
+      );
+    }
+    return parsed.database;
+  }
+  if (isCurrentSchemaRegressionMode()) {
+    return resolveCurrentSchemaTipDatabase('resolveStage13b2ExpectedDatabase');
+  }
+  return STAGE13B2_ACCEPTANCE_DATABASE;
+}
+
 /** Users permitted to run Stage 12 acceptance against the expected DB. */
 export function stage12AllowedDbUsers(expectedDatabase: string): Set<string> {
   return new Set(['victor', expectedDatabase]);
@@ -686,20 +793,35 @@ export function stage13b1AllowedDbUsers(expectedDatabase: string): Set<string> {
   return new Set(['victor', expectedDatabase]);
 }
 
+/** Users permitted to run Stage 13B-2 acceptance against the expected DB. */
+export function stage13b2AllowedDbUsers(expectedDatabase: string): Set<string> {
+  return new Set(['victor', expectedDatabase]);
+}
+
 /**
- * Connect via Prisma and prove current_database() matches the requested
- * disposable target. Never logs credentials.
+ * Pre-connect identity gate shared by frozen Stage 12/13A/13B suites.
+ * Current-schema regression uses the centralized disposable policy so a
+ * later-stage repair/terra DB does not require editing frozen suites.
+ * Historical mode keeps the stage-specific gate unchanged.
  */
-export async function assertPrismaConnectedToStage12AcceptanceDb(
+export function assertSuiteExpectedDatabase(
+  expectedDatabase: string,
+  label: string,
+  historicalAssert: (database: string, label: string) => void,
+): void {
+  if (isCurrentSchemaRegressionMode()) {
+    assertSafeCurrentSchemaRegressionDatabase(expectedDatabase, label);
+    return;
+  }
+  historicalAssert(expectedDatabase, label);
+}
+
+async function assertPrismaConnectedToExpectedAcceptanceDb(
   prisma: PrismaService,
   expectedDatabase: string,
   label: string,
+  historicalForbidden: ReadonlySet<string> | null,
 ): Promise<{ database: string; user: string }> {
-  if (isCurrentSchemaRegressionMode()) {
-    assertSafeCurrentSchemaRegressionDatabase(expectedDatabase, label);
-  } else {
-    assertSafeStage12AcceptanceDatabase(expectedDatabase, label);
-  }
   const rows = await prisma.$queryRaw<
     Array<{ database: string; user: string }>
   >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
@@ -718,7 +840,38 @@ export async function assertPrismaConnectedToStage12AcceptanceDb(
       `${label}: connected to forbidden database ${database}; abort before any mutation`,
     );
   }
+  if (
+    !isCurrentSchemaRegressionMode() &&
+    historicalForbidden &&
+    historicalForbidden.has(database)
+  ) {
+    throw new Error(
+      `${label}: connected to forbidden database ${database}; abort before any mutation`,
+    );
+  }
   return { database, user };
+}
+
+/**
+ * Connect via Prisma and prove current_database() matches the requested
+ * disposable target. Never logs credentials.
+ */
+export async function assertPrismaConnectedToStage12AcceptanceDb(
+  prisma: PrismaService,
+  expectedDatabase: string,
+  label: string,
+): Promise<{ database: string; user: string }> {
+  assertSuiteExpectedDatabase(
+    expectedDatabase,
+    label,
+    assertSafeStage12AcceptanceDatabase,
+  );
+  return assertPrismaConnectedToExpectedAcceptanceDb(
+    prisma,
+    expectedDatabase,
+    label,
+    null,
+  );
 }
 
 export async function assertPrismaConnectedToStage13aAcceptanceDb(
@@ -726,33 +879,17 @@ export async function assertPrismaConnectedToStage13aAcceptanceDb(
   expectedDatabase: string,
   label: string,
 ): Promise<{ database: string; user: string }> {
-  if (isCurrentSchemaRegressionMode()) {
-    assertSafeCurrentSchemaRegressionDatabase(expectedDatabase, label);
-  } else {
-    assertSafeStage13aAcceptanceDatabase(expectedDatabase, label);
-  }
-  const rows = await prisma.$queryRaw<
-    Array<{ database: string; user: string }>
-  >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-  const database = rows[0]?.database;
-  const user = rows[0]?.user;
-  if (!database || !user) {
-    throw new Error(`${label}: unable to resolve current_database()/current_user()`);
-  }
-  if (database !== expectedDatabase) {
-    throw new Error(
-      `${label}: Prisma current_database=${database} does not match expected disposable DB ${expectedDatabase} (user=${user})`,
-    );
-  }
-  if (
-    ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database) ||
-    STAGE13A_FORBIDDEN_DATABASES.has(database)
-  ) {
-    throw new Error(
-      `${label}: connected to forbidden database ${database}; abort before any mutation`,
-    );
-  }
-  return { database, user };
+  assertSuiteExpectedDatabase(
+    expectedDatabase,
+    label,
+    assertSafeStage13aAcceptanceDatabase,
+  );
+  return assertPrismaConnectedToExpectedAcceptanceDb(
+    prisma,
+    expectedDatabase,
+    label,
+    STAGE13A_FORBIDDEN_DATABASES,
+  );
 }
 
 export async function assertPrismaConnectedToStage13b1AcceptanceDb(
@@ -760,35 +897,43 @@ export async function assertPrismaConnectedToStage13b1AcceptanceDb(
   expectedDatabase: string,
   label: string,
 ): Promise<{ database: string; user: string }> {
-  assertSafeStage13b1AcceptanceDatabase(expectedDatabase, label);
-  const rows = await prisma.$queryRaw<
-    Array<{ database: string; user: string }>
-  >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-  const database = rows[0]?.database;
-  const user = rows[0]?.user;
-  if (!database || !user) {
-    throw new Error(`${label}: unable to resolve current_database()/current_user()`);
-  }
-  if (database !== expectedDatabase) {
-    throw new Error(
-      `${label}: Prisma current_database=${database} does not match expected disposable DB ${expectedDatabase} (user=${user})`,
-    );
-  }
-  if (
-    ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database) ||
-    STAGE13B1_FORBIDDEN_DATABASES.has(database)
-  ) {
-    throw new Error(
-      `${label}: connected to forbidden database ${database}; abort before any mutation`,
-    );
-  }
-  return { database, user };
+  assertSuiteExpectedDatabase(
+    expectedDatabase,
+    label,
+    assertSafeStage13b1AcceptanceDatabase,
+  );
+  return assertPrismaConnectedToExpectedAcceptanceDb(
+    prisma,
+    expectedDatabase,
+    label,
+    STAGE13B1_FORBIDDEN_DATABASES,
+  );
+}
+
+export async function assertPrismaConnectedToStage13b2AcceptanceDb(
+  prisma: PrismaService,
+  expectedDatabase: string,
+  label: string,
+): Promise<{ database: string; user: string }> {
+  assertSuiteExpectedDatabase(
+    expectedDatabase,
+    label,
+    assertSafeStage13b2AcceptanceDatabase,
+  );
+  return assertPrismaConnectedToExpectedAcceptanceDb(
+    prisma,
+    expectedDatabase,
+    label,
+    STAGE13B2_FORBIDDEN_DATABASES,
+  );
 }
 
 /** Whether cleanup helpers may TRUNCATE/aggressive-clean this DB. */
 export function isDisposableCleanupDatabaseName(database: string): boolean {
   return (
     isStage12DisposableAcceptanceDatabase(database) ||
-    isStage13b1DisposableAcceptanceDatabase(database)
+    isStage13b1DisposableAcceptanceDatabase(database) ||
+    isStage13b2DisposableAcceptanceDatabase(database) ||
+    isRecognizedCurrentSchemaDisposableName(database)
   );
 }

@@ -180,4 +180,22 @@ describe('Stage13B-1 financial-reconciliation architecture', () => {
       expect(src).not.toMatch(/['"]PLATFORM['"]\s+as debtor/);
     }
   });
+
+  it('Stage13B-2 does not persist findings or emit coherent-transfer findings', () => {
+    for (const { src } of productSources()) {
+      expect(src).not.toMatch(/\bdetectedAt\b/);
+      expect(src).not.toMatch(/RA_RETURN_TRANSFER_COHERENT/);
+      expect(src).not.toMatch(/ReconciliationFinding\s+table/);
+    }
+  });
+
+  it('forOrder uses RepeatableRead and does not take writer locks', () => {
+    const src = readFileSync(
+      resolve(DIR, 'financial-reconciliation.service.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/TransactionIsolationLevel\.RepeatableRead/);
+    expect(src).not.toMatch(/Serializable/);
+    expect(src).not.toMatch(/FOR UPDATE/i);
+  });
 });

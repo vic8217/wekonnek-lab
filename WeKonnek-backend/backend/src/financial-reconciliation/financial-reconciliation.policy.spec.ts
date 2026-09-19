@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import {
   collectibleRemainingAmount,
+  composeOrderFinancialReconciliation,
   deriveFinancialState,
   groupDirectionalItems,
   remainingAmount,
@@ -134,5 +135,29 @@ describe('Stage13B-1 financial-reconciliation policy', () => {
       ]),
     );
     expect(JSON.stringify(groups)).not.toMatch(/"orderNetBalance"/);
+  });
+
+  it('composeOrderFinancialReconciliation treats findings as the only issue flag', () => {
+    const order = composeOrderFinancialReconciliation({
+      wkOrderId: 1,
+      items: [
+        item({
+          obligationId: 'ra',
+          remainingAmount: toMoney(500),
+          flags: {
+            disputed: true,
+            nonExecutable: false,
+            collectionRestricted: false,
+            reconciliationRequired: false,
+          },
+        }),
+      ],
+      findings: [],
+      relatedItems: [],
+    });
+    expect(order.hasOutstanding).toBe(true);
+    expect(order.hasDispute).toBe(true);
+    expect(order.hasReconciliationIssue).toBe(false);
+    expect(order.findings).toEqual([]);
   });
 });

@@ -137,6 +137,7 @@ export async function insertRiderAdvance(
     principal?: Prisma.Decimal.Value | null;
     status?: RiderAdvanceStatus;
     createdAt?: Date;
+    currency?: string;
   },
 ): Promise<string> {
   const agreementId = randomUUID();
@@ -183,7 +184,7 @@ export async function insertRiderAdvance(
       riderId: opts.riderId,
       riderAssignmentId: fx.assignmentId,
       assignmentVersion: 1,
-      currency: 'PHP',
+      currency: opts.currency ?? 'PHP',
       authorizedMaximumAmount: toMoney(opts.principal ?? 800),
       actualAdvanceAmount:
         opts.principal == null ? null : toMoney(opts.principal),
@@ -230,31 +231,39 @@ export async function insertActiveRestriction(
   riderAdvanceId: string,
   determinationId: string,
   amount: Prisma.Decimal.Value,
-): Promise<void> {
+  status: RiderAdvanceCollectionRestrictionStatus = RiderAdvanceCollectionRestrictionStatus.ACTIVE,
+): Promise<string> {
+  const id = randomUUID();
   await prisma.riderAdvanceCollectionRestriction.create({
     data: {
-      id: randomUUID(),
+      id,
       riderAdvanceId,
       wkOrderId: fx.orderId,
       returnFinancialDeterminationId: determinationId,
       restrictedAmount: toMoney(amount),
       effect:
         RiderAdvanceCollectionRestrictionEffect.TRANSFER_OUTSTANDING_TO_MERCHANT_RETURN_RESOLUTION,
-      status: RiderAdvanceCollectionRestrictionStatus.ACTIVE,
+      status,
       createdByActorType: OrderDomainActorType.SYSTEM,
       createdByActorId: fx.merchantUserId,
     },
   });
+  return id;
 }
 
 export async function insertFinalizedReturnDetermination(
   prisma: PrismaService,
   fx: Stage13b1OrderSeed,
   opts: {
-    riderAdvanceId: string;
+    riderAdvanceId: string | null;
     merchantToRider: Prisma.Decimal.Value;
     merchantToCustomer: Prisma.Decimal.Value;
     status?: ReturnFinancialDeterminationStatus;
+    snapshotPrincipal?: Prisma.Decimal.Value;
+    snapshotReimbursed?: Prisma.Decimal.Value;
+    creditorRiderId?: string;
+    path?: string;
+    currency?: string;
   },
 ): Promise<{ determinationId: string; riderObligationId: string; customerObligationId: string }> {
   const custody = await prisma.custodyEvent.create({
@@ -281,10 +290,13 @@ export async function insertFinalizedReturnDetermination(
       returnCustodyEventId: custody.id,
       riderAdvanceId: opts.riderAdvanceId,
       status,
-      path: 'RIDER_ADVANCE',
+      path: opts.path ?? 'RIDER_ADVANCE',
       outcome: ReturnFinancialDeterminationOutcome.QUALIFYING_FULL_RETURN,
-      snapshotPrincipal: toMoney(800),
-      snapshotReimbursed: toMoney(opts.merchantToCustomer),
+      currency: opts.currency ?? 'PHP',
+      snapshotPrincipal: toMoney(opts.snapshotPrincipal ?? 800),
+      snapshotReimbursed: toMoney(
+        opts.snapshotReimbursed ?? opts.merchantToCustomer,
+      ),
       merchantToRiderAmount: toMoney(opts.merchantToRider),
       merchantToCustomerAmount: toMoney(opts.merchantToCustomer),
       finalizedAt:
@@ -299,40 +311,48 @@ export async function insertFinalizedReturnDetermination(
           : null,
     },
   });
-  const riderObligation = await prisma.returnFinancialObligation.create({
-    data: {
-      id: randomUUID(),
-      determinationId: determination.id,
-      wkOrderId: fx.orderId,
-      merchantId: fx.merchantId,
-      type: ReturnFinancialObligationType.MERCHANT_TO_RIDER_ADVANCE_REPAYMENT,
-      debtorType: ReturnFinancialPartyType.MERCHANT,
-      debtorMerchantId: fx.merchantId,
-      creditorType: ReturnFinancialPartyType.RIDER,
-      creditorUserId: fx.riderAId,
-      principal: toMoney(opts.merchantToRider),
-      reason: 'Stage 9 P−R merchant→rider repayment',
-    },
-  });
-  const customerObligation = await prisma.returnFinancialObligation.create({
-    data: {
-      id: randomUUID(),
-      determinationId: determination.id,
-      wkOrderId: fx.orderId,
-      merchantId: fx.merchantId,
-      type: ReturnFinancialObligationType.MERCHANT_TO_CUSTOMER_REFUND,
-      debtorType: ReturnFinancialPartyType.MERCHANT,
-      debtorMerchantId: fx.merchantId,
-      creditorType: ReturnFinancialPartyType.CUSTOMER,
-      creditorUserId: fx.customerId,
-      principal: toMoney(opts.merchantToCustomer),
-      reason: 'Stage 9 R merchant→customer refund',
-    },
-  });
+  let riderObligationId = '';
+  if (toMoney(opts.merchantToRider).gt(0)) {
+    const riderObligation = await prisma.returnFinancialObligation.create({
+      data: {
+        id: randomUUID(),
+        determinationId: determination.id,
+        wkOrderId: fx.orderId,
+        merchantId: fx.merchantId,
+        type: ReturnFinancialObligationType.MERCHANT_TO_RIDER_ADVANCE_REPAYMENT,
+        debtorType: ReturnFinancialPartyType.MERCHANT,
+        debtorMerchantId: fx.merchantId,
+        creditorType: ReturnFinancialPartyType.RIDER,
+        creditorUserId: opts.creditorRiderId ?? fx.riderAId,
+        principal: toMoney(opts.merchantToRider),
+        reason: 'Stage 9 P−R merchant→rider repayment',
+      },
+    });
+    riderObligationId = riderObligation.id;
+  }
+  let customerObligationId = '';
+  if (toMoney(opts.merchantToCustomer).gt(0)) {
+    const customerObligation = await prisma.returnFinancialObligation.create({
+      data: {
+        id: randomUUID(),
+        determinationId: determination.id,
+        wkOrderId: fx.orderId,
+        merchantId: fx.merchantId,
+        type: ReturnFinancialObligationType.MERCHANT_TO_CUSTOMER_REFUND,
+        debtorType: ReturnFinancialPartyType.MERCHANT,
+        debtorMerchantId: fx.merchantId,
+        creditorType: ReturnFinancialPartyType.CUSTOMER,
+        creditorUserId: fx.customerId,
+        principal: toMoney(opts.merchantToCustomer),
+        reason: 'Stage 9 R merchant→customer refund',
+      },
+    });
+    customerObligationId = customerObligation.id;
+  }
   return {
     determinationId: determination.id,
-    riderObligationId: riderObligation.id,
-    customerObligationId: customerObligation.id,
+    riderObligationId,
+    customerObligationId,
   };
 }
 
@@ -399,6 +419,36 @@ export async function insertStage12Coverage(
       sourceRef: input.obligationId,
       subjectRefSnapshot: input.subjectRef,
       amount: toMoney(input.amount),
+      createdByActorType: OrderDomainActorType.SYSTEM_ADMIN,
+      createdByActorId: input.actorId,
+    },
+  });
+  return id;
+}
+
+export async function insertStage9Coverage(
+  prisma: PrismaService,
+  input: {
+    economicLossId: string;
+    obligationId: string;
+    amount: Prisma.Decimal.Value;
+    actorId: string;
+    subjectRef: string;
+    currency?: string;
+    sourceRef?: string;
+  },
+): Promise<string> {
+  const id = randomUUID();
+  await prisma.economicLossCoverage.create({
+    data: {
+      id,
+      economicLossId: input.economicLossId,
+      sourceKind: EconomicLossCoverageSourceKind.STAGE9_OBLIGATION,
+      sourceRef: input.sourceRef ?? input.obligationId,
+      stage9ObligationId: input.obligationId,
+      subjectRefSnapshot: input.subjectRef,
+      amount: toMoney(input.amount),
+      currency: input.currency ?? 'PHP',
       createdByActorType: OrderDomainActorType.SYSTEM_ADMIN,
       createdByActorId: input.actorId,
     },

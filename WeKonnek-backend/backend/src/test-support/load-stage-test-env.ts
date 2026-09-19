@@ -11,7 +11,8 @@
  * 5. Else if current-schema and incoming URL was an approved disposable
  *    identity → restore it (do not clobber with a tip env file)
  * 6. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load tip
- *    `.env.stage13b1.regression.test` when present, else
+ *    `.env.stage13b2.regression.test` when present, else
+ *    `.env.stage13b1.regression.test`, else
  *    `.env.stage13a.regression.test`, else `.env.stage12.regression.test`
  *
  * Explicit Terra/Cursor override always wins over dotenv.
@@ -42,6 +43,10 @@ function isCurrentSchemaDisposableUrl(url: string | undefined): boolean {
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
+  const tip13b2RegressionPath = resolve(
+    backendRoot,
+    '.env.stage13b2.regression.test',
+  );
   const tip13b1RegressionPath = resolve(
     backendRoot,
     '.env.stage13b1.regression.test',
@@ -63,7 +68,8 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   );
   const currentSchemaTipPresent =
     isCurrentSchemaRegressionMode() &&
-    (existsSync(tip13b1RegressionPath) ||
+    (existsSync(tip13b2RegressionPath) ||
+      existsSync(tip13b1RegressionPath) ||
       existsSync(tipRegressionPath) ||
       existsSync(stage12TipRegressionPath));
 
@@ -90,6 +96,8 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   if (isCurrentSchemaRegressionMode()) {
     if (incomingCurrentSchemaDisposable && incomingDatabaseUrl) {
       process.env.DATABASE_URL = incomingDatabaseUrl;
+    } else if (existsSync(tip13b2RegressionPath)) {
+      loadDotenv({ path: tip13b2RegressionPath, override: true });
     } else if (existsSync(tip13b1RegressionPath)) {
       loadDotenv({ path: tip13b1RegressionPath, override: true });
     } else if (existsSync(tipRegressionPath)) {
@@ -107,6 +115,7 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     }
     return (
       existsSync(stagePath) ||
+      existsSync(tip13b2RegressionPath) ||
       existsSync(tip13b1RegressionPath) ||
       existsSync(tipRegressionPath) ||
       existsSync(stage12TipRegressionPath) ||
@@ -121,7 +130,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage13a.test' ||
       stageEnvFileName === '.env.stage13a.regression.test' ||
       stageEnvFileName === '.env.stage13b1.test' ||
-      stageEnvFileName === '.env.stage13b1.regression.test'
+      stageEnvFileName === '.env.stage13b1.regression.test' ||
+      stageEnvFileName === '.env.stage13b2.test' ||
+      stageEnvFileName === '.env.stage13b2.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

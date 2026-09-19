@@ -2,6 +2,8 @@ export * from './financial-reconciliation.types';
 export * from './financial-reconciliation.policy';
 export * from './financial-reconciliation.service';
 export * from './financial-reconciliation.module';
+export * from './financial-reconciliation.detectors';
+export * from './reconciliation-read-context';
 export * from './rider-advance-reimbursement.adapter';
 export * from './return-financial.adapter';
 export * from './exception-financial.adapter';

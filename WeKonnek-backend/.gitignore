@@ -76,6 +76,8 @@ backend/prisma/seed-stage2-e2e.local.ts
 !backend/.env.stage13a.regression.test.example
 !backend/.env.stage13b1.test.example
 !backend/.env.stage13b1.regression.test.example
+!backend/.env.stage13b2.test.example
+!backend/.env.stage13b2.regression.test.example
 !backend/benchmark-fixtures/
 !backend/benchmark-fixtures/vertex-poc-v1/
 !backend/benchmark-fixtures/vertex-poc-v1/dataset.json

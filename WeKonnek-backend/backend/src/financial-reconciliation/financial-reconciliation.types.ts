@@ -53,10 +53,82 @@ export type ReconciliationFlags = {
   reconciliationRequired: boolean;
 };
 
+export type ReconciliationRelation =
+  | 'SUCCESSOR'
+  | 'SUCCESSOR_OF'
+  | 'COLLECTION_TRANSFERRED_TO_RETURN'
+  | 'ECONOMIC_LOSS_COVERED_BY_RETURN'
+  | 'POTENTIAL_OVERLAP';
+
 export type ReconciliationRelatedItem = {
   rail: FinancialRailId;
   obligationId: string;
-  relation: 'SUCCESSOR' | 'SUCCESSOR_OF';
+  relation: ReconciliationRelation;
+  fromRail?: FinancialRailId;
+  fromObligationId?: string;
+};
+
+export type ReconciliationCheckOutcome =
+  | 'PASSED'
+  | 'FAILED'
+  | 'NOT_APPLICABLE'
+  | 'INSUFFICIENT_LINKAGE';
+
+export type ReconciliationSubjectMatch =
+  | 'EXACT'
+  | 'CONTAINED'
+  | 'RELATED'
+  | 'UNKNOWN'
+  | 'NOT_APPLICABLE';
+
+export const RECONCILIATION_FINDING_CODES = {
+  RA_RETURN_RESTRICTION_MISSING: 'RA_RETURN_RESTRICTION_MISSING',
+  RA_RETURN_RESTRICTION_AMOUNT_MISMATCH: 'RA_RETURN_RESTRICTION_AMOUNT_MISMATCH',
+  RA_RETURN_RESTRICTION_MULTIPLE: 'RA_RETURN_RESTRICTION_MULTIPLE',
+  RA_RETURN_DOUBLE_COLLECTIBLE: 'RA_RETURN_DOUBLE_COLLECTIBLE',
+  RA_RETURN_SNAPSHOT_PRINCIPAL_MISMATCH: 'RA_RETURN_SNAPSHOT_PRINCIPAL_MISMATCH',
+  RA_RETURN_SNAPSHOT_ACK_MISMATCH: 'RA_RETURN_SNAPSHOT_ACK_MISMATCH',
+  RA_RETURN_CREDITOR_MISMATCH: 'RA_RETURN_CREDITOR_MISMATCH',
+  RA_RETURN_RA_MISSING: 'RA_RETURN_RA_MISSING',
+  INSUFFICIENT_SOURCE_LINKAGE: 'INSUFFICIENT_SOURCE_LINKAGE',
+  CURRENCY_MISMATCH: 'CURRENCY_MISMATCH',
+  COVERAGE_SOURCE_MISSING: 'COVERAGE_SOURCE_MISSING',
+  STAGE9_COVERAGE_MISSING: 'STAGE9_COVERAGE_MISSING',
+  STAGE9_COVERAGE_AMOUNT_MISMATCH: 'STAGE9_COVERAGE_AMOUNT_MISMATCH',
+  COVERAGE_WRONG_LOSS: 'COVERAGE_WRONG_LOSS',
+  COVERAGE_DUPLICATE_SEMANTIC: 'COVERAGE_DUPLICATE_SEMANTIC',
+  COVERAGE_EXCEEDS_COMPENSABLE: 'COVERAGE_EXCEEDS_COMPENSABLE',
+  SUBJECT_MATCH_UNKNOWN: 'SUBJECT_MATCH_UNKNOWN',
+  EXCEPTION_DUPLICATE_ACTIVE_EXPOSURE: 'EXCEPTION_DUPLICATE_ACTIVE_EXPOSURE',
+  SUCCESSOR_REVIEW_REQUIRED: 'SUCCESSOR_REVIEW_REQUIRED',
+  SUCCESSOR_BRANCH_DETECTED: 'SUCCESSOR_BRANCH_DETECTED',
+  SUCCESSOR_CYCLE_DETECTED: 'SUCCESSOR_CYCLE_DETECTED',
+} as const;
+
+export type ReconciliationFindingCode =
+  (typeof RECONCILIATION_FINDING_CODES)[keyof typeof RECONCILIATION_FINDING_CODES];
+
+export type ReconciliationFindingInvolvedItem = {
+  rail: FinancialRailId;
+  obligationId: string;
+};
+
+/**
+ * Runtime-derived detector output. Not persisted. No clock identity field.
+ * findingKey is deterministic (code + sorted involved items + source id).
+ */
+export type ReconciliationFinding = {
+  findingKey: string;
+  code: ReconciliationFindingCode;
+  reconciliationState: ReconciliationState;
+  wkOrderId: number;
+  subjectMatch?: ReconciliationSubjectMatch;
+  checkOutcome: ReconciliationCheckOutcome;
+  involvedItems: ReconciliationFindingInvolvedItem[];
+  expectedRelationship?: string;
+  observedRelationship?: string;
+  explanationCode: ReconciliationFindingCode;
+  evidenceRefs: string[];
 };
 
 export type ReconciliationSourceRefs = {
@@ -117,4 +189,9 @@ export type OrderFinancialReconciliation = {
   wkOrderId: number;
   items: FinancialReconciliationItem[];
   directionalGroups: DirectionalGroup[];
+  findings: ReconciliationFinding[];
+  relatedItems: ReconciliationRelatedItem[];
+  hasOutstanding: boolean;
+  hasDispute: boolean;
+  hasReconciliationIssue: boolean;
 };

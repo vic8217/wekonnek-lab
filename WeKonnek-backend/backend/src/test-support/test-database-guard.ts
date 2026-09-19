@@ -71,6 +71,10 @@ export const STAGE13B1_ACCEPTANCE_DATABASE = 'wekonnek_stage13b1_test';
 export const STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE =
   'wekonnek_stage13b1_regression_test';
 
+export const STAGE13B2_ACCEPTANCE_DATABASE = 'wekonnek_stage13b2_test';
+export const STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE =
+  'wekonnek_stage13b2_regression_test';
+
 /**
  * Prior-stage DBs Stage 12 suites must never mutate (Stage 11 becomes a frozen
  * parent once Stage 12 opens, alongside earlier historical/contaminated DBs).
@@ -113,6 +117,15 @@ export const STAGE13A_FORBIDDEN_DATABASES = new Set([
 export const STAGE13B1_FORBIDDEN_DATABASES = new Set([
   ...STAGE13A_FORBIDDEN_DATABASES,
   STAGE13A_ACCEPTANCE_DATABASE,
+]);
+
+/**
+ * Prior-stage DBs Stage 13B-2 suites must never mutate. Stage13B-1 acceptance
+ * is the frozen parent; living current-schema tips are admitted separately.
+ */
+export const STAGE13B2_FORBIDDEN_DATABASES = new Set([
+  ...STAGE13B1_FORBIDDEN_DATABASES,
+  STAGE13B1_ACCEPTANCE_DATABASE,
 ]);
 
 /**
@@ -199,6 +212,8 @@ export const DISPOSABLE_CLEANUP_DATABASES = new Set([
   STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE13B1_ACCEPTANCE_DATABASE,
   STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE13B2_ACCEPTANCE_DATABASE,
+  STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 
 /** Terra/Cursor ephemeral Stage 12 acceptance DBs. */
@@ -210,22 +225,78 @@ const STAGE13A_EPHEMERAL_DISPOSABLE_RE =
   /^wekonnek_stage13a_(terra|cursor)_[a-z0-9][a-z0-9_]*$/;
 
 /**
- * Stage 13B-1 ephemeral disposable DBs.
- * Slot-based (terra/cursor/repair/…) — not a wekonnek_* wildcard, and not a
- * special-case privilege for any one executor name.
- *   wekonnek_stage13b1_<slot>_(test|regression|…_test|…_regression)
+ * Labels forbidden anywhere in a disposable suffix. Stronger than first-slot
+ * denylist: prod/dev/live/staging/stage never become safe by wrapping a marker.
  */
-const STAGE13B1_EPHEMERAL_DISPOSABLE_RE =
-  /^wekonnek_stage13b1_([a-z][a-z0-9]{0,24})_([a-z0-9][a-z0-9_]*)$/;
-
-const STAGE13B1_FORBIDDEN_EPHEMERAL_SLOTS = new Set([
+const FORBIDDEN_DISPOSABLE_SUFFIX_LABELS = new Set([
   'prod',
   'production',
   'dev',
   'development',
   'live',
   'staging',
+  'stage',
 ]);
+
+const CURRENT_SCHEMA_ACCEPTANCE_MARKERS = new Set(['test', 'regression']);
+
+/** Per-label: lowercase letter then up to 24 alphanumeric. Max 6 labels. */
+const DISPOSABLE_SUFFIX_LABEL_RE = /^[a-z][a-z0-9]{0,24}$/;
+const DISPOSABLE_SUFFIX_MAX_LABELS = 6;
+const DISPOSABLE_SUFFIX_MAX_CHARS = 160;
+
+/**
+ * Current-schema disposable naming grammar:
+ *   wekonnek_stage{token}_{bounded-disposable-suffix}
+ * Token is Stage 12+ (12–99 or 13a / 13b1 / 13c / …). Not a wekonnek_* wildcard.
+ * Suffix is 1–6 underscore-delimited lowercase labels. At least one complete
+ * token must be `test` or `regression`. Descriptive labels may sit before or
+ * after that marker. Does not special-case executor names (terra/cursor/repair)
+ * or the word `final`.
+ */
+const CURRENT_SCHEMA_STAGE_TOKEN = '(?:13[a-z][0-9]{0,3}|1[2-9]|[2-9][0-9])';
+const CURRENT_SCHEMA_DISPOSABLE_RE = new RegExp(
+  `^wekonnek_stage(${CURRENT_SCHEMA_STAGE_TOKEN})_([a-z][a-z0-9_]{0,${DISPOSABLE_SUFFIX_MAX_CHARS - 1}})$`,
+);
+
+/** Frozen Stage0–11 acceptance parents — never admitted via grammar. */
+const CURRENT_SCHEMA_GRAMMAR_FROZEN_PARENTS = new Set([
+  ...HISTORICAL_ACCEPTANCE_DATABASES,
+  STAGE7_ACCEPTANCE_DATABASE,
+  STAGE8_ACCEPTANCE_DATABASE,
+  STAGE9_ACCEPTANCE_DATABASE,
+  STAGE10_ACCEPTANCE_DATABASE,
+  STAGE11_ACCEPTANCE_DATABASE,
+]);
+
+export function isSafeCurrentSchemaDisposableSuffix(suffix: string): boolean {
+  if (!suffix || suffix.length > DISPOSABLE_SUFFIX_MAX_CHARS) return false;
+  if (suffix.startsWith('_') || suffix.endsWith('_') || suffix.includes('__')) {
+    return false;
+  }
+  const labels = suffix.split('_');
+  if (labels.length < 1 || labels.length > DISPOSABLE_SUFFIX_MAX_LABELS) {
+    return false;
+  }
+  let hasAcceptanceMarker = false;
+  for (const label of labels) {
+    if (!DISPOSABLE_SUFFIX_LABEL_RE.test(label)) return false;
+    if (FORBIDDEN_DISPOSABLE_SUFFIX_LABELS.has(label)) return false;
+    if (CURRENT_SCHEMA_ACCEPTANCE_MARKERS.has(label)) {
+      hasAcceptanceMarker = true;
+    }
+  }
+  return hasAcceptanceMarker;
+}
+
+export function isRecognizedCurrentSchemaDisposableName(
+  database: string,
+): boolean {
+  if (CURRENT_SCHEMA_GRAMMAR_FROZEN_PARENTS.has(database)) return false;
+  const match = CURRENT_SCHEMA_DISPOSABLE_RE.exec(database);
+  if (!match) return false;
+  return isSafeCurrentSchemaDisposableSuffix(match[2]);
+}
 
 export function isStage12TerraDisposableDatabase(database: string): boolean {
   return STAGE12_EPHEMERAL_DISPOSABLE_RE.test(database);
@@ -238,22 +309,22 @@ export function isStage13aTerraDisposableDatabase(database: string): boolean {
 export function isStage13b1EphemeralDisposableDatabase(
   database: string,
 ): boolean {
-  const match = STAGE13B1_EPHEMERAL_DISPOSABLE_RE.exec(database);
-  if (!match) return false;
-  const slot = match[1];
-  const rest = match[2];
-  if (STAGE13B1_FORBIDDEN_EPHEMERAL_SLOTS.has(slot)) return false;
-  return (
-    rest === 'test' ||
-    rest === 'regression' ||
-    rest.endsWith('_test') ||
-    rest.endsWith('_regression')
-  );
+  const prefix = 'wekonnek_stage13b1_';
+  if (!database.startsWith(prefix)) return false;
+  return isSafeCurrentSchemaDisposableSuffix(database.slice(prefix.length));
 }
 
 /** @deprecated Use isStage13b1EphemeralDisposableDatabase — kept as alias. */
 export function isStage13b1TerraDisposableDatabase(database: string): boolean {
   return isStage13b1EphemeralDisposableDatabase(database);
+}
+
+export function isStage13b2EphemeralDisposableDatabase(
+  database: string,
+): boolean {
+  const prefix = 'wekonnek_stage13b2_';
+  if (!database.startsWith(prefix)) return false;
+  return isSafeCurrentSchemaDisposableSuffix(database.slice(prefix.length));
 }
 
 export function isCurrentSchemaRegressionMode(): boolean {
@@ -291,12 +362,14 @@ export function assertDisposableCleanupDatabase(database: string): void {
     DISPOSABLE_CLEANUP_DATABASES.has(database) ||
     isStage12TerraDisposableDatabase(database) ||
     isStage13aTerraDisposableDatabase(database) ||
-    isStage13b1EphemeralDisposableDatabase(database)
+    isStage13b1EphemeralDisposableDatabase(database) ||
+    isStage13b2EphemeralDisposableDatabase(database) ||
+    isRecognizedCurrentSchemaDisposableName(database)
   ) {
     return;
   }
   throw new Error(
-    `cleanup refused: expected disposable Stage 7/8/9/10/11/12/13A/13B-1 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*|wekonnek_stage13a_(terra|cursor)_*|wekonnek_stage13b1_<slot>_(test|regression)), got ${database}`,
+    `cleanup refused: expected disposable Stage 7/8/9/10/11/12/13A/13B-1/13B-2 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*|wekonnek_stage13a_(terra|cursor)_*|wekonnek_stage{token}_{test|regression suffix}), got ${database}`,
   );
 }
 
@@ -340,6 +413,7 @@ export function stageOrRegressionDatabases(
     // Stage 11 remains accepted while its regression DB is still provisioned.
     set.add(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
     set.add(STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    set.add(STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE);
   }
   return set;
 }
@@ -351,6 +425,7 @@ export function isAllowedCurrentSchemaRegressionDatabase(
   return (
     database === STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE ||
+    database === STAGE13B2_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||

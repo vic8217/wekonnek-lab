@@ -9,8 +9,13 @@ import {
   DirectionalGroupKey,
   FinancialReconciliationItem,
   NormalizedParty,
+  OrderFinancialReconciliation,
+  ReconciliationFinding,
+  ReconciliationFindingCode,
+  ReconciliationFindingInvolvedItem,
   ReconciliationFlags,
   ReconciliationPartyType,
+  ReconciliationRelatedItem,
   ReconciliationState,
 } from './financial-reconciliation.types';
 
@@ -230,4 +235,84 @@ export function groupDirectionalItems(
     existing.itemIds.push(item.obligationId);
   }
   return [...map.values()];
+}
+
+export function sortInvolvedItems(
+  items: ReconciliationFindingInvolvedItem[],
+): ReconciliationFindingInvolvedItem[] {
+  return [...items].sort((a, b) => {
+    const rail = a.rail.localeCompare(b.rail);
+    if (rail !== 0) return rail;
+    return a.obligationId.localeCompare(b.obligationId);
+  });
+}
+
+export function buildFindingKey(input: {
+  code: ReconciliationFindingCode;
+  involvedItems: ReconciliationFindingInvolvedItem[];
+  sourceId?: string;
+}): string {
+  const involved = sortInvolvedItems(input.involvedItems)
+    .map((i) => `${i.rail}:${i.obligationId}`)
+    .join(',');
+  const source = input.sourceId ?? '';
+  return `${input.code}:${involved}:${source}`;
+}
+
+export function relatedItemKey(rel: ReconciliationRelatedItem): string {
+  return [
+    rel.fromRail ?? '',
+    rel.fromObligationId ?? '',
+    rel.relation,
+    rel.rail,
+    rel.obligationId,
+  ].join('|');
+}
+
+export function dedupeRelatedItems(
+  items: ReconciliationRelatedItem[],
+): ReconciliationRelatedItem[] {
+  const map = new Map<string, ReconciliationRelatedItem>();
+  for (const item of items) {
+    map.set(relatedItemKey(item), item);
+  }
+  return [...map.values()].sort((a, b) =>
+    relatedItemKey(a).localeCompare(relatedItemKey(b)),
+  );
+}
+
+export function dedupeFindings(
+  findings: ReconciliationFinding[],
+): ReconciliationFinding[] {
+  const map = new Map<string, ReconciliationFinding>();
+  for (const finding of findings) {
+    map.set(finding.findingKey, finding);
+  }
+  return [...map.values()].sort((a, b) =>
+    a.findingKey.localeCompare(b.findingKey),
+  );
+}
+
+/**
+ * Canonical items are left untouched. Cross-rail state lives on findings.
+ * hasReconciliationIssue tracks anomaly/review findings only (not coherent
+ * transfer relations, which are never findings).
+ */
+export function composeOrderFinancialReconciliation(input: {
+  wkOrderId: number;
+  items: FinancialReconciliationItem[];
+  findings: ReconciliationFinding[];
+  relatedItems: ReconciliationRelatedItem[];
+}): OrderFinancialReconciliation {
+  const findings = dedupeFindings(input.findings);
+  return {
+    wkOrderId: input.wkOrderId,
+    items: input.items,
+    directionalGroups: groupDirectionalItems(input.items),
+    findings,
+    relatedItems: dedupeRelatedItems(input.relatedItems),
+    hasOutstanding: input.items.some((i) => toMoney(i.remainingAmount).gt(0)),
+    hasDispute: input.items.some((i) => i.flags.disputed),
+    hasReconciliationIssue: findings.length > 0,
+  };
 }
