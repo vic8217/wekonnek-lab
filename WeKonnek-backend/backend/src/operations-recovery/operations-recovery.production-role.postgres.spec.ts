@@ -9,8 +9,8 @@
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { STAGE11_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 
 const enabled = loadStageTestEnv('.env.stage11.test');
@@ -31,10 +31,10 @@ describeIf('Stage 11 non-owner production-role release gate', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const db = await prisma.$queryRaw<Array<{ database: string }>>(
-      Prisma.sql`SELECT current_database() AS database`,
-    );
-    expect(db[0]?.database).toBe(STAGE11_ACCEPTANCE_DATABASE);
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 11 production-role',
+      historicalDatabases: [STAGE11_ACCEPTANCE_DATABASE],
+    });
 
     const canCreate = await prisma.$queryRawUnsafe<
       Array<{ rolcreaterole: boolean }>

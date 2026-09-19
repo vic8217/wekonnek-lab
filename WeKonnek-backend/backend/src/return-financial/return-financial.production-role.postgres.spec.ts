@@ -1,11 +1,13 @@
 /**
  * Stage 9 production-role release gate.  This creates a disposable, non-login
- * representative application role only on the dedicated Stage 9 acceptance DB.
- * It deliberately uses SET ROLE so no credential is stored in source or tests.
+ * representative application role on the Stage 9 historical acceptance DB, or
+ * on a centralized current-schema disposable DB when
+ * WEKONNEK_CURRENT_SCHEMA_REGRESSION=1. It deliberately uses SET ROLE so no
+ * credential is stored in source or tests.
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { STAGE9_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 
 const enabled = loadStageTestEnv('.env.stage9.test');
@@ -26,10 +28,10 @@ describeIf('Stage 9 non-owner production-role release gate', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const db = await prisma.$queryRaw<Array<{ database: string }>>(
-      Prisma.sql`SELECT current_database() AS database`,
-    );
-    expect(db[0]?.database).toBe(STAGE9_ACCEPTANCE_DATABASE);
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 9 production-role',
+      historicalDatabases: [STAGE9_ACCEPTANCE_DATABASE],
+    });
     // A prior interrupted run may leave only the disposable role itself.
     // CREATEROLE is required by this release gate specifically so it can clean
     // that role up before provisioning a fresh one.

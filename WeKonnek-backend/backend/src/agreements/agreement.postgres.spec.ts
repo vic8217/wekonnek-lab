@@ -1,18 +1,13 @@
 /**
  * Stage 2A PostgreSQL concurrency / immutability suite.
- * Requires dedicated env file backend/.env.stage2.test and database wekonnek_stage2_test.
+ * Historical: backend/.env.stage2.test and database wekonnek_stage2_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  * Does NOT fall back to stage0/stage1 databases.
  */
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 
-const STAGE2_ENV = resolve(__dirname, '../../.env.stage2.test');
-const STAGE2_ENV_PRESENT = existsSync(STAGE2_ENV);
-
-if (STAGE2_ENV_PRESENT) {
-  loadEnv({ path: STAGE2_ENV, override: true });
-}
+const STAGE2_ENV_PRESENT = loadStageTestEnv('.env.stage2.test');
 
 import {
   AgreementAcceptanceMethod,
@@ -56,17 +51,11 @@ describeIf('Stage 2A agreements PostgreSQL (wekonnek_stage2_test)', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    if (
-      target[0]?.database !== 'wekonnek_stage2_test' ||
-      target[0]?.user !== 'wekonnek_stage2_test'
-    ) {
-      throw new Error(
-        `Stage 2 tests require wekonnek_stage2_test identity; got database=${target[0]?.database} user=${target[0]?.user}`,
-      );
-    }
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 2A agreements PostgreSQL',
+      historicalDatabases: ['wekonnek_stage2_test'],
+      historicalUsers: new Set(['wekonnek_stage2_test']),
+    });
   });
 
   afterEach(async () => {

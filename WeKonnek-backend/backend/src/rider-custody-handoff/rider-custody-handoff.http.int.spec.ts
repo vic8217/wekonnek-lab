@@ -1,17 +1,14 @@
 /**
  * Stage 7 secure rider custody handoff HTTP acceptance.
- * Requires backend/.env.stage7.test and database wekonnek_stage7_test.
+ * Historical: wekonnek_stage7_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE7_ENV = resolve(__dirname, '../../.env.stage7.test');
-const STAGE7_ENV_PRESENT = existsSync(STAGE7_ENV);
-
-if (STAGE7_ENV_PRESENT) {
-  loadEnv({ path: STAGE7_ENV, override: true });
-}
+const STAGE7_ENV_PRESENT = loadStageTestEnv('.env.stage7.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -21,7 +18,6 @@ import {
   FulfillmentStatus,
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
-  Prisma,
   UserRole,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -35,15 +31,8 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = STAGE7_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage7_test']);
-const FORBIDDEN_DBS = new Set([
-  'wekonnek_stage2_test',
-  'wekonnek_stage3_test',
-  'wekonnek_stage4_test',
-  'wekonnek_stage5_test',
-  'wekonnek_stage5b_test',
-  'wekonnek_stage6_test',
-]);
+const STAGE7_HISTORICAL_DATABASES = ['wekonnek_stage7_test'] as const;
+const STAGE7_HISTORICAL_USERS = new Set(['victor', 'wekonnek_stage7_test']);
 
 describeIf('Stage 7 Rider Custody Handoff HTTP (wekonnek_stage7_test)', () => {
   let app: INestApplication;
@@ -83,22 +72,11 @@ describeIf('Stage 7 Rider Custody Handoff HTTP (wekonnek_stage7_test)', () => {
     assignments = app.get(RiderAssignmentService);
     transitions = app.get(FulfillmentTransitionService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    const database = target[0]?.database;
-    const user = target[0]?.user;
-    if (
-      !database ||
-      FORBIDDEN_DBS.has(database) ||
-      database !== 'wekonnek_stage7_test' ||
-      !user ||
-      !ALLOWED_DB_USERS.has(user)
-    ) {
-      throw new Error(
-        `Stage 7 HTTP tests require wekonnek_stage7_test identity; got database=${database} user=${user}`,
-      );
-    }
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 7 HTTP',
+      historicalDatabases: STAGE7_HISTORICAL_DATABASES,
+      historicalUsers: STAGE7_HISTORICAL_USERS,
+    });
   });
 
   beforeEach(async () => {

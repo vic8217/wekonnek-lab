@@ -128,6 +128,19 @@ describe('Legacy Stage0–11 current-schema harness normalization', () => {
     );
   });
 
+  it('8b: Stage5B current-schema accepts Stage13B-1 disposable identity', () => {
+    process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+    process.env[ACCEPTANCE_DESTRUCTIVE_OK_ENV] = '1';
+    process.env[ACCEPTANCE_DATABASE_URL_ENV] =
+      'postgresql://u:s@127.0.0.1:5432/wekonnek_stage13b1_repair_regression';
+    expect(resolveStage12ExpectedDatabase()).toBe(
+      'wekonnek_stage13b1_repair_regression',
+    );
+    expect(isStage12DisposableAcceptanceDatabase(
+      'wekonnek_stage13b1_repair_regression',
+    )).toBe(false);
+  });
+
   it('8: Stage7–11 representative current-schema suites accept override', () => {
     process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
     process.env[ACCEPTANCE_DESTRUCTIVE_OK_ENV] = '1';

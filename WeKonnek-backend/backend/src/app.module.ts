@@ -74,6 +74,7 @@ import { ReturnFinancialModule } from './return-financial/return-financial.modul
 import { RedeliveryModule } from './redelivery/redelivery.module';
 import { OperationsRecoveryModule } from './operations-recovery/operations-recovery.module';
 import { ExceptionFinancialModule } from './exception-financial/exception-financial.module';
+import { FinancialReconciliationModule } from './financial-reconciliation/financial-reconciliation.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { ExceptionFinancialModule } from './exception-financial/exception-financ
     RedeliveryModule,
     OperationsRecoveryModule,
     ExceptionFinancialModule,
+    FinancialReconciliationModule,
 
     I18nModule.forRoot({
       fallbackLanguage: 'en',

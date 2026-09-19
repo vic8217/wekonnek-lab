@@ -216,6 +216,12 @@ describe('Stage 12 acceptance harness isolation', () => {
     expect(isStage12DisposableAcceptanceDatabase('wekonnek_stage12_other')).toBe(
       false,
     );
+    expect(
+      isStage12DisposableAcceptanceDatabase('wekonnek_stage13b1_terra_regression'),
+    ).toBe(false);
+    expect(
+      isStage12DisposableAcceptanceDatabase('wekonnek_stage13b1_repair_test'),
+    ).toBe(false);
   });
 
   it('parseAcceptanceDatabaseUrl extracts database name', () => {

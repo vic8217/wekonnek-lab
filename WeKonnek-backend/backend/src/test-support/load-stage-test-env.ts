@@ -2,14 +2,17 @@
  * Load Stage N PostgreSQL acceptance env without mutating production/dev
  * DATABASE_URL for day-to-day `nest start`.
  *
- * Order (fail-closed for Stage 13A / 12 acceptance override):
+ * Order (fail-closed for Stage 13A / 12 / 13B-1 acceptance override):
  * 1. Snapshot WEKONNEK_ACCEPTANCE_DATABASE_URL / DESTRUCTIVE_OK if present
- * 2. Load .env then stage env file when present (may set DATABASE_URL)
- * 3. If explicit override → restore and apply (always wins)
- * 4. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load tip
- *    `.env.stage13a.regression.test` when present, else
- *    `.env.stage12.regression.test` so legacy Stage0–12 suites do not stay
- *    bound to their historical stage DB URL
+ * 2. Snapshot incoming DATABASE_URL when it already names an approved
+ *    current-schema disposable DB (Terra/Cursor/repair identities)
+ * 3. Load .env then stage env file when present (may set DATABASE_URL)
+ * 4. If explicit override → restore and apply (always wins)
+ * 5. Else if current-schema and incoming URL was an approved disposable
+ *    identity → restore it (do not clobber with a tip env file)
+ * 6. Else if WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 → load tip
+ *    `.env.stage13b1.regression.test` when present, else
+ *    `.env.stage13a.regression.test`, else `.env.stage12.regression.test`
  *
  * Explicit Terra/Cursor override always wins over dotenv.
  */
@@ -18,14 +21,31 @@ import { resolve } from 'path';
 import { config as loadDotenv } from 'dotenv';
 import {
   applyAcceptanceDatabaseOverride,
+  isCurrentSchemaDisposableDatabase,
+  parseAcceptanceDatabaseUrl,
   restoreAcceptanceOverrideEnv,
   snapshotAcceptanceOverrideEnv,
 } from './acceptance-database';
 import { isCurrentSchemaRegressionMode } from './test-database-guard';
 
+function isCurrentSchemaDisposableUrl(url: string | undefined): boolean {
+  if (!url || url.trim() === '') return false;
+  try {
+    return isCurrentSchemaDisposableDatabase(
+      parseAcceptanceDatabaseUrl(url).database,
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
+  const tip13b1RegressionPath = resolve(
+    backendRoot,
+    '.env.stage13b1.regression.test',
+  );
   const tipRegressionPath = resolve(
     backendRoot,
     '.env.stage13a.regression.test',
@@ -37,14 +57,21 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   const overrideSnap = snapshotAcceptanceOverrideEnv();
   const hasOverride =
     overrideSnap.url !== undefined && overrideSnap.url.trim() !== '';
+  const incomingDatabaseUrl = process.env.DATABASE_URL;
+  const incomingCurrentSchemaDisposable = isCurrentSchemaDisposableUrl(
+    incomingDatabaseUrl,
+  );
+  const currentSchemaTipPresent =
+    isCurrentSchemaRegressionMode() &&
+    (existsSync(tip13b1RegressionPath) ||
+      existsSync(tipRegressionPath) ||
+      existsSync(stage12TipRegressionPath));
 
   if (
     !existsSync(stagePath) &&
     !hasOverride &&
-    !(
-      isCurrentSchemaRegressionMode() &&
-      (existsSync(tipRegressionPath) || existsSync(stage12TipRegressionPath))
-    )
+    !currentSchemaTipPresent &&
+    !(isCurrentSchemaRegressionMode() && incomingCurrentSchemaDisposable)
   ) {
     return false;
   }
@@ -61,8 +88,11 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
   }
 
   if (isCurrentSchemaRegressionMode()) {
-    // Tip current-schema DB must win over stage-specific historical URLs.
-    if (existsSync(tipRegressionPath)) {
+    if (incomingCurrentSchemaDisposable && incomingDatabaseUrl) {
+      process.env.DATABASE_URL = incomingDatabaseUrl;
+    } else if (existsSync(tip13b1RegressionPath)) {
+      loadDotenv({ path: tip13b1RegressionPath, override: true });
+    } else if (existsSync(tipRegressionPath)) {
       loadDotenv({ path: tipRegressionPath, override: true });
     } else if (existsSync(stage12TipRegressionPath)) {
       loadDotenv({ path: stage12TipRegressionPath, override: true });
@@ -77,8 +107,10 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     }
     return (
       existsSync(stagePath) ||
+      existsSync(tip13b1RegressionPath) ||
       existsSync(tipRegressionPath) ||
-      existsSync(stage12TipRegressionPath)
+      existsSync(stage12TipRegressionPath) ||
+      isCurrentSchemaDisposableUrl(process.env.DATABASE_URL)
     );
   }
 
@@ -87,7 +119,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage12.test' ||
       stageEnvFileName === '.env.stage12.regression.test' ||
       stageEnvFileName === '.env.stage13a.test' ||
-      stageEnvFileName === '.env.stage13a.regression.test'
+      stageEnvFileName === '.env.stage13a.regression.test' ||
+      stageEnvFileName === '.env.stage13b1.test' ||
+      stageEnvFileName === '.env.stage13b1.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

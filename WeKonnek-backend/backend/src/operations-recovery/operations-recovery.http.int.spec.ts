@@ -1,17 +1,14 @@
 /**
  * Stage 11 operations recovery HTTP + privacy acceptance.
- * Requires backend/.env.stage11.test → wekonnek_stage11_test.
+ * Historical: wekonnek_stage11_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE11_ENV = resolve(__dirname, '../../.env.stage11.test');
-const STAGE11_ENV_PRESENT = existsSync(STAGE11_ENV);
-
-if (STAGE11_ENV_PRESENT) {
-  loadEnv({ path: STAGE11_ENV, override: true });
-}
+const STAGE11_ENV_PRESENT = loadStageTestEnv('.env.stage11.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -23,7 +20,6 @@ import {
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
   OperationsRecoveryTrigger,
-  Prisma,
   RiderAssignmentStatus,
   UserRole,
 } from '@prisma/client';
@@ -33,15 +29,13 @@ import request from 'supertest';
 import { AppModule } from '../app.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeliveryFailureService } from '../delivery-failure/delivery-failure.service';
-import {
-  STAGE11_ACCEPTANCE_DATABASE,
-  STAGE11_FORBIDDEN_DATABASES,
-} from '../test-support/test-database-guard';
+import { STAGE11_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 
 const describeIf = STAGE11_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage11_test']);
+const STAGE11_HISTORICAL_DATABASES = [STAGE11_ACCEPTANCE_DATABASE] as const;
+const STAGE11_HISTORICAL_USERS = new Set(['victor', STAGE11_ACCEPTANCE_DATABASE]);
 
 describeIf('Stage 11 Operations Recovery HTTP (wekonnek_stage11_test)', () => {
   let app: INestApplication;
@@ -77,12 +71,11 @@ describeIf('Stage 11 Operations Recovery HTTP (wekonnek_stage11_test)', () => {
     prisma = app.get(PrismaService);
     failures = app.get(DeliveryFailureService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(STAGE11_FORBIDDEN_DATABASES.has(target[0]!.database)).toBe(false);
-    expect(target[0]?.database).toBe(STAGE11_ACCEPTANCE_DATABASE);
-    expect(ALLOWED_DB_USERS.has(target[0]!.user)).toBe(true);
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 11 HTTP',
+      historicalDatabases: STAGE11_HISTORICAL_DATABASES,
+      historicalUsers: STAGE11_HISTORICAL_USERS,
+    });
 
     const tag = randomUUID();
     const mk = (role: UserRole, p: string) =>

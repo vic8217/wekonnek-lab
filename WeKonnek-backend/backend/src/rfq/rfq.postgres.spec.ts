@@ -1,14 +1,18 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   CommerceDomain,
-  Prisma,
   QuotationStatus,
   RfqStatus,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { OrdersService } from '../orders/orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RfqService } from './rfq.service';
+
+const STAGE2_ENV_PRESENT = loadStageTestEnv('.env.stage2.test');
+const describeIf = STAGE2_ENV_PRESENT ? describe : describe.skip;
 
 jest.setTimeout(30_000);
 
@@ -163,16 +167,15 @@ async function createFixture(
   };
 }
 
-describe('RfqService PostgreSQL acceptance gate', () => {
+describeIf('RfqService PostgreSQL acceptance gate', () => {
   let fixture: Fixture | undefined;
 
   beforeAll(async () => {
     await prisma.$connect();
-    const target = await prisma.$queryRaw<Array<{ database: string }>>(
-      Prisma.sql`SELECT current_database() AS database`,
-    );
-    if (target[0]?.database !== 'wekonnek_stage2_test')
-      throw new Error('Stage 2 tests require wekonnek_stage2_test');
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 2 RFQ PostgreSQL',
+      historicalDatabases: ['wekonnek_stage2_test'],
+    });
     jest
       .spyOn(orders, 'runOrderCreatedPostCommitEffects')
       .mockImplementation(() => {

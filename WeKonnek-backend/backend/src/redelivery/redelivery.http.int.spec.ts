@@ -1,17 +1,14 @@
 /**
  * Stage 10 redelivery HTTP acceptance.
- * Requires backend/.env.stage10.test → wekonnek_stage10_test.
+ * Historical: wekonnek_stage10_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE10_ENV = resolve(__dirname, '../../.env.stage10.test');
-const STAGE10_ENV_PRESENT = existsSync(STAGE10_ENV);
-
-if (STAGE10_ENV_PRESENT) {
-  loadEnv({ path: STAGE10_ENV, override: true });
-}
+const STAGE10_ENV_PRESENT = loadStageTestEnv('.env.stage10.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -21,7 +18,6 @@ import {
   FulfillmentStatus,
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
-  Prisma,
   RiderAssignmentStatus,
   UserRole,
 } from '@prisma/client';
@@ -30,15 +26,13 @@ import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { AppModule } from '../app.module';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  STAGE10_ACCEPTANCE_DATABASE,
-  STAGE10_FORBIDDEN_DATABASES,
-} from '../test-support/test-database-guard';
+import { STAGE10_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 
 const describeIf = STAGE10_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage10_test']);
+const STAGE10_HISTORICAL_DATABASES = [STAGE10_ACCEPTANCE_DATABASE] as const;
+const STAGE10_HISTORICAL_USERS = new Set(['victor', STAGE10_ACCEPTANCE_DATABASE]);
 
 describeIf('Stage 10 Redelivery HTTP (wekonnek_stage10_test)', () => {
   let app: INestApplication;
@@ -72,12 +66,11 @@ describeIf('Stage 10 Redelivery HTTP (wekonnek_stage10_test)', () => {
     await app.listen(0);
     prisma = app.get(PrismaService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(STAGE10_FORBIDDEN_DATABASES.has(target[0]!.database)).toBe(false);
-    expect(target[0]?.database).toBe(STAGE10_ACCEPTANCE_DATABASE);
-    expect(ALLOWED_DB_USERS.has(target[0]!.user)).toBe(true);
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 10 HTTP',
+      historicalDatabases: STAGE10_HISTORICAL_DATABASES,
+      historicalUsers: STAGE10_HISTORICAL_USERS,
+    });
 
     const tag = randomUUID();
     const mk = (role: UserRole, p: string) =>

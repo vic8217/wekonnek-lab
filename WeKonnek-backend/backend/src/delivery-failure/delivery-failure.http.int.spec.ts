@@ -1,17 +1,14 @@
 /**
  * Stage 8 delivery failure HTTP acceptance.
- * Requires backend/.env.stage8.test and database wekonnek_stage8_test.
+ * Historical: wekonnek_stage8_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE8_ENV = resolve(__dirname, '../../.env.stage8.test');
-const STAGE8_ENV_PRESENT = existsSync(STAGE8_ENV);
-
-if (STAGE8_ENV_PRESENT) {
-  loadEnv({ path: STAGE8_ENV, override: true });
-}
+const STAGE8_ENV_PRESENT = loadStageTestEnv('.env.stage8.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -22,7 +19,6 @@ import {
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
   OperationalDisposition,
-  Prisma,
   RiderAssignmentStatus,
   UserRole,
 } from '@prisma/client';
@@ -32,15 +28,13 @@ import request from 'supertest';
 import { AppModule } from '../app.module';
 import { FulfillmentTransitionService } from '../fulfillment/fulfillment-transition.service';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  STAGE8_ACCEPTANCE_DATABASE,
-  STAGE8_FORBIDDEN_DATABASES,
-} from '../test-support/test-database-guard';
+import { STAGE8_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 
 const describeIf = STAGE8_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage8_test']);
+const STAGE8_HISTORICAL_DATABASES = [STAGE8_ACCEPTANCE_DATABASE] as const;
+const STAGE8_HISTORICAL_USERS = new Set(['victor', STAGE8_ACCEPTANCE_DATABASE]);
 
 describeIf('Stage 8 Delivery Failure HTTP (wekonnek_stage8_test)', () => {
   let app: INestApplication;
@@ -75,22 +69,11 @@ describeIf('Stage 8 Delivery Failure HTTP (wekonnek_stage8_test)', () => {
     await app.listen(0);
     prisma = app.get(PrismaService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    const database = target[0]?.database;
-    const user = target[0]?.user;
-    if (
-      !database ||
-      STAGE8_FORBIDDEN_DATABASES.has(database) ||
-      database !== STAGE8_ACCEPTANCE_DATABASE ||
-      !user ||
-      !ALLOWED_DB_USERS.has(user)
-    ) {
-      throw new Error(
-        `Stage 8 HTTP tests require wekonnek_stage8_test identity; got database=${database} user=${user}`,
-      );
-    }
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 8 HTTP',
+      historicalDatabases: STAGE8_HISTORICAL_DATABASES,
+      historicalUsers: STAGE8_HISTORICAL_USERS,
+    });
   });
 
   afterAll(async () => {

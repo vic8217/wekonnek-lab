@@ -1,13 +1,10 @@
 /**
  * Stage 6 secure merchant return handoff HTTP acceptance.
- * Requires backend/.env.stage6.test and database wekonnek_stage6_test,
- * or WEKONNEK_CURRENT_SCHEMA_REGRESSION=1 + wekonnek_stage7_regression_test.
+ * Historical: wekonnek_stage6_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
 import { loadStageTestEnv } from '../test-support/load-stage-test-env';
-import {
-  isCurrentSchemaRegressionMode,
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-} from '../test-support/test-database-guard';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 
@@ -22,7 +19,6 @@ import {
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
   MerchantReturnHandoffTokenStatus,
-  Prisma,
   UserRole,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -37,18 +33,8 @@ import { PrismaService } from '../prisma/prisma.service';
 const describeIf = STAGE6_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set([
-  'victor',
-  'wekonnek_stage6_test',
-  STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE,
-]);
-const FORBIDDEN_DB_USERS = new Set([
-  'wekonnek_stage2_test',
-  'wekonnek_stage3_test',
-  'wekonnek_stage4_test',
-  'wekonnek_stage5_test',
-  'wekonnek_stage5b_test',
-]);
+const STAGE6_HISTORICAL_DATABASES = ['wekonnek_stage6_test'] as const;
+const STAGE6_HISTORICAL_USERS = new Set(['victor', 'wekonnek_stage6_test']);
 
 describeIf('Stage 6 Return Handoff HTTP (wekonnek_stage6_test)', () => {
   let app: INestApplication;
@@ -90,25 +76,11 @@ describeIf('Stage 6 Return Handoff HTTP (wekonnek_stage6_test)', () => {
     assignments = app.get(RiderAssignmentService);
     transitions = app.get(FulfillmentTransitionService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    const database = target[0]?.database;
-    const user = target[0]?.user;
-    const okHistorical = database === 'wekonnek_stage6_test';
-    const okRegression =
-      isCurrentSchemaRegressionMode() &&
-      database === STAGE7_CURRENT_SCHEMA_REGRESSION_DATABASE;
-    if (
-      (!okHistorical && !okRegression) ||
-      !user ||
-      FORBIDDEN_DB_USERS.has(user) ||
-      !ALLOWED_DB_USERS.has(user)
-    ) {
-      throw new Error(
-        `Stage 6 HTTP tests require wekonnek_stage6_test or stage7 regression identity; got database=${database} user=${user}`,
-      );
-    }
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 6 HTTP',
+      historicalDatabases: STAGE6_HISTORICAL_DATABASES,
+      historicalUsers: STAGE6_HISTORICAL_USERS,
+    });
   });
 
   beforeEach(async () => {

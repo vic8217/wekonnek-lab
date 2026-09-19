@@ -1,17 +1,14 @@
 /**
  * Stage 9 Return Financial HTTP actor matrix.
- * Requires backend/.env.stage9.test → wekonnek_stage9_test.
+ * Historical: wekonnek_stage9_test.
+ * Current-schema: centralized disposable identity (WEKONNEK_CURRENT_SCHEMA_REGRESSION=1).
  */
-import { config as loadEnv } from 'dotenv';
+import { loadStageTestEnv } from '../test-support/load-stage-test-env';
+import { assertLegacyPostgresSuiteIdentity } from '../test-support/acceptance-database';
 import { cpSync, existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 
-const STAGE9_ENV = resolve(__dirname, '../../.env.stage9.test');
-const STAGE9_ENV_PRESENT = existsSync(STAGE9_ENV);
-
-if (STAGE9_ENV_PRESENT) {
-  loadEnv({ path: STAGE9_ENV, override: true });
-}
+const STAGE9_ENV_PRESENT = loadStageTestEnv('.env.stage9.test');
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -23,7 +20,6 @@ import {
   FulfillmentStatus,
   MerchantPaymentMethodKind,
   MerchantPaymentStatus,
-  Prisma,
   ReturnFinancialTermsKind,
   RiderAdvanceStatus,
   RiderAssignmentStatus,
@@ -34,16 +30,14 @@ import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { AppModule } from '../app.module';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  STAGE9_ACCEPTANCE_DATABASE,
-  STAGE9_FORBIDDEN_DATABASES,
-} from '../test-support/test-database-guard';
+import { STAGE9_ACCEPTANCE_DATABASE } from '../test-support/test-database-guard';
 import { ReturnFinancialTermsService } from './return-financial-terms.service';
 
 const describeIf = STAGE9_ENV_PRESENT ? describe : describe.skip;
 jest.setTimeout(180_000);
 
-const ALLOWED_DB_USERS = new Set(['victor', 'wekonnek_stage9_test']);
+const STAGE9_HISTORICAL_DATABASES = [STAGE9_ACCEPTANCE_DATABASE] as const;
+const STAGE9_HISTORICAL_USERS = new Set(['victor', STAGE9_ACCEPTANCE_DATABASE]);
 
 describeIf('Stage 9 Return Financial HTTP (wekonnek_stage9_test)', () => {
   let app: INestApplication;
@@ -85,12 +79,11 @@ describeIf('Stage 9 Return Financial HTTP (wekonnek_stage9_test)', () => {
     prisma = app.get(PrismaService);
     terms = app.get(ReturnFinancialTermsService);
 
-    const target = await prisma.$queryRaw<
-      Array<{ database: string; user: string }>
-    >(Prisma.sql`SELECT current_database() AS database, current_user AS user`);
-    expect(target[0]?.database).toBe(STAGE9_ACCEPTANCE_DATABASE);
-    expect(STAGE9_FORBIDDEN_DATABASES.has(target[0]!.database)).toBe(false);
-    expect(ALLOWED_DB_USERS.has(target[0]!.user)).toBe(true);
+    await assertLegacyPostgresSuiteIdentity(prisma, {
+      label: 'Stage 9 HTTP',
+      historicalDatabases: STAGE9_HISTORICAL_DATABASES,
+      historicalUsers: STAGE9_HISTORICAL_USERS,
+    });
 
     await terms.ensureSeededTerms();
 

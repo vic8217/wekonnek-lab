@@ -67,6 +67,10 @@ export const STAGE13A_ACCEPTANCE_DATABASE = 'wekonnek_stage13a_test';
 export const STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE =
   'wekonnek_stage13a_regression_test';
 
+export const STAGE13B1_ACCEPTANCE_DATABASE = 'wekonnek_stage13b1_test';
+export const STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE =
+  'wekonnek_stage13b1_regression_test';
+
 /**
  * Prior-stage DBs Stage 12 suites must never mutate (Stage 11 becomes a frozen
  * parent once Stage 12 opens, alongside earlier historical/contaminated DBs).
@@ -99,6 +103,16 @@ export const STAGE13A_FORBIDDEN_DATABASES = new Set([
   STAGE12_ACCEPTANCE_DATABASE,
   STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
   'wekonnek_stage12_regression_test',
+]);
+
+/**
+ * Prior-stage DBs Stage 13B-1 suites must never mutate. Stage13A acceptance is
+ * frozen; the living current-schema tip (13A regression) is admitted separately
+ * so schema-identical Stage13B-1 tests can run under current-schema mode.
+ */
+export const STAGE13B1_FORBIDDEN_DATABASES = new Set([
+  ...STAGE13A_FORBIDDEN_DATABASES,
+  STAGE13A_ACCEPTANCE_DATABASE,
 ]);
 
 /**
@@ -183,6 +197,8 @@ export const DISPOSABLE_CLEANUP_DATABASES = new Set([
   STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE,
   STAGE13A_ACCEPTANCE_DATABASE,
   STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE,
+  STAGE13B1_ACCEPTANCE_DATABASE,
+  STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE,
 ]);
 
 /** Terra/Cursor ephemeral Stage 12 acceptance DBs. */
@@ -193,12 +209,51 @@ const STAGE12_EPHEMERAL_DISPOSABLE_RE =
 const STAGE13A_EPHEMERAL_DISPOSABLE_RE =
   /^wekonnek_stage13a_(terra|cursor)_[a-z0-9][a-z0-9_]*$/;
 
+/**
+ * Stage 13B-1 ephemeral disposable DBs.
+ * Slot-based (terra/cursor/repair/…) — not a wekonnek_* wildcard, and not a
+ * special-case privilege for any one executor name.
+ *   wekonnek_stage13b1_<slot>_(test|regression|…_test|…_regression)
+ */
+const STAGE13B1_EPHEMERAL_DISPOSABLE_RE =
+  /^wekonnek_stage13b1_([a-z][a-z0-9]{0,24})_([a-z0-9][a-z0-9_]*)$/;
+
+const STAGE13B1_FORBIDDEN_EPHEMERAL_SLOTS = new Set([
+  'prod',
+  'production',
+  'dev',
+  'development',
+  'live',
+  'staging',
+]);
+
 export function isStage12TerraDisposableDatabase(database: string): boolean {
   return STAGE12_EPHEMERAL_DISPOSABLE_RE.test(database);
 }
 
 export function isStage13aTerraDisposableDatabase(database: string): boolean {
   return STAGE13A_EPHEMERAL_DISPOSABLE_RE.test(database);
+}
+
+export function isStage13b1EphemeralDisposableDatabase(
+  database: string,
+): boolean {
+  const match = STAGE13B1_EPHEMERAL_DISPOSABLE_RE.exec(database);
+  if (!match) return false;
+  const slot = match[1];
+  const rest = match[2];
+  if (STAGE13B1_FORBIDDEN_EPHEMERAL_SLOTS.has(slot)) return false;
+  return (
+    rest === 'test' ||
+    rest === 'regression' ||
+    rest.endsWith('_test') ||
+    rest.endsWith('_regression')
+  );
+}
+
+/** @deprecated Use isStage13b1EphemeralDisposableDatabase — kept as alias. */
+export function isStage13b1TerraDisposableDatabase(database: string): boolean {
+  return isStage13b1EphemeralDisposableDatabase(database);
 }
 
 export function isCurrentSchemaRegressionMode(): boolean {
@@ -235,12 +290,13 @@ export function assertDisposableCleanupDatabase(database: string): void {
   if (
     DISPOSABLE_CLEANUP_DATABASES.has(database) ||
     isStage12TerraDisposableDatabase(database) ||
-    isStage13aTerraDisposableDatabase(database)
+    isStage13aTerraDisposableDatabase(database) ||
+    isStage13b1EphemeralDisposableDatabase(database)
   ) {
     return;
   }
   throw new Error(
-    `cleanup refused: expected disposable Stage 7/8/9/10/11/12/13A DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*|wekonnek_stage13a_(terra|cursor)_*), got ${database}`,
+    `cleanup refused: expected disposable Stage 7/8/9/10/11/12/13A/13B-1 DB (${[...DISPOSABLE_CLEANUP_DATABASES].join('|')}|wekonnek_stage12_(terra|cursor)_*|wekonnek_stage13a_(terra|cursor)_*|wekonnek_stage13b1_<slot>_(test|regression)), got ${database}`,
   );
 }
 
@@ -283,6 +339,7 @@ export function stageOrRegressionDatabases(
     set.add(STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE);
     // Stage 11 remains accepted while its regression DB is still provisioned.
     set.add(STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE);
+    set.add(STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE);
   }
   return set;
 }
@@ -293,6 +350,7 @@ export function isAllowedCurrentSchemaRegressionDatabase(
 ): boolean {
   return (
     database === STAGE13A_CURRENT_SCHEMA_REGRESSION_DATABASE ||
+    database === STAGE13B1_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE12_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE11_CURRENT_SCHEMA_REGRESSION_DATABASE ||
     database === STAGE10_CURRENT_SCHEMA_REGRESSION_DATABASE ||
