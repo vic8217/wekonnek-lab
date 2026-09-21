@@ -41,6 +41,8 @@ import {
   stage9ObligationCoversLossKind,
   stage9OrderMoneyOverlapsSubject,
   stage12SubjectContainedInStage9GoodsScope,
+  STAGE15B_RIDER_NOT_ELIGIBLE_REASON,
+  validateAllocationPartyMembership,
   validateAllocations,
 } from './exception-financial.policy';
 import { createHash } from 'crypto';
@@ -759,5 +761,143 @@ describe('Stage15A trusted evidence provenance architecture', () => {
     expect(migrationSql).not.toMatch(/UPDATE\s+"exception_claim_evidence"/i);
     expect(migrationSql).not.toMatch(/DELETE\s+FROM\s+"exception_claim_evidence"/i);
     expect(migrationSql).not.toMatch(/DEFAULT\s+'SERVER_ATTESTED_ORDER_TERMS'/);
+  });
+});
+
+describe('Stage15B liability party membership architecture', () => {
+  const orderUserId = '11111111-1111-1111-1111-111111111111';
+  const orderMerchantId = 42;
+
+  it('accepts exact order CUSTOMER and MERCHANT bindings', () => {
+    expect(
+      validateAllocationPartyMembership({
+        allocations: [
+          {
+            partyType: ExceptionLiablePartyType.CUSTOMER,
+            partyUserId: orderUserId,
+            partyMerchantId: null,
+          },
+        ],
+        orderUserId,
+        orderMerchantId,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      validateAllocationPartyMembership({
+        allocations: [
+          {
+            partyType: ExceptionLiablePartyType.MERCHANT,
+            partyUserId: null,
+            partyMerchantId: orderMerchantId,
+          },
+        ],
+        orderUserId,
+        orderMerchantId,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('rejects foreign, malformed, and RIDER allocations', () => {
+    const foreignCustomer = validateAllocationPartyMembership({
+      allocations: [
+        {
+          partyType: ExceptionLiablePartyType.CUSTOMER,
+          partyUserId: '22222222-2222-2222-2222-222222222222',
+          partyMerchantId: null,
+        },
+      ],
+      orderUserId,
+      orderMerchantId,
+    });
+    expect(foreignCustomer.ok).toBe(false);
+    if (!foreignCustomer.ok) {
+      expect(foreignCustomer.code).toBe(
+        EXCEPTION_FINANCIAL_CODES.ALLOCATION_PARTY_INVALID,
+      );
+    }
+
+    const malformedCustomer = validateAllocationPartyMembership({
+      allocations: [
+        {
+          partyType: ExceptionLiablePartyType.CUSTOMER,
+          partyUserId: orderUserId,
+          partyMerchantId: orderMerchantId,
+        },
+      ],
+      orderUserId,
+      orderMerchantId,
+    });
+    expect(malformedCustomer.ok).toBe(false);
+
+    const foreignMerchant = validateAllocationPartyMembership({
+      allocations: [
+        {
+          partyType: ExceptionLiablePartyType.MERCHANT,
+          partyUserId: null,
+          partyMerchantId: 99,
+        },
+      ],
+      orderUserId,
+      orderMerchantId,
+    });
+    expect(foreignMerchant.ok).toBe(false);
+
+    const rider = validateAllocationPartyMembership({
+      allocations: [
+        {
+          partyType: ExceptionLiablePartyType.RIDER,
+          partyUserId: '33333333-3333-3333-3333-333333333333',
+          partyMerchantId: null,
+        },
+      ],
+      orderUserId,
+      orderMerchantId,
+    });
+    expect(rider.ok).toBe(false);
+    if (!rider.ok) {
+      expect(rider.code).toBe(
+        EXCEPTION_FINANCIAL_CODES.ALLOCATION_RIDER_NOT_ELIGIBLE,
+      );
+    }
+    expect(STAGE15B_RIDER_NOT_ELIGIBLE_REASON).toBe(
+      'NO_FROZEN_LOSS_RELEVANT_RIDER_IDENTITY_POLICY',
+    );
+  });
+
+  it('rejects mixed packs if any allocation fails membership', () => {
+    const mixed = validateAllocationPartyMembership({
+      allocations: [
+        {
+          partyType: ExceptionLiablePartyType.CUSTOMER,
+          partyUserId: orderUserId,
+          partyMerchantId: null,
+        },
+        {
+          partyType: ExceptionLiablePartyType.RIDER,
+          partyUserId: '33333333-3333-3333-3333-333333333333',
+          partyMerchantId: null,
+        },
+      ],
+      orderUserId,
+      orderMerchantId,
+    });
+    expect(mixed.ok).toBe(false);
+  });
+
+  it('does not treat VerifiedFact or snapshot metadata as membership inputs', () => {
+    const src = readFileSync(
+      resolve(__dirname, './exception-financial.policy.ts'),
+      'utf8',
+    );
+    const fnStart = src.indexOf('export function validateAllocationPartyMembership');
+    const fnEnd = src.indexOf(
+      '// ─── Seeded policy document',
+      fnStart,
+    );
+    const fn = src.slice(fnStart, fnEnd);
+    expect(fn).not.toContain('VerifiedFact');
+    expect(fn).not.toContain('ORDER_TERMS_SNAPSHOT');
+    expect(fn).not.toContain('physicalCustodian');
+    expect(fn).not.toContain('RiderAdvance');
   });
 });

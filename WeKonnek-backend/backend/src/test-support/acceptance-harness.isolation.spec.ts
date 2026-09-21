@@ -33,6 +33,9 @@ describe('Stage 12 acceptance harness isolation', () => {
       ACCEPTANCE_DESTRUCTIVE_OK_ENV,
       'DATABASE_URL',
       'WEKONNEK_CURRENT_SCHEMA_REGRESSION',
+      'WEKONNEK_ACCEPTANCE_DB_OVERRIDE',
+      'TEST_DATABASE_URL',
+      'TEST_DATABASE_ADMIN_URL',
     ]) {
       saved[k] = process.env[k];
       delete process.env[k];

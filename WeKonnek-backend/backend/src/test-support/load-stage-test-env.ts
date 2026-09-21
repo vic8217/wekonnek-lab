@@ -22,8 +22,11 @@ import { resolve } from 'path';
 import { config as loadDotenv } from 'dotenv';
 import {
   applyAcceptanceDatabaseOverride,
+  applyExplicitStage15bAcceptanceOverride,
   isCurrentSchemaDisposableDatabase,
+  isExplicitAcceptanceDbOverrideRequested,
   parseAcceptanceDatabaseUrl,
+  pinExplicitStage15bAcceptanceOverrideAfterDotenv,
   restoreAcceptanceOverrideEnv,
   snapshotAcceptanceOverrideEnv,
 } from './acceptance-database';
@@ -60,6 +63,13 @@ export function isStage14aAcceptanceDatabase(database: string): boolean {
 export function isStage15aAcceptanceDatabase(database: string): boolean {
   return (
     database.startsWith('wekonnek_stage15a_') &&
+    isCurrentSchemaDisposableDatabase(database)
+  );
+}
+
+export function isStage15bAcceptanceDatabase(database: string): boolean {
+  return (
+    database.startsWith('wekonnek_stage15b_') &&
     isCurrentSchemaDisposableDatabase(database)
   );
 }
@@ -162,7 +172,76 @@ export function loadStage15aTestEnv(): boolean {
   return true;
 }
 
+function isStage15bDisposableUrl(url: string | undefined): boolean {
+  if (!url || url.trim() === '') return false;
+  try {
+    const database = parseAcceptanceDatabaseUrl(url).database;
+    return isStage15bAcceptanceDatabase(database);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stage15B acceptance routing is dedicated. It never falls through to
+ * frozen historical parents. A generic WEKONNEK_ACCEPTANCE_DATABASE_URL
+ * wins only when it already names wekonnek_stage15b_*.
+ */
+export function loadStage15bTestEnv(): boolean {
+  const backendRoot = resolve(__dirname, '../..');
+  const stagePath = resolve(backendRoot, '.env.stage15b.test');
+  const overrideSnap = snapshotAcceptanceOverrideEnv();
+  const overrideUrl = overrideSnap.url;
+  const incomingDatabaseUrl = process.env.DATABASE_URL;
+  const overrideIs15b = isStage15bDisposableUrl(overrideUrl);
+  const incomingIs15b = isStage15bDisposableUrl(incomingDatabaseUrl);
+
+  if (!existsSync(stagePath) && !overrideIs15b && !incomingIs15b) {
+    return false;
+  }
+
+  loadDotenv({ path: resolve(backendRoot, '.env') });
+  if (existsSync(stagePath)) {
+    loadDotenv({ path: stagePath, override: true });
+  }
+
+  if (overrideIs15b && overrideUrl) {
+    restoreAcceptanceOverrideEnv(overrideSnap);
+    applyAcceptanceDatabaseOverride();
+  } else if (isStage15bDisposableUrl(process.env.WEKONNEK_ACCEPTANCE_DATABASE_URL)) {
+    applyAcceptanceDatabaseOverride();
+  } else if (
+    !isStage15bDisposableUrl(process.env.DATABASE_URL) &&
+    incomingIs15b &&
+    incomingDatabaseUrl
+  ) {
+    process.env.DATABASE_URL = incomingDatabaseUrl;
+  }
+
+  if (!isStage15bDisposableUrl(process.env.DATABASE_URL)) {
+    return false;
+  }
+
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+    process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+  }
+  return true;
+}
+
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    const backendRoot = resolve(__dirname, '../..');
+    const stagePath = resolve(backendRoot, stageEnvFileName);
+    pinExplicitStage15bAcceptanceOverrideAfterDotenv(() => {
+      loadDotenv({ path: resolve(backendRoot, '.env') });
+      if (existsSync(stagePath)) {
+        loadDotenv({ path: stagePath, override: true });
+      }
+    });
+    applyExplicitStage15bAcceptanceOverride('loadStageTestEnv');
+    return true;
+  }
   if (
     stageEnvFileName === '.env.stage14a.test' ||
     stageEnvFileName === '.env.stage14a.regression.test'
@@ -174,6 +253,12 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     stageEnvFileName === '.env.stage15a.regression.test'
   ) {
     return loadStage15aTestEnv();
+  }
+  if (
+    stageEnvFileName === '.env.stage15b.test' ||
+    stageEnvFileName === '.env.stage15b.regression.test'
+  ) {
+    return loadStage15bTestEnv();
   }
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
@@ -300,7 +385,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage14a.test' ||
       stageEnvFileName === '.env.stage14a.regression.test' ||
       stageEnvFileName === '.env.stage15a.test' ||
-      stageEnvFileName === '.env.stage15a.regression.test'
+      stageEnvFileName === '.env.stage15a.regression.test' ||
+      stageEnvFileName === '.env.stage15b.test' ||
+      stageEnvFileName === '.env.stage15b.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

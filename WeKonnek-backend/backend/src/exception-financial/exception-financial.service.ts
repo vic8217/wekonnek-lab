@@ -54,6 +54,7 @@ import {
   stage9ObligationCoversLossKind,
   sumAmounts,
   toMoney,
+  validateAllocationPartyMembership,
   validateAllocations,
 } from './exception-financial.policy';
 
@@ -63,6 +64,29 @@ type Viewer = 'ADMIN' | 'PARTY' | 'DENIED';
 @Injectable()
 export class ExceptionFinancialService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private requireAllocationMembership(
+    allocations: Array<{
+      partyType: ExceptionLiablePartyType | string;
+      partyUserId?: string | null;
+      partyMerchantId?: number | null;
+    }>,
+    order: { userId: string | null; merchantId: number | null },
+    mode: 'create' | 'finalize',
+  ) {
+    const membership = validateAllocationPartyMembership({
+      allocations,
+      orderUserId: order.userId,
+      orderMerchantId: order.merchantId,
+    });
+    if (!membership.ok) {
+      const body = { code: membership.code, message: membership.message };
+      if (mode === 'finalize') {
+        throw new ConflictException(body);
+      }
+      throw new BadRequestException(body);
+    }
+  }
 
   private async withSerializableRetry<T>(
     run: () => Promise<T>,
@@ -1338,6 +1362,9 @@ export class ExceptionFinancialService {
               input.adjustmentOfDeterminationId,
             ),
           });
+          const order = await tx.wkOrder.findUniqueOrThrow({
+            where: { id: claim.wkOrderId },
+          });
 
           const facts = await this.lockVerifiedFacts(tx, claim.id);
           if (facts.length === 0) {
@@ -1391,6 +1418,7 @@ export class ExceptionFinancialService {
               message: validation.message,
             });
           }
+          this.requireAllocationMembership(input.allocations, order, 'create');
 
           const nonConformanceBasis = evaluateNonConformanceLiabilityBasis({
             claimType: claim.claimType,
@@ -1643,6 +1671,9 @@ export class ExceptionFinancialService {
             tx,
             peek.exceptionClaimId,
           );
+          const order = await tx.wkOrder.findUniqueOrThrow({
+            where: { id: claim.wkOrderId },
+          });
           await this.lockVerifiedFacts(tx, claim.id);
           const determination = await this.lockDetermination(
             tx,
@@ -1773,6 +1804,7 @@ export class ExceptionFinancialService {
               message: validation.message,
             });
           }
+          this.requireAllocationMembership(allocations, order, 'finalize');
 
           const finalizedAt = new Date();
           const updated = await tx.liabilityDetermination.update({

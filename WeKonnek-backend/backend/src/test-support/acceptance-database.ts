@@ -49,6 +49,23 @@ import {
 
 export const ACCEPTANCE_DATABASE_URL_ENV = 'WEKONNEK_ACCEPTANCE_DATABASE_URL';
 export const ACCEPTANCE_DESTRUCTIVE_OK_ENV = 'WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK';
+/**
+ * Explicit current-schema acceptance override. When set to `1`, historical
+ * `.env.stage12.test` (and other stage env files) must not replace the
+ * approved disposable database. Missing/invalid URL fails closed — no
+ * historical fallback.
+ */
+export const ACCEPTANCE_DB_OVERRIDE_ENV = 'WEKONNEK_ACCEPTANCE_DB_OVERRIDE';
+
+const DATABASE_AUTHORITY_ENV_KEYS = [
+  'DATABASE_URL',
+  ACCEPTANCE_DATABASE_URL_ENV,
+  ACCEPTANCE_DESTRUCTIVE_OK_ENV,
+  ACCEPTANCE_DB_OVERRIDE_ENV,
+  'WEKONNEK_CURRENT_SCHEMA_REGRESSION',
+  'TEST_DATABASE_URL',
+  'TEST_DATABASE_ADMIN_URL',
+] as const;
 
 /** Absolute deny list — never mutate, even if named like a test DB. */
 export const ACCEPTANCE_ABSOLUTE_DENY_DATABASES = new Set([
@@ -181,6 +198,138 @@ export function assertSafeLocalAcceptanceHost(
 
 export function isDestructiveAcceptanceOptIn(): boolean {
   return process.env[ACCEPTANCE_DESTRUCTIVE_OK_ENV] === '1';
+}
+
+export function isExplicitAcceptanceDbOverrideRequested(): boolean {
+  return process.env[ACCEPTANCE_DB_OVERRIDE_ENV] === '1';
+}
+
+/**
+ * Tight Stage15B current-schema override grammar. Historical Stage12–15A
+ * parents and other stage tokens are refused even if they look like *_test.
+ */
+export function isApprovedStage15bOverrideDatabase(database: string): boolean {
+  if (ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database)) return false;
+  if (database.startsWith('wekonnek_stage12_')) return false;
+  if (database.startsWith('wekonnek_stage13')) return false;
+  if (database.startsWith('wekonnek_stage14')) return false;
+  if (database.startsWith('wekonnek_stage15a_')) return false;
+  return (
+    database.startsWith('wekonnek_stage15b_') &&
+    isRecognizedCurrentSchemaDisposableName(database)
+  );
+}
+
+export function assertRuntimeDatabaseIdentityMatchesApproved(
+  actualDatabase: string | null | undefined,
+  approvedDatabase: string,
+  label: string,
+): void {
+  if (!actualDatabase) {
+    throw new Error(
+      `${label} refused: current_database() is empty; refuse to continue`,
+    );
+  }
+  if (actualDatabase !== approvedDatabase) {
+    throw new Error(
+      `${label} refused: current_database=${actualDatabase} does not match approved ${approvedDatabase}`,
+    );
+  }
+}
+
+function snapshotDatabaseAuthorityEnv(): Record<string, string | undefined> {
+  const snap: Record<string, string | undefined> = {};
+  for (const key of DATABASE_AUTHORITY_ENV_KEYS) {
+    snap[key] = process.env[key];
+  }
+  return snap;
+}
+
+function restoreDatabaseAuthorityEnv(
+  snap: Record<string, string | undefined>,
+): void {
+  for (const key of DATABASE_AUTHORITY_ENV_KEYS) {
+    const value = snap[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
+/**
+ * Fail-closed pin for explicit current-schema acceptance. Does not fall back
+ * to historical `.env.stage12.test` / default DATABASE_URL.
+ */
+export function applyExplicitStage15bAcceptanceOverride(
+  operation = 'explicit Stage15B acceptance override',
+): string {
+  if (!isExplicitAcceptanceDbOverrideRequested()) {
+    throw new Error(`${operation} refused: ${ACCEPTANCE_DB_OVERRIDE_ENV}=1 is required`);
+  }
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error(
+      `${operation} refused: NODE_ENV=test is required (got ${process.env.NODE_ENV ?? '<unset>'})`,
+    );
+  }
+  if (!isDestructiveAcceptanceOptIn()) {
+    throw new Error(
+      `${operation} refused: ${ACCEPTANCE_DESTRUCTIVE_OK_ENV}=1 is required`,
+    );
+  }
+  const url = getExplicitAcceptanceDatabaseUrl();
+  if (!url) {
+    throw new Error(
+      `${operation} refused: ${ACCEPTANCE_DATABASE_URL_ENV} is absent; refuse historical DATABASE_URL fallback`,
+    );
+  }
+  const parsed = parseAcceptanceDatabaseUrl(url);
+  assertSafeLocalAcceptanceHost(parsed, operation);
+  if (!isApprovedStage15bOverrideDatabase(parsed.database)) {
+    throw new Error(
+      `${operation} refused: database ${parsed.database} is not an approved Stage15B current-schema override target`,
+    );
+  }
+  process.env.DATABASE_URL = url;
+  process.env[ACCEPTANCE_DATABASE_URL_ENV] = url;
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  return parsed.database;
+}
+
+/**
+ * After validating the override, historical stage env files may supply
+ * non-database settings (JWT). Database authority vars are restored so
+ * `.env.stage12.test` cannot reroute Prisma.
+ */
+export function pinExplicitStage15bAcceptanceOverrideAfterDotenv(loadHistoricalEnv: () => void): string {
+  const database = applyExplicitStage15bAcceptanceOverride();
+  const authority = snapshotDatabaseAuthorityEnv();
+  loadHistoricalEnv();
+  restoreDatabaseAuthorityEnv(authority);
+  process.env.DATABASE_URL = authority.DATABASE_URL ?? process.env.DATABASE_URL;
+  process.env[ACCEPTANCE_DATABASE_URL_ENV] =
+    authority[ACCEPTANCE_DATABASE_URL_ENV] ?? process.env[ACCEPTANCE_DATABASE_URL_ENV];
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  process.env[ACCEPTANCE_DB_OVERRIDE_ENV] = '1';
+  process.env.NODE_ENV = 'test';
+  if (authority[ACCEPTANCE_DESTRUCTIVE_OK_ENV] !== undefined) {
+    process.env[ACCEPTANCE_DESTRUCTIVE_OK_ENV] =
+      authority[ACCEPTANCE_DESTRUCTIVE_OK_ENV];
+  }
+  const pinned = getExplicitAcceptanceDatabaseUrl();
+  if (!pinned) {
+    throw new Error(
+      'explicit Stage15B acceptance override lost after env load; refuse historical fallback',
+    );
+  }
+  const parsed = parseAcceptanceDatabaseUrl(pinned);
+  if (parsed.database !== database) {
+    throw new Error(
+      `explicit Stage15B acceptance override mutated during env load (${parsed.database} != ${database})`,
+    );
+  }
+  process.env.DATABASE_URL = pinned;
+  delete process.env.TEST_DATABASE_URL;
+  delete process.env.TEST_DATABASE_ADMIN_URL;
+  return database;
 }
 
 export {
@@ -568,6 +717,11 @@ export function getExplicitAcceptanceDatabaseUrl(): string | null {
  * Returns the validated database name, or null when no override is set.
  */
 export function applyAcceptanceDatabaseOverride(): string | null {
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    return applyExplicitStage15bAcceptanceOverride(
+      'acceptance database override',
+    );
+  }
   const override = getExplicitAcceptanceDatabaseUrl();
   if (!override) return null;
   const parsed = parseAcceptanceDatabaseUrl(override);
@@ -671,6 +825,11 @@ function resolveCurrentSchemaTipDatabase(operation: string): string {
  * regression DB when in current-schema mode, else shared Stage 12 acceptance.
  */
 export function resolveStage12ExpectedDatabase(): string {
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    return applyExplicitStage15bAcceptanceOverride(
+      'resolveStage12ExpectedDatabase',
+    );
+  }
   const override = getExplicitAcceptanceDatabaseUrl();
   if (override) {
     const parsed = parseAcceptanceDatabaseUrl(override);
@@ -834,6 +993,18 @@ async function assertPrismaConnectedToExpectedAcceptanceDb(
     throw new Error(
       `${label}: Prisma current_database=${database} does not match expected disposable DB ${expectedDatabase} (user=${user})`,
     );
+  }
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    assertRuntimeDatabaseIdentityMatchesApproved(
+      database,
+      expectedDatabase,
+      label,
+    );
+    if (!isApprovedStage15bOverrideDatabase(expectedDatabase)) {
+      throw new Error(
+        `${label}: expected database ${expectedDatabase} is not an approved Stage15B override target`,
+      );
+    }
   }
   if (ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database)) {
     throw new Error(

@@ -83,6 +83,7 @@ export const EXCEPTION_FINANCIAL_CODES = {
   ALLOCATIONS_REQUIRED: 'LIABILITY_ALLOCATIONS_REQUIRED',
   ALLOCATION_SUM_MISMATCH: 'LIABILITY_ALLOCATION_SUM_MISMATCH',
   ALLOCATION_PARTY_INVALID: 'LIABILITY_ALLOCATION_PARTY_INVALID',
+  ALLOCATION_RIDER_NOT_ELIGIBLE: 'LIABILITY_ALLOCATION_RIDER_NOT_ELIGIBLE',
   PLATFORM_NEVER_LIABLE: 'EXCEPTION_PLATFORM_NEVER_LIABLE',
   REMAINING_EXCEEDED: 'EXCEPTION_REMAINING_COMPENSABLE_EXCEEDED',
   NOTHING_REMAINING: 'EXCEPTION_NOTHING_REMAINING_TO_RECOVER',
@@ -910,6 +911,73 @@ export function validateAllocations(
         input.remainingAmount,
       ).toFixed(2)}`,
     };
+  }
+  return { ok: true };
+}
+
+/**
+ * Stage15B: allocation identities must match canonical WkOrder parties.
+ * CUSTOMER/MERCHANT membership is exact. RIDER fails closed — there is no
+ * frozen loss-time rider-debtor identity policy. VerifiedFact attribution,
+ * snapshot metadata, assignment, and custody are not membership authority.
+ */
+export const STAGE15B_RIDER_NOT_ELIGIBLE_REASON =
+  'NO_FROZEN_LOSS_RELEVANT_RIDER_IDENTITY_POLICY';
+
+export type AllocationMembershipInput = {
+  allocations: Array<{
+    partyType: ExceptionLiablePartyType | string;
+    partyUserId?: string | null;
+    partyMerchantId?: number | null;
+  }>;
+  orderUserId: string | null | undefined;
+  orderMerchantId: number | null | undefined;
+};
+
+export function validateAllocationPartyMembership(
+  input: AllocationMembershipInput,
+): GateResult {
+  for (const a of input.allocations) {
+    if (a.partyType === ExceptionLiablePartyType.RIDER) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ALLOCATION_RIDER_NOT_ELIGIBLE,
+        message:
+          'RIDER allocations are not eligible until a frozen loss-relevant rider identity policy exists',
+      };
+    }
+    if (a.partyType === ExceptionLiablePartyType.CUSTOMER) {
+      if (
+        input.orderUserId == null ||
+        input.orderUserId === '' ||
+        a.partyUserId == null ||
+        a.partyUserId === '' ||
+        a.partyUserId !== input.orderUserId ||
+        a.partyMerchantId != null
+      ) {
+        return {
+          ok: false,
+          code: EXCEPTION_FINANCIAL_CODES.ALLOCATION_PARTY_INVALID,
+          message:
+            'CUSTOMER allocation must bind exactly to the order customer with no merchant id',
+        };
+      }
+    }
+    if (a.partyType === ExceptionLiablePartyType.MERCHANT) {
+      if (
+        input.orderMerchantId == null ||
+        a.partyMerchantId == null ||
+        a.partyMerchantId !== input.orderMerchantId ||
+        a.partyUserId != null
+      ) {
+        return {
+          ok: false,
+          code: EXCEPTION_FINANCIAL_CODES.ALLOCATION_PARTY_INVALID,
+          message:
+            'MERCHANT allocation must bind exactly to the order merchant with no user id',
+        };
+      }
+    }
   }
   return { ok: true };
 }
