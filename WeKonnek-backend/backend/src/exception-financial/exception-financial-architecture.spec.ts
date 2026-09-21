@@ -44,6 +44,14 @@ import {
   STAGE15B_RIDER_NOT_ELIGIBLE_REASON,
   validateAllocationPartyMembership,
   validateAllocations,
+  validateSuccessorClaimGraph,
+  isStage15COneChildUniqueViolation,
+  isLiabilityCreateIdempotencyUniqueViolation,
+  isLiabilityOneActiveUniqueViolation,
+  liabilityDeterminationUniqueViolationCode,
+  STAGE15C_ONE_CHILD_UNIQUE_INDEX,
+  LIABILITY_CREATE_IDEM_UNIQUE_INDEX,
+  LIABILITY_ONE_ACTIVE_UNIQUE_INDEX,
 } from './exception-financial.policy';
 import { createHash } from 'crypto';
 
@@ -899,5 +907,247 @@ describe('Stage15B liability party membership architecture', () => {
     expect(fn).not.toContain('ORDER_TERMS_SNAPSHOT');
     expect(fn).not.toContain('physicalCustodian');
     expect(fn).not.toContain('RiderAdvance');
+  });
+});
+
+describe('Stage15C successor chain architecture', () => {
+  const migrationSql = readFileSync(
+    resolve(
+      __dirname,
+      '../../prisma/migrations/20260921200000_stage15c_successor_chain_authority/migration.sql',
+    ),
+    'utf8',
+  );
+  const rollbackSql = readFileSync(
+    resolve(
+      __dirname,
+      '../../prisma/migrations/20260921200000_stage15c_successor_chain_authority/rollback.sql',
+    ),
+    'utf8',
+  );
+  const serviceSrc = readFileSync(
+    resolve(__dirname, './exception-financial.service.ts'),
+    'utf8',
+  );
+
+  const chain = [
+    { id: 'a', exceptionClaimId: 'c1', adjustmentOfDeterminationId: null },
+    { id: 'b', exceptionClaimId: 'c1', adjustmentOfDeterminationId: 'a' },
+  ];
+
+  it('accepts a single-chain tip as the only successor source', () => {
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'b',
+        nodes: chain,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('rejects branch, cycle, cross-claim, missing parent, multiple roots, and non-tip source', () => {
+    const branch = [
+      ...chain,
+      { id: 'x', exceptionClaimId: 'c1', adjustmentOfDeterminationId: 'a' },
+    ];
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'b',
+        nodes: branch,
+      }).ok,
+    ).toBe(false);
+
+    const cycled = [
+      { id: 'a', exceptionClaimId: 'c1', adjustmentOfDeterminationId: 'b' },
+      { id: 'b', exceptionClaimId: 'c1', adjustmentOfDeterminationId: 'a' },
+    ];
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'a',
+        nodes: cycled,
+      }).ok,
+    ).toBe(false);
+
+    const cross = [
+      { id: 'a', exceptionClaimId: 'c1', adjustmentOfDeterminationId: null },
+      { id: 'b', exceptionClaimId: 'c2', adjustmentOfDeterminationId: 'a' },
+    ];
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'a',
+        nodes: cross,
+      }).ok,
+    ).toBe(false);
+
+    const missing = [
+      { id: 'b', exceptionClaimId: 'c1', adjustmentOfDeterminationId: 'ghost' },
+    ];
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'b',
+        nodes: missing,
+      }).ok,
+    ).toBe(false);
+
+    const twoRoots = [
+      { id: 'a', exceptionClaimId: 'c1', adjustmentOfDeterminationId: null },
+      { id: 'z', exceptionClaimId: 'c1', adjustmentOfDeterminationId: null },
+    ];
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'a',
+        nodes: twoRoots,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      validateSuccessorClaimGraph({
+        claimId: 'c1',
+        sourceId: 'a',
+        nodes: chain,
+      }).ok,
+    ).toBe(false);
+  });
+
+  it('migration is additive unique index with no data rewrite', () => {
+    expect(migrationSql).toContain(
+      'liability_determinations_one_child_per_parent',
+    );
+    expect(migrationSql).toContain(
+      'WHERE "adjustment_of_determination_id" IS NOT NULL',
+    );
+    expect(migrationSql).not.toMatch(/UPDATE\s+/i);
+    expect(migrationSql).not.toMatch(/DELETE\s+/i);
+    expect(rollbackSql).toContain(
+      'DROP INDEX IF EXISTS "liability_determinations_one_child_per_parent"',
+    );
+  });
+
+  it('service locks claim determinations after facts and before successor create', () => {
+    expect(serviceSrc).toContain('lockClaimDeterminations');
+    expect(serviceSrc).toContain('requireSuccessorTopology');
+    expect(serviceSrc).toContain('validateSuccessorClaimGraph');
+    const createStart = serviceSrc.indexOf('async createDetermination');
+    const createEnd = serviceSrc.indexOf(
+      'async proposeDetermination',
+      createStart,
+    );
+    const create = serviceSrc.slice(createStart, createEnd);
+    expect(create.indexOf('lockVerifiedFacts')).toBeGreaterThan(-1);
+    expect(create.indexOf('lockClaimDeterminations')).toBeGreaterThan(
+      create.indexOf('lockVerifiedFacts'),
+    );
+    expect(create.indexOf('requireSuccessorTopology')).toBeGreaterThan(
+      create.indexOf('lockClaimDeterminations'),
+    );
+    expect(create.indexOf('DETERMINATION_ALREADY_ACTIVE')).toBeGreaterThan(
+      create.indexOf('requireSuccessorTopology'),
+    );
+    expect(create).not.toMatch(
+      /code === ['"]P2002['"]\s*&&\s*input\.adjustmentOfDeterminationId/,
+    );
+    expect(create).toContain('liabilityDeterminationUniqueViolationCode');
+    expect(create).not.toContain(
+      'e.code === \'P2002\' &&\n              input.adjustmentOfDeterminationId',
+    );
+  });
+
+  it('discriminates Stage15C one-child P2002 from other unique collisions', () => {
+    const oneChild = {
+      code: 'P2002',
+      meta: {
+        modelName: 'LiabilityDetermination',
+        driverAdapterError: {
+          cause: {
+            kind: 'UniqueConstraintViolation',
+            constraint: { index: STAGE15C_ONE_CHILD_UNIQUE_INDEX },
+          },
+        },
+      },
+    };
+    expect(isStage15COneChildUniqueViolation(oneChild)).toBe(true);
+    expect(liabilityDeterminationUniqueViolationCode(oneChild)).toBe(
+      EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+    );
+
+    const fieldTarget = {
+      code: 'P2002',
+      meta: { target: ['adjustmentOfDeterminationId'] },
+    };
+    expect(isStage15COneChildUniqueViolation(fieldTarget)).toBe(true);
+
+    const createIdem = {
+      code: 'P2002',
+      meta: {
+        target: ['createdByActorId', 'createIdempotencyKey'],
+        driverAdapterError: {
+          cause: {
+            kind: 'UniqueConstraintViolation',
+            constraint: { index: LIABILITY_CREATE_IDEM_UNIQUE_INDEX },
+          },
+        },
+      },
+    };
+    expect(isStage15COneChildUniqueViolation(createIdem)).toBe(false);
+    expect(isLiabilityCreateIdempotencyUniqueViolation(createIdem)).toBe(true);
+    expect(liabilityDeterminationUniqueViolationCode(createIdem)).toBeNull();
+
+    const oneActive = {
+      code: 'P2002',
+      meta: {
+        driverAdapterError: {
+          cause: {
+            kind: 'UniqueConstraintViolation',
+            constraint: { index: LIABILITY_ONE_ACTIVE_UNIQUE_INDEX },
+          },
+        },
+      },
+    };
+    expect(isStage15COneChildUniqueViolation(oneActive)).toBe(false);
+    expect(isLiabilityOneActiveUniqueViolation(oneActive)).toBe(true);
+    expect(liabilityDeterminationUniqueViolationCode(oneActive)).toBe(
+      EXCEPTION_FINANCIAL_CODES.DETERMINATION_ALREADY_ACTIVE,
+    );
+
+    const unknown = { code: 'P2002', meta: {} };
+    expect(isStage15COneChildUniqueViolation(unknown)).toBe(false);
+    expect(liabilityDeterminationUniqueViolationCode(unknown)).toBeNull();
+
+    const pgConstraint = {
+      code: 'P2002',
+      cause: {
+        code: '23505',
+        constraint: STAGE15C_ONE_CHILD_UNIQUE_INDEX,
+      },
+    };
+    expect(isStage15COneChildUniqueViolation(pgConstraint)).toBe(true);
+
+    const prismaPgAdapter = {
+      code: 'P2002',
+      message:
+        'Unique constraint failed on the fields: (`adjustment_of_determination_id`)',
+      meta: {
+        modelName: 'LiabilityDetermination',
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: {
+            originalCode: '23505',
+            originalMessage:
+              'duplicate key value violates unique constraint "liability_determinations_one_child_per_parent"',
+            kind: 'UniqueConstraintViolation',
+            constraint: { fields: ['adjustment_of_determination_id'] },
+          },
+        },
+      },
+    };
+    expect(isStage15COneChildUniqueViolation(prismaPgAdapter)).toBe(true);
+    expect(liabilityDeterminationUniqueViolationCode(prismaPgAdapter)).toBe(
+      EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+    );
   });
 });

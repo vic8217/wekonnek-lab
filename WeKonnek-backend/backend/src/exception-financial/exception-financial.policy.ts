@@ -982,6 +982,342 @@ export function validateAllocationPartyMembership(
   return { ok: true };
 }
 
+/**
+ * Stage15C: bounded successor topology on the claim's fetched determinations.
+ * Finite walk only (at most nodes.length hops). No latest-by-time fallback.
+ */
+export type SuccessorGraphNode = {
+  id: string;
+  exceptionClaimId: string;
+  adjustmentOfDeterminationId: string | null;
+};
+
+export function validateSuccessorClaimGraph(input: {
+  claimId: string;
+  sourceId: string;
+  nodes: SuccessorGraphNode[];
+}): GateResult {
+  const { claimId, sourceId, nodes } = input;
+  if (nodes.length === 0) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor source graph is empty',
+    };
+  }
+  const byId = new Map<string, SuccessorGraphNode>();
+  for (const n of nodes) {
+    if (n.exceptionClaimId !== claimId) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor graph contains a cross-claim determination',
+      };
+    }
+    if (byId.has(n.id)) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor graph contains duplicate determination ids',
+      };
+    }
+    byId.set(n.id, n);
+  }
+  const source = byId.get(sourceId);
+  if (!source) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor source is not on the claim graph',
+    };
+  }
+
+  const childCount = new Map<string, number>();
+  for (const n of nodes) {
+    const parent = n.adjustmentOfDeterminationId;
+    if (parent == null) continue;
+    if (parent === n.id) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor graph contains a self-parent',
+      };
+    }
+    if (!byId.has(parent)) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor graph parent is missing or unresolvable',
+      };
+    }
+    childCount.set(parent, (childCount.get(parent) ?? 0) + 1);
+  }
+  for (const count of childCount.values()) {
+    if (count > 1) {
+      return {
+        ok: false,
+        code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor graph is branched; no canonical child edge',
+      };
+    }
+  }
+
+  const bound = nodes.length;
+  for (const start of nodes) {
+    const seen = new Set<string>();
+    let cur: SuccessorGraphNode | undefined = start;
+    let hops = 0;
+    while (cur) {
+      if (seen.has(cur.id)) {
+        return {
+          ok: false,
+          code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+          message: 'Successor graph contains a cycle',
+        };
+      }
+      seen.add(cur.id);
+      hops += 1;
+      if (hops > bound) {
+        return {
+          ok: false,
+          code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+          message: 'Successor graph walk exceeded bound',
+        };
+      }
+      const parentId = cur.adjustmentOfDeterminationId;
+      if (parentId == null) break;
+      cur = byId.get(parentId);
+    }
+  }
+
+  const roots = nodes.filter((n) => n.adjustmentOfDeterminationId == null);
+  if (roots.length !== 1) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor graph does not have exactly one root',
+    };
+  }
+  const tips = nodes.filter((n) => (childCount.get(n.id) ?? 0) === 0);
+  if (tips.length !== 1) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor graph does not have exactly one canonical tip',
+    };
+  }
+  if (tips[0].id !== sourceId) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor source is not the canonical claim tip',
+    };
+  }
+  if ((childCount.get(sourceId) ?? 0) !== 0) {
+    return {
+      ok: false,
+      code: EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID,
+      message: 'Successor source already has a child',
+    };
+  }
+  return { ok: true };
+}
+
+/** PostgreSQL unique index created by Stage15C. */
+export const STAGE15C_ONE_CHILD_UNIQUE_INDEX =
+  'liability_determinations_one_child_per_parent';
+export const LIABILITY_CREATE_IDEM_UNIQUE_INDEX =
+  'liability_determinations_create_idem_unique';
+export const LIABILITY_FINALIZE_IDEM_UNIQUE_INDEX =
+  'liability_determinations_finalize_idem_unique';
+export const LIABILITY_ONE_ACTIVE_UNIQUE_INDEX =
+  'liability_determinations_one_active_per_claim';
+
+const STAGE15C_ONE_CHILD_FIELDS = new Set([
+  'adjustment_of_determination_id',
+  'adjustmentOfDeterminationId',
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object') return value as Record<string, unknown>;
+  return null;
+}
+
+function collectUniqueViolationTokens(
+  value: unknown,
+  depth = 0,
+  into: string[] = [],
+): string[] {
+  if (depth > 8 || value == null) return into;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed) into.push(trimmed);
+    const known = [
+      STAGE15C_ONE_CHILD_UNIQUE_INDEX,
+      LIABILITY_CREATE_IDEM_UNIQUE_INDEX,
+      LIABILITY_FINALIZE_IDEM_UNIQUE_INDEX,
+      LIABILITY_ONE_ACTIVE_UNIQUE_INDEX,
+    ];
+    for (const index of known) {
+      if (trimmed.includes(index)) into.push(index);
+    }
+    return into;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectUniqueViolationTokens(item, depth + 1, into);
+    return into;
+  }
+  const rec = asRecord(value);
+  if (!rec) return into;
+  for (const key of [
+    'constraint',
+    'index',
+    'name',
+    'constraint_name',
+    'constraintName',
+    'target',
+    'fields',
+    'column',
+    'columns',
+  ]) {
+    if (key in rec) collectUniqueViolationTokens(rec[key], depth + 1, into);
+  }
+  if ('driverAdapterError' in rec) {
+    collectUniqueViolationTokens(rec.driverAdapterError, depth + 1, into);
+  }
+  if ('cause' in rec) collectUniqueViolationTokens(rec.cause, depth + 1, into);
+  if ('meta' in rec) collectUniqueViolationTokens(rec.meta, depth + 1, into);
+  if (typeof rec.originalMessage === 'string') {
+    collectUniqueViolationTokens(rec.originalMessage, depth + 1, into);
+  }
+  if (typeof rec.message === 'string') {
+    const known = [
+      STAGE15C_ONE_CHILD_UNIQUE_INDEX,
+      LIABILITY_CREATE_IDEM_UNIQUE_INDEX,
+      LIABILITY_FINALIZE_IDEM_UNIQUE_INDEX,
+      LIABILITY_ONE_ACTIVE_UNIQUE_INDEX,
+    ];
+    for (const index of known) {
+      if (rec.message.includes(index)) into.push(index);
+    }
+  }
+  return into;
+}
+
+function uniqueViolationCode(error: unknown): string | null {
+  const rec = asRecord(error);
+  if (!rec) return null;
+  if (typeof rec.code === 'string') return rec.code;
+  const cause = asRecord(rec.cause);
+  if (cause && typeof cause.code === 'string') return cause.code;
+  const meta = asRecord(rec.meta);
+  if (meta && typeof meta.code === 'string') return meta.code;
+  return null;
+}
+
+function isUniqueConstraintFailure(error: unknown): boolean {
+  const code = uniqueViolationCode(error);
+  if (code === 'P2002' || code === '23505') return true;
+  const rec = asRecord(error);
+  if (!rec) return false;
+  if (rec.kind === 'UniqueConstraintViolation') return true;
+  const cause = asRecord(rec.cause);
+  if (cause?.kind === 'UniqueConstraintViolation') return true;
+  const meta = asRecord(rec.meta);
+  const driver = asRecord(meta?.driverAdapterError);
+  const driverCause = asRecord(driver?.cause);
+  return driverCause?.kind === 'UniqueConstraintViolation';
+}
+
+function tokensNameExactIndex(tokens: string[], indexName: string): boolean {
+  return tokens.some((t) => t === indexName);
+}
+
+/**
+ * True only when Prisma/PostgreSQL metadata identifies the Stage15C
+ * one-child-per-parent unique index. Does not consult request input.
+ */
+export function isStage15COneChildUniqueViolation(error: unknown): boolean {
+  if (!isUniqueConstraintFailure(error)) return false;
+  const tokens = collectUniqueViolationTokens(error);
+  if (tokensNameExactIndex(tokens, STAGE15C_ONE_CHILD_UNIQUE_INDEX)) {
+    if (tokensNameExactIndex(tokens, LIABILITY_CREATE_IDEM_UNIQUE_INDEX)) {
+      return false;
+    }
+    if (tokensNameExactIndex(tokens, LIABILITY_ONE_ACTIVE_UNIQUE_INDEX)) {
+      return false;
+    }
+    return true;
+  }
+  const rec = asRecord(error);
+  const meta = asRecord(rec?.meta);
+  const target = meta?.target;
+  if (typeof target === 'string' && STAGE15C_ONE_CHILD_FIELDS.has(target)) {
+    return true;
+  }
+  if (
+    Array.isArray(target) &&
+    target.length === 1 &&
+    typeof target[0] === 'string' &&
+    STAGE15C_ONE_CHILD_FIELDS.has(target[0])
+  ) {
+    return true;
+  }
+  const hasChildField = tokens.some((t) => STAGE15C_ONE_CHILD_FIELDS.has(t));
+  const hasOtherAuthority =
+    tokensNameExactIndex(tokens, LIABILITY_CREATE_IDEM_UNIQUE_INDEX) ||
+    tokensNameExactIndex(tokens, LIABILITY_FINALIZE_IDEM_UNIQUE_INDEX) ||
+    tokensNameExactIndex(tokens, LIABILITY_ONE_ACTIVE_UNIQUE_INDEX);
+  return hasChildField && !hasOtherAuthority;
+}
+
+export function isLiabilityCreateIdempotencyUniqueViolation(
+  error: unknown,
+): boolean {
+  if (!isUniqueConstraintFailure(error)) return false;
+  const tokens = collectUniqueViolationTokens(error);
+  if (tokensNameExactIndex(tokens, LIABILITY_CREATE_IDEM_UNIQUE_INDEX)) {
+    return true;
+  }
+  const rec = asRecord(error);
+  const target = asRecord(rec)?.meta
+    ? asRecord(asRecord(rec)!.meta)?.target
+    : undefined;
+  if (Array.isArray(target)) {
+    const fields = target.filter((t) => typeof t === 'string') as string[];
+    return (
+      fields.includes('createIdempotencyKey') ||
+      fields.includes('create_idempotency_key')
+    );
+  }
+  return false;
+}
+
+export function isLiabilityOneActiveUniqueViolation(error: unknown): boolean {
+  if (!isUniqueConstraintFailure(error)) return false;
+  const tokens = collectUniqueViolationTokens(error);
+  return tokensNameExactIndex(tokens, LIABILITY_ONE_ACTIVE_UNIQUE_INDEX);
+}
+
+/**
+ * Maps a proven unique-violation to an existing bounded code.
+ * Unknown unique collisions return null (do not invent topology conflicts).
+ */
+export function liabilityDeterminationUniqueViolationCode(
+  error: unknown,
+): string | null {
+  if (isStage15COneChildUniqueViolation(error)) {
+    return EXCEPTION_FINANCIAL_CODES.ADJUSTMENT_SOURCE_INVALID;
+  }
+  if (isLiabilityOneActiveUniqueViolation(error)) {
+    return EXCEPTION_FINANCIAL_CODES.DETERMINATION_ALREADY_ACTIVE;
+  }
+  if (isLiabilityCreateIdempotencyUniqueViolation(error)) {
+    return null;
+  }
+  return null;
+}
+
 // ─── Seeded policy document ────────────────────────────────────────────
 
 export const EXCEPTION_LIABILITY_POLICY_V1 = {

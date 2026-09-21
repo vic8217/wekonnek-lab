@@ -11,6 +11,8 @@
  * `.env.stage13a.test` / `.env.stage12.test` cannot silently replace Terra's
  * disposable target.
  */
+import { existsSync, readFileSync } from 'fs';
+import { parse as parseDotenv } from 'dotenv';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -220,6 +222,19 @@ export function isApprovedStage15bOverrideDatabase(database: string): boolean {
   );
 }
 
+export function isApprovedStage15cOverrideDatabase(database: string): boolean {
+  if (ACCEPTANCE_ABSOLUTE_DENY_DATABASES.has(database)) return false;
+  if (database.startsWith('wekonnek_stage12_')) return false;
+  if (database.startsWith('wekonnek_stage13')) return false;
+  if (database.startsWith('wekonnek_stage14')) return false;
+  if (database.startsWith('wekonnek_stage15a_')) return false;
+  if (database.startsWith('wekonnek_stage15b_')) return false;
+  return (
+    database.startsWith('wekonnek_stage15c_') &&
+    isRecognizedCurrentSchemaDisposableName(database)
+  );
+}
+
 export function assertRuntimeDatabaseIdentityMatchesApproved(
   actualDatabase: string | null | undefined,
   approvedDatabase: string,
@@ -255,6 +270,68 @@ function restoreDatabaseAuthorityEnv(
   }
 }
 
+const DATABASE_AUTHORITY_KEY_SET = new Set<string>(DATABASE_AUTHORITY_ENV_KEYS);
+
+/**
+ * Load a historical dotenv file without letting it mutate acceptance DB
+ * authority. JWT and other non-authority keys may still be applied.
+ */
+export function loadDotenvIgnoringDatabaseAuthority(
+  envPath: string,
+  opts?: { overrideNonAuthority?: boolean },
+): void {
+  if (!existsSync(envPath)) return;
+  const parsed = parseDotenv(readFileSync(envPath));
+  const overrideNonAuthority = opts?.overrideNonAuthority !== false;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value == null) continue;
+    if (DATABASE_AUTHORITY_KEY_SET.has(key)) continue;
+    if (!overrideNonAuthority && process.env[key] !== undefined) continue;
+    process.env[key] = value;
+  }
+}
+
+export function assertNotQuarantinedAcceptanceOverrideDatabase(
+  database: string,
+  operation: string,
+): void {
+  if (database === STAGE12_ACCEPTANCE_DATABASE) {
+    throw new Error(
+      `${operation} refused: database ${database} is quarantined; refuse override targeting wekonnek_stage12_test`,
+    );
+  }
+}
+
+/**
+ * Re-apply explicit acceptance DB authority after any later dotenv/ConfigModule
+ * load. No-op when WEKONNEK_ACCEPTANCE_DB_OVERRIDE is not 1.
+ */
+export function repinExplicitAcceptanceDatabaseAuthorityIfActive(
+  operation = 'repin explicit acceptance database authority',
+): string | null {
+  if (!isExplicitAcceptanceDbOverrideRequested()) return null;
+  const database = applyExplicitStage15bAcceptanceOverride(operation);
+  assertNotQuarantinedAcceptanceOverrideDatabase(database, operation);
+  const url = getExplicitAcceptanceDatabaseUrl();
+  if (!url) {
+    throw new Error(`${operation} refused: approved URL lost during repin`);
+  }
+  process.env.DATABASE_URL = url;
+  process.env[ACCEPTANCE_DATABASE_URL_ENV] = url;
+  process.env[ACCEPTANCE_DB_OVERRIDE_ENV] = '1';
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  process.env.NODE_ENV = 'test';
+  delete process.env.TEST_DATABASE_URL;
+  delete process.env.TEST_DATABASE_ADMIN_URL;
+  const actual = parseAcceptanceDatabaseUrl(process.env.DATABASE_URL).database;
+  if (actual !== database) {
+    throw new Error(
+      `${operation} refused: DATABASE_URL database ${actual} != approved ${database}`,
+    );
+  }
+  return database;
+}
+
 /**
  * Fail-closed pin for explicit current-schema acceptance. Does not fall back
  * to historical `.env.stage12.test` / default DATABASE_URL.
@@ -283,9 +360,11 @@ export function applyExplicitStage15bAcceptanceOverride(
   }
   const parsed = parseAcceptanceDatabaseUrl(url);
   assertSafeLocalAcceptanceHost(parsed, operation);
-  if (!isApprovedStage15bOverrideDatabase(parsed.database)) {
+  assertNotQuarantinedAcceptanceOverrideDatabase(parsed.database, operation);
+  if (!isApprovedStage15bOverrideDatabase(parsed.database) &&
+      !isApprovedStage15cOverrideDatabase(parsed.database)) {
     throw new Error(
-      `${operation} refused: database ${parsed.database} is not an approved Stage15B current-schema override target`,
+      `${operation} refused: database ${parsed.database} is not an approved Stage15B/Stage15C current-schema override target`,
     );
   }
   process.env.DATABASE_URL = url;
@@ -329,6 +408,10 @@ export function pinExplicitStage15bAcceptanceOverrideAfterDotenv(loadHistoricalE
   process.env.DATABASE_URL = pinned;
   delete process.env.TEST_DATABASE_URL;
   delete process.env.TEST_DATABASE_ADMIN_URL;
+  assertNotQuarantinedAcceptanceOverrideDatabase(
+    parsed.database,
+    'explicit Stage15B acceptance override',
+  );
   return database;
 }
 
@@ -1000,9 +1083,12 @@ async function assertPrismaConnectedToExpectedAcceptanceDb(
       expectedDatabase,
       label,
     );
-    if (!isApprovedStage15bOverrideDatabase(expectedDatabase)) {
+    if (
+      !isApprovedStage15bOverrideDatabase(expectedDatabase) &&
+      !isApprovedStage15cOverrideDatabase(expectedDatabase)
+    ) {
       throw new Error(
-        `${label}: expected database ${expectedDatabase} is not an approved Stage15B override target`,
+        `${label}: expected database ${expectedDatabase} is not an approved Stage15B/Stage15C override target`,
       );
     }
   }

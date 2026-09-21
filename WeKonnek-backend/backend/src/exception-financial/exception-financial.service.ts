@@ -46,7 +46,9 @@ import {
   evaluateRecoveryEligibility,
   evaluateStage9FinalizeGate,
   isLiablePartyType,
+  isLiabilityCreateIdempotencyUniqueViolation,
   LIABILITY_DETERMINATION_ACTIVE_STATUSES,
+  liabilityDeterminationUniqueViolationCode,
   lossKindForClaimType,
   maxImportableCoverage,
   policyHash,
@@ -56,6 +58,7 @@ import {
   toMoney,
   validateAllocationPartyMembership,
   validateAllocations,
+  validateSuccessorClaimGraph,
 } from './exception-financial.policy';
 
 type AdminActor = { type: 'SYSTEM_ADMIN'; id: string };
@@ -186,6 +189,75 @@ export class ExceptionFinancialService {
       SELECT id FROM "liability_determinations" WHERE id = ${id}::uuid FOR UPDATE
     `;
     return tx.liabilityDetermination.findUnique({ where: { id } });
+  }
+
+  private async lockClaimDeterminations(
+    tx: Prisma.TransactionClient,
+    claimId: string,
+  ) {
+    await tx.$queryRaw`
+      SELECT id FROM "liability_determinations"
+      WHERE exception_claim_id = ${claimId}::uuid
+      ORDER BY id
+      FOR UPDATE
+    `;
+    return tx.liabilityDetermination.findMany({
+      where: { exceptionClaimId: claimId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  private requireSuccessorTopology(
+    claimId: string,
+    source: {
+      id: string;
+      exceptionClaimId: string;
+      status: LiabilityDeterminationStatus;
+    },
+    claimDeterminations: Array<{
+      id: string;
+      exceptionClaimId: string;
+      adjustmentOfDeterminationId: string | null;
+    }>,
+  ) {
+    if (source.exceptionClaimId !== claimId) {
+      throw new ConflictException({
+        code: CODES.ADJUSTMENT_SOURCE_INVALID,
+        message:
+          'Adjustments must reference a FINALIZED determination on the same claim',
+      });
+    }
+    if (source.status !== LiabilityDeterminationStatus.FINALIZED) {
+      throw new ConflictException({
+        code: CODES.ADJUSTMENT_SOURCE_INVALID,
+        message:
+          'Adjustments must reference a FINALIZED determination on the same claim',
+      });
+    }
+    const existingChild = claimDeterminations.find(
+      (d) => d.adjustmentOfDeterminationId === source.id,
+    );
+    if (existingChild) {
+      throw new ConflictException({
+        code: CODES.ADJUSTMENT_SOURCE_INVALID,
+        message: 'Successor source already has a child of any status',
+      });
+    }
+    const graph = validateSuccessorClaimGraph({
+      claimId,
+      sourceId: source.id,
+      nodes: claimDeterminations.map((d) => ({
+        id: d.id,
+        exceptionClaimId: d.exceptionClaimId,
+        adjustmentOfDeterminationId: d.adjustmentOfDeterminationId,
+      })),
+    });
+    if (!graph.ok) {
+      throw new ConflictException({
+        code: graph.code,
+        message: graph.message,
+      });
+    }
   }
 
   private async lockObligations(tx: Prisma.TransactionClient, claimId: string) {
@@ -1329,31 +1401,17 @@ export class ExceptionFinancialService {
     });
 
     if (idemKey) {
-      const prior = await this.prisma.liabilityDetermination.findFirst({
-        where: { createdByActorId: actor.id, createIdempotencyKey: idemKey },
+      const replay = await this.replayCreateDeterminationIfPresent({
+        actorId: actor.id,
+        claimId: input.claimId,
+        idemKey,
+        payloadHash,
       });
-      if (prior) {
-        if (prior.exceptionClaimId !== input.claimId) {
-          throw new ConflictException({
-            code: CODES.IDEMPOTENCY_CROSS_ORDER_CONFLICT,
-            message: 'Determination idempotency key scoped to another claim',
-          });
-        }
-        if (prior.createPayloadHash !== payloadHash) {
-          throw new ConflictException({
-            code: CODES.IDEMPOTENCY_PAYLOAD_CONFLICT,
-            message: 'Idempotency key reused with different payload',
-          });
-        }
-        return {
-          code: 'LIABILITY_DETERMINATION_CREATED',
-          idempotent: true,
-          determination: this.serializeDetermination(prior),
-        };
-      }
+      if (replay) return replay;
     }
 
-    return this.withSerializableRetry(async () =>
+    try {
+      return await this.withSerializableRetry(async () =>
       this.prisma.$transaction(
         async (tx) => {
           const claim = await this.loadAndLockClaimChain(tx, input.claimId);
@@ -1375,12 +1433,58 @@ export class ExceptionFinancialService {
             });
           }
 
-          const existingActive = await tx.liabilityDetermination.findFirst({
-            where: {
-              exceptionClaimId: claim.id,
-              status: { in: LIABILITY_DETERMINATION_ACTIVE_STATUSES },
-            },
-          });
+          const claimDeterminations = await this.lockClaimDeterminations(
+            tx,
+            claim.id,
+          );
+          if (idemKey) {
+            const lockedPrior = claimDeterminations.find(
+              (d) =>
+                d.createIdempotencyKey === idemKey &&
+                d.createdByActorId === actor.id,
+            );
+            if (lockedPrior) {
+              if (lockedPrior.exceptionClaimId !== claim.id) {
+                throw new ConflictException({
+                  code: CODES.IDEMPOTENCY_CROSS_ORDER_CONFLICT,
+                  message:
+                    'Determination idempotency key scoped to another claim',
+                });
+              }
+              if (lockedPrior.createPayloadHash !== payloadHash) {
+                throw new ConflictException({
+                  code: CODES.IDEMPOTENCY_PAYLOAD_CONFLICT,
+                  message: 'Idempotency key reused with different payload',
+                });
+              }
+              return {
+                code: 'LIABILITY_DETERMINATION_CREATED',
+                idempotent: true,
+                determination: this.serializeDetermination(lockedPrior),
+              };
+            }
+          }
+          if (input.adjustmentOfDeterminationId) {
+            const source =
+              claimDeterminations.find(
+                (d) => d.id === input.adjustmentOfDeterminationId,
+              ) ??
+              (await this.lockDetermination(
+                tx,
+                input.adjustmentOfDeterminationId,
+              ));
+            if (!source) {
+              throw new ConflictException({
+                code: CODES.ADJUSTMENT_SOURCE_INVALID,
+                message:
+                  'Adjustments must reference a FINALIZED determination on the same claim',
+              });
+            }
+            this.requireSuccessorTopology(claim.id, source, claimDeterminations);
+          }
+          const existingActive = claimDeterminations.find((d) =>
+            LIABILITY_DETERMINATION_ACTIVE_STATUSES.includes(d.status),
+          );
           if (existingActive) {
             throw new ConflictException({
               code: CODES.DETERMINATION_ALREADY_ACTIVE,
@@ -1432,48 +1536,30 @@ export class ExceptionFinancialService {
             });
           }
 
-          if (input.adjustmentOfDeterminationId) {
-            const source = await this.lockDetermination(
-              tx,
-              input.adjustmentOfDeterminationId,
-            );
-            if (
-              !source ||
-              source.exceptionClaimId !== claim.id ||
-              source.status !== LiabilityDeterminationStatus.FINALIZED
-            ) {
-              throw new ConflictException({
-                code: CODES.ADJUSTMENT_SOURCE_INVALID,
-                message:
-                  'Adjustments must reference a FINALIZED determination on the same claim',
-              });
-            }
-          }
-
           const determinationId = randomUUID();
           const determination = await tx.liabilityDetermination.create({
-            data: {
-              id: determinationId,
-              exceptionClaimId: claim.id,
-              economicLossId: economicLoss.id,
-              policyVersionId: claim.policyVersionId,
-              policyHash: claim.policyHash,
-              status: LiabilityDeterminationStatus.DRAFT,
-              currency: economicLoss.currency,
-              totalLiabilityAmount: total,
-              compensableAmountSnapshot: economicLoss.compensableAmount,
-              priorCoverageAmountSnapshot: covered,
-              remainingAmountSnapshot: remaining,
-              adjustmentOfDeterminationId:
-                input.adjustmentOfDeterminationId ?? null,
-              reason: input.reason?.slice(0, 2000) ?? null,
-              createdByActorType: actor.type,
-              createdByActorId: actor.id,
-              correlationId: input.correlationId.slice(0, 64),
-              createIdempotencyKey: idemKey,
-              createPayloadHash: idemKey ? payloadHash : null,
-            },
-          });
+              data: {
+                id: determinationId,
+                exceptionClaimId: claim.id,
+                economicLossId: economicLoss.id,
+                policyVersionId: claim.policyVersionId,
+                policyHash: claim.policyHash,
+                status: LiabilityDeterminationStatus.DRAFT,
+                currency: economicLoss.currency,
+                totalLiabilityAmount: total,
+                compensableAmountSnapshot: economicLoss.compensableAmount,
+                priorCoverageAmountSnapshot: covered,
+                remainingAmountSnapshot: remaining,
+                adjustmentOfDeterminationId:
+                  input.adjustmentOfDeterminationId ?? null,
+                reason: input.reason?.slice(0, 2000) ?? null,
+                createdByActorType: actor.type,
+                createdByActorId: actor.id,
+                correlationId: input.correlationId.slice(0, 64),
+                createIdempotencyKey: idemKey,
+                createPayloadHash: idemKey ? payloadHash : null,
+              },
+            });
 
           for (const a of input.allocations) {
             await tx.liabilityAllocation.create({
@@ -1514,7 +1600,62 @@ export class ExceptionFinancialService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       ),
-    );
+      );
+    } catch (e) {
+      const topologyCode = liabilityDeterminationUniqueViolationCode(e);
+      if (topologyCode === CODES.ADJUSTMENT_SOURCE_INVALID) {
+        throw new ConflictException({
+          code: CODES.ADJUSTMENT_SOURCE_INVALID,
+          message: 'Successor source already has a child of any status',
+        });
+      }
+      if (topologyCode === CODES.DETERMINATION_ALREADY_ACTIVE) {
+        throw new ConflictException({
+          code: CODES.DETERMINATION_ALREADY_ACTIVE,
+          message:
+            'An active (DRAFT/PROPOSED) determination already exists for this claim',
+        });
+      }
+      if (idemKey && isLiabilityCreateIdempotencyUniqueViolation(e)) {
+        const replay = await this.replayCreateDeterminationIfPresent({
+          actorId: actor.id,
+          claimId: input.claimId,
+          idemKey,
+          payloadHash,
+        });
+        if (replay) return replay;
+      }
+      throw e;
+    }
+  }
+
+  private async replayCreateDeterminationIfPresent(input: {
+    actorId: string;
+    claimId: string;
+    idemKey: string;
+    payloadHash: string;
+  }) {
+    const prior = await this.prisma.liabilityDetermination.findFirst({
+      where: { createdByActorId: input.actorId, createIdempotencyKey: input.idemKey },
+    });
+    if (!prior) return null;
+    if (prior.exceptionClaimId !== input.claimId) {
+      throw new ConflictException({
+        code: CODES.IDEMPOTENCY_CROSS_ORDER_CONFLICT,
+        message: 'Determination idempotency key scoped to another claim',
+      });
+    }
+    if (prior.createPayloadHash !== input.payloadHash) {
+      throw new ConflictException({
+        code: CODES.IDEMPOTENCY_PAYLOAD_CONFLICT,
+        message: 'Idempotency key reused with different payload',
+      });
+    }
+    return {
+      code: 'LIABILITY_DETERMINATION_CREATED' as const,
+      idempotent: true as const,
+      determination: this.serializeDetermination(prior),
+    };
   }
 
   // ─── proposeDetermination ───────────────────────────────

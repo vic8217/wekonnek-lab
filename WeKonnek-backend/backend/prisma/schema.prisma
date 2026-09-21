@@ -4844,6 +4844,7 @@ model LiabilityDetermination {
   priorCoverageAmountSnapshot Decimal?                     @map("prior_coverage_amount_snapshot") @db.Decimal(14, 2)
   remainingAmountSnapshot     Decimal?                     @map("remaining_amount_snapshot") @db.Decimal(14, 2)
   stage9DeterminationId       String?                      @map("stage9_determination_id") @db.Uuid
+  /// Stage15C: at most one child ever per parent (partial unique index in SQL).
   adjustmentOfDeterminationId String?                      @map("adjustment_of_determination_id") @db.Uuid
   reason                      String?                      @db.VarChar(2000)
   createdByActorType          OrderDomainActorType         @map("created_by_actor_type")

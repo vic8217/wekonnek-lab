@@ -58,6 +58,7 @@ import { SocialAuthModule } from './social-auth/social-auth.module';
 import { DeliveryPartnersModule } from './delivery-partners/delivery-partners.module';
 import { RfqModule } from './rfq/rfq.module';
 import { AccuraModule } from './integrations/accura/accura.module';
+import { isExplicitAcceptanceBootstrapContext } from './acceptance-bootstrap-context';
 import { ScheduleModule } from '@nestjs/schedule';
 import { FulfillmentModule } from './fulfillment/fulfillment.module';
 import { PaymentOwnershipModule } from './payment-ownership/payment-ownership.module';
@@ -82,6 +83,9 @@ import { FinancialReconciliationReviewModule } from './financial-reconciliation-
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      // Suppress `.env` only in bounded TEST acceptance bootstrap.
+      // Override flag alone must not change production/development config.
+      ignoreEnvFile: isExplicitAcceptanceBootstrapContext(),
     }),
 
     PrismaModule,

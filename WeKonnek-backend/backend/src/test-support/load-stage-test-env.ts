@@ -23,10 +23,14 @@ import { config as loadDotenv } from 'dotenv';
 import {
   applyAcceptanceDatabaseOverride,
   applyExplicitStage15bAcceptanceOverride,
+  isApprovedStage15bOverrideDatabase,
+  isApprovedStage15cOverrideDatabase,
   isCurrentSchemaDisposableDatabase,
   isExplicitAcceptanceDbOverrideRequested,
+  loadDotenvIgnoringDatabaseAuthority,
   parseAcceptanceDatabaseUrl,
   pinExplicitStage15bAcceptanceOverrideAfterDotenv,
+  repinExplicitAcceptanceDatabaseAuthorityIfActive,
   restoreAcceptanceOverrideEnv,
   snapshotAcceptanceOverrideEnv,
 } from './acceptance-database';
@@ -60,16 +64,37 @@ export function isStage14aAcceptanceDatabase(database: string): boolean {
   );
 }
 
-export function isStage15aAcceptanceDatabase(database: string): boolean {
+function admitsExplicitCrossStageOverride(database: string): boolean {
+  if (!isExplicitAcceptanceDbOverrideRequested()) return false;
   return (
-    database.startsWith('wekonnek_stage15a_') &&
-    isCurrentSchemaDisposableDatabase(database)
+    isApprovedStage15bOverrideDatabase(database) ||
+    isApprovedStage15cOverrideDatabase(database)
   );
 }
 
+export function isStage15aAcceptanceDatabase(database: string): boolean {
+  if (
+    database.startsWith('wekonnek_stage15a_') &&
+    isCurrentSchemaDisposableDatabase(database)
+  ) {
+    return true;
+  }
+  return admitsExplicitCrossStageOverride(database);
+}
+
 export function isStage15bAcceptanceDatabase(database: string): boolean {
-  return (
+  if (
     database.startsWith('wekonnek_stage15b_') &&
+    isCurrentSchemaDisposableDatabase(database)
+  ) {
+    return true;
+  }
+  return admitsExplicitCrossStageOverride(database);
+}
+
+export function isStage15cAcceptanceDatabase(database: string): boolean {
+  return (
+    database.startsWith('wekonnek_stage15c_') &&
     isCurrentSchemaDisposableDatabase(database)
   );
 }
@@ -135,6 +160,23 @@ function isStage15aDisposableUrl(url: string | undefined): boolean {
  * wekonnek_stage15a_*.
  */
 export function loadStage15aTestEnv(): boolean {
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    const backendRoot = resolve(__dirname, '../..');
+    const stagePath = resolve(backendRoot, '.env.stage15a.test');
+    pinExplicitStage15bAcceptanceOverrideAfterDotenv(() => {
+      loadDotenvIgnoringDatabaseAuthority(resolve(backendRoot, '.env'));
+      if (existsSync(stagePath)) {
+        loadDotenvIgnoringDatabaseAuthority(stagePath);
+      }
+    });
+    applyExplicitStage15bAcceptanceOverride('loadStage15aTestEnv');
+    repinExplicitAcceptanceDatabaseAuthorityIfActive('loadStage15aTestEnv');
+    process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+    if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+      process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+    }
+    return true;
+  }
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, '.env.stage15a.test');
   const overrideSnap = snapshotAcceptanceOverrideEnv();
@@ -188,6 +230,23 @@ function isStage15bDisposableUrl(url: string | undefined): boolean {
  * wins only when it already names wekonnek_stage15b_*.
  */
 export function loadStage15bTestEnv(): boolean {
+  if (isExplicitAcceptanceDbOverrideRequested()) {
+    const backendRoot = resolve(__dirname, '../..');
+    const stagePath = resolve(backendRoot, '.env.stage15b.test');
+    pinExplicitStage15bAcceptanceOverrideAfterDotenv(() => {
+      loadDotenvIgnoringDatabaseAuthority(resolve(backendRoot, '.env'));
+      if (existsSync(stagePath)) {
+        loadDotenvIgnoringDatabaseAuthority(stagePath);
+      }
+    });
+    applyExplicitStage15bAcceptanceOverride('loadStage15bTestEnv');
+    repinExplicitAcceptanceDatabaseAuthorityIfActive('loadStage15bTestEnv');
+    process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+    if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+      process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+    }
+    return true;
+  }
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, '.env.stage15b.test');
   const overrideSnap = snapshotAcceptanceOverrideEnv();
@@ -229,17 +288,81 @@ export function loadStage15bTestEnv(): boolean {
   return true;
 }
 
+function isStage15cDisposableUrl(url: string | undefined): boolean {
+  if (!url || url.trim() === '') return false;
+  try {
+    const database = parseAcceptanceDatabaseUrl(url).database;
+    return isStage15cAcceptanceDatabase(database);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stage15C acceptance routing is dedicated. It never falls through to
+ * frozen historical parents. A generic WEKONNEK_ACCEPTANCE_DATABASE_URL
+ * wins only when it already names wekonnek_stage15c_*.
+ */
+export function loadStage15cTestEnv(): boolean {
+  const backendRoot = resolve(__dirname, '../..');
+  const stagePath = resolve(backendRoot, '.env.stage15c.test');
+  const overrideSnap = snapshotAcceptanceOverrideEnv();
+  const overrideUrl = overrideSnap.url;
+  const incomingDatabaseUrl = process.env.DATABASE_URL;
+  const overrideIs15c = isStage15cDisposableUrl(overrideUrl);
+  const incomingIs15c = isStage15cDisposableUrl(incomingDatabaseUrl);
+
+  if (!existsSync(stagePath) && !overrideIs15c && !incomingIs15c) {
+    return false;
+  }
+
+  loadDotenv({ path: resolve(backendRoot, '.env') });
+  if (existsSync(stagePath)) {
+    loadDotenv({ path: stagePath, override: true });
+  }
+
+  if (overrideIs15c && overrideUrl) {
+    restoreAcceptanceOverrideEnv(overrideSnap);
+    applyAcceptanceDatabaseOverride();
+  } else if (isStage15cDisposableUrl(process.env.WEKONNEK_ACCEPTANCE_DATABASE_URL)) {
+    applyAcceptanceDatabaseOverride();
+  } else if (
+    !isStage15cDisposableUrl(process.env.DATABASE_URL) &&
+    incomingIs15c &&
+    incomingDatabaseUrl
+  ) {
+    process.env.DATABASE_URL = incomingDatabaseUrl;
+  }
+
+  if (!isStage15cDisposableUrl(process.env.DATABASE_URL)) {
+    return false;
+  }
+
+  process.env.WEKONNEK_CURRENT_SCHEMA_REGRESSION = '1';
+  if (process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK == null) {
+    process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
+  }
+  return true;
+}
+
 export function loadStageTestEnv(stageEnvFileName: string): boolean {
+  if (
+    stageEnvFileName === '.env.stage15c.test' ||
+    stageEnvFileName === '.env.stage15c.regression.test'
+  ) {
+    return loadStage15cTestEnv();
+  }
   if (isExplicitAcceptanceDbOverrideRequested()) {
     const backendRoot = resolve(__dirname, '../..');
     const stagePath = resolve(backendRoot, stageEnvFileName);
     pinExplicitStage15bAcceptanceOverrideAfterDotenv(() => {
-      loadDotenv({ path: resolve(backendRoot, '.env') });
+      loadDotenvIgnoringDatabaseAuthority(resolve(backendRoot, '.env'));
       if (existsSync(stagePath)) {
-        loadDotenv({ path: stagePath, override: true });
+        loadDotenvIgnoringDatabaseAuthority(stagePath);
       }
     });
     applyExplicitStage15bAcceptanceOverride('loadStageTestEnv');
+    repinExplicitAcceptanceDatabaseAuthorityIfActive('loadStageTestEnv');
     return true;
   }
   if (
@@ -259,6 +382,12 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
     stageEnvFileName === '.env.stage15b.regression.test'
   ) {
     return loadStage15bTestEnv();
+  }
+  if (
+    stageEnvFileName === '.env.stage15c.test' ||
+    stageEnvFileName === '.env.stage15c.regression.test'
+  ) {
+    return loadStage15cTestEnv();
   }
   const backendRoot = resolve(__dirname, '../..');
   const stagePath = resolve(backendRoot, stageEnvFileName);
@@ -387,7 +516,9 @@ export function loadStageTestEnv(stageEnvFileName: string): boolean {
       stageEnvFileName === '.env.stage15a.test' ||
       stageEnvFileName === '.env.stage15a.regression.test' ||
       stageEnvFileName === '.env.stage15b.test' ||
-      stageEnvFileName === '.env.stage15b.regression.test'
+      stageEnvFileName === '.env.stage15b.regression.test' ||
+      stageEnvFileName === '.env.stage15c.test' ||
+      stageEnvFileName === '.env.stage15c.regression.test'
     ) {
       process.env.WEKONNEK_ACCEPTANCE_DESTRUCTIVE_OK = '1';
     }

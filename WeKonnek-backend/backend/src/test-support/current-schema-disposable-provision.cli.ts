@@ -76,6 +76,7 @@ async function main(): Promise<void> {
       database: result.database,
       template: result.template,
       created: result.created,
+      appliedMigrations: result.appliedMigrations,
     }),
   );
 }

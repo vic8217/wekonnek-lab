@@ -7,8 +7,10 @@ import {
 } from './acceptance-database';
 import {
   CURRENT_SCHEMA_PROVISION_TEMPLATE_CANDIDATES,
+  CURRENT_SCHEMA_POST_TEMPLATE_MIGRATION_PROBES,
   assertAdminConnectionIsLocal,
   assertCurrentSchemaProvisionTarget,
+  listPrismaMigrationNames,
   quotePgIdent,
   selectCurrentSchemaTemplate,
 } from './current-schema-disposable-provision';
@@ -155,5 +157,27 @@ describe('current-schema disposable provision policy', () => {
         'postgresql://wekonnek@127.0.0.1:5432/postgres',
       ),
     ).not.toThrow();
+  });
+
+  it('repository migration list includes frozen Stage15A and Stage15C', () => {
+    const names = listPrismaMigrationNames();
+    expect(names).toContain(
+      '20260919120000_stage14a_financial_reconciliation_review',
+    );
+    expect(names).toContain(
+      '20260921120000_stage15a_trusted_evidence_provenance',
+    );
+    expect(names).toContain(
+      '20260921200000_stage15c_successor_chain_authority',
+    );
+    expect(
+      Object.keys(CURRENT_SCHEMA_POST_TEMPLATE_MIGRATION_PROBES),
+    ).toEqual(
+      expect.arrayContaining([
+        '20260919120000_stage14a_financial_reconciliation_review',
+        '20260921120000_stage15a_trusted_evidence_provenance',
+        '20260921200000_stage15c_successor_chain_authority',
+      ]),
+    );
   });
 });
