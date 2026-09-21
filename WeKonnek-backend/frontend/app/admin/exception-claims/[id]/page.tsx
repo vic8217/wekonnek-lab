@@ -28,26 +28,36 @@ import {
 import {
   addEvidence,
   captureOrderTermsEvidence,
+  createDetermination,
   createVerifiedFact,
+  proposeDetermination,
   verifyEvidence,
 } from '@/lib/exception-liability-admin-api';
 import {
   COVERAGE_INVESTIGATION_COPY,
   asRecordList,
+  canCreateLiabilityDraft,
+  canSubmitEligibleLiabilityDraft,
   claimWorkspacePanelKey,
+  collectAuthoritativeDebtorOptions,
   collectAuthoritativeFactAttributionOptions,
   createCorrelationId,
+  decidePostMutationRefreshOutcome,
+  isCreateDeterminationProven,
+  isEligibleDraftReviewProven,
   findRowByIdempotencyKey,
   isAmbiguousMutationFailure,
   isCurrentClaimOwner,
   mayAbortRouteLoad,
   normalizeExpectedWkOrderId,
   ownedResultDecision,
+  stringField,
   type ClaimOwner,
   type MutationPhase,
 } from '@/lib/exception-liability-admin-presentation';
 import { ClaimEvidencePanel } from './claim-evidence-panel';
 import { VerifiedFactsPanel } from './verified-facts-panel';
+import { LiabilityDeterminationPanel } from './liability-determination-panel';
 import { ClaimEventTimeline } from './claim-event-timeline';
 
 function AccessDenied() {
@@ -100,10 +110,14 @@ function ClaimBody() {
   const [orderTermsPhase, setOrderTermsPhase] = useState<MutationPhase>('idle');
   const [verifyPhase, setVerifyPhase] = useState<MutationPhase>('idle');
   const [factPhase, setFactPhase] = useState<MutationPhase>('idle');
+  const [createDetPhase, setCreateDetPhase] = useState<MutationPhase>('idle');
+  const [draftReviewPhase, setDraftReviewPhase] = useState<MutationPhase>('idle');
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [orderTermsError, setOrderTermsError] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [factError, setFactError] = useState<string | null>(null);
+  const [createDetError, setCreateDetError] = useState<string | null>(null);
+  const [draftReviewError, setDraftReviewError] = useState<string | null>(null);
 
   const loadClaim = async (
     claimId: string,
@@ -136,10 +150,14 @@ function ClaimBody() {
     setOrderTermsPhase('idle');
     setVerifyPhase('idle');
     setFactPhase('idle');
+    setCreateDetPhase('idle');
+    setDraftReviewPhase('idle');
     setEvidenceError(null);
     setOrderTermsError(null);
     setVerifyError(null);
     setFactError(null);
+    setCreateDetError(null);
+    setDraftReviewError(null);
     void (async () => {
       try {
         const next = await loadClaim(id, generation, controller);
@@ -238,23 +256,73 @@ function ClaimBody() {
     setError: (message: string | null) => void;
     mutate: (signal: AbortSignal) => Promise<unknown>;
     confirm: (latest: ExceptionClaimRecord) => boolean;
+    preflight?: (latest: ExceptionClaimRecord) => string | null;
+    requireAuthoritativeProof?: boolean;
   }): Promise<'success' | 'unproven' | 'error' | 'discarded'> => {
     const owner = currentOwner();
     if (!ownerIsCurrent(owner)) return 'discarded';
     input.setPhase('submitting');
     input.setError(null);
     const controller = new AbortController();
-    try {
-      await input.mutate(controller.signal);
-      if (!ownerIsCurrent(owner)) return 'discarded';
-      const latest = await refreshAfterMutation(owner);
-      if (latest === 'discarded' || !ownerIsCurrent(owner)) return 'discarded';
-      if (latest) {
+    const applyRefreshOutcome = (
+      latest: ExceptionClaimRecord | null | 'discarded',
+      requireAuthoritativeProof: boolean,
+    ): 'success' | 'unproven' | 'error' | 'discarded' => {
+      const discarded = latest === 'discarded' || !ownerIsCurrent(owner);
+      const hasLatest = latest != null && latest !== 'discarded';
+      const confirmed =
+        hasLatest && input.confirm(latest as ExceptionClaimRecord);
+      const outcome = decidePostMutationRefreshOutcome({
+        discarded,
+        hasLatest,
+        requireAuthoritativeProof,
+        confirmed,
+      });
+      if (outcome === 'discarded') return 'discarded';
+      if (outcome === 'success') {
         input.setPhase('success');
+        input.setError(null);
         return 'success';
+      }
+      if (outcome === 'unproven') {
+        input.setPhase('error');
+        return 'unproven';
       }
       input.setPhase('error');
       return 'error';
+    };
+    try {
+      if (input.preflight) {
+        const latest = await refreshAfterMutation(owner);
+        if (latest === 'discarded' || !ownerIsCurrent(owner)) return 'discarded';
+        if (!latest) {
+          input.setPhase('error');
+          input.setError('The claim could not be reloaded.');
+          return 'error';
+        }
+        const blocked = input.preflight(latest);
+        if (blocked) {
+          input.setPhase('error');
+          input.setError(blocked);
+          return 'error';
+        }
+      }
+      await input.mutate(controller.signal);
+      if (!ownerIsCurrent(owner)) return 'discarded';
+      if (input.requireAuthoritativeProof) {
+        input.setPhase('reconciling');
+      }
+      const latest = await refreshAfterMutation(owner);
+      const outcome = applyRefreshOutcome(
+        latest,
+        Boolean(input.requireAuthoritativeProof),
+      );
+      if (outcome === 'unproven') {
+        input.setError(
+          'The server accepted the request, but this claim does not yet prove the same action. Retry the same request.',
+        );
+      }
+      return outcome;
     } catch (err) {
       if (!ownerIsCurrent(owner)) return 'discarded';
       if (isAbortError(err)) return 'discarded';
@@ -264,18 +332,14 @@ function ClaimBody() {
         input.setPhase('reconciling');
         try {
           const latest = await refreshAfterMutation(owner);
-          if (latest === 'discarded' || !ownerIsCurrent(owner)) return 'discarded';
-          if (latest && input.confirm(latest)) {
-            input.setPhase('success');
-            input.setError(null);
-            return 'success';
+          const outcome = applyRefreshOutcome(latest, true);
+          if (outcome === 'unproven' || outcome === 'error') {
+            input.setError(
+              apiError?.message ??
+                (err instanceof Error ? err.message : 'The claim was not changed.'),
+            );
           }
-          input.setPhase('error');
-          input.setError(
-            apiError?.message ??
-              (err instanceof Error ? err.message : 'The claim was not changed.'),
-          );
-          return 'unproven';
+          return outcome;
         } catch (refreshErr) {
           if (!ownerIsCurrent(owner)) return 'discarded';
           input.setPhase('error');
@@ -301,10 +365,6 @@ function ClaimBody() {
       : null;
   const coverages = asRecordList(loss?.coverages);
   const determinations = asRecordList(claim?.determinations);
-  const allocationsByDet = determinations.map((det) => ({
-    det,
-    allocations: asRecordList(det.allocations),
-  }));
   const obligations = asRecordList(claim?.obligations);
   const evidence = asRecordList(claim?.evidence);
   const verifications = asRecordList(claim?.verifications);
@@ -319,13 +379,11 @@ function ClaimBody() {
       <header>
         <h1 className="text-2xl font-bold text-gray-900">Liability claim</h1>
         <p className="mt-1 text-sm text-gray-600">
-          Read-only inspection. This page does not settle, acknowledge, finalize, or change coverage.
-        </p>
-        <p className="mt-1 text-sm text-gray-600">
-          On an active claim, System Admin may record evidence, record verification, and conclude
-          verified facts. Those actions do not create a determination, propose, finalize, adjust,
-          or open a claim. Return to the follow-up and refresh live reconciliation there. This page
-          does not close the follow-up.
+          Authoritative inspection. Evidence, verification, verified facts, and a liability
+          draft may be recorded on an active claim. Proposal of an eligible draft is still
+          a review state. This page does not settle, acknowledge, finalize, adjust, import
+          coverage, or open a claim. Return to the follow-up and refresh live reconciliation
+          there. This page does not close the follow-up.
         </p>
       </header>
 
@@ -486,6 +544,99 @@ function ClaimBody() {
             }
           />
 
+          <LiabilityDeterminationPanel
+            key={claimWorkspacePanelKey(id, expectedWkOrderId, 'determination')}
+            claimId={claim.id}
+            claimStatus={claim.status}
+            claimType={claim.claimType}
+            currency={claim.currency}
+            loss={loss}
+            facts={facts}
+            determinations={determinations}
+            determinationRoleLabel={determinationRoleLabel}
+            debtorOptions={collectAuthoritativeDebtorOptions(
+              claim as Record<string, unknown>,
+            )}
+            createPhase={createDetPhase}
+            proposePhase={draftReviewPhase}
+            createError={createDetError}
+            proposeError={draftReviewError}
+            onCreateDraft={(input) =>
+              runMutation({
+                setPhase: setCreateDetPhase,
+                setError: setCreateDetError,
+                preflight: (latest) => {
+                  const ok = canCreateLiabilityDraft({
+                    claimStatus: latest.status,
+                    facts: asRecordList(latest.verifiedFacts),
+                    determinations: asRecordList(latest.determinations),
+                    debtorOptions: collectAuthoritativeDebtorOptions(
+                      latest as Record<string, unknown>,
+                    ),
+                  });
+                  return ok
+                    ? null
+                    : 'The claim is no longer eligible for a new draft. Reload before continuing.';
+                },
+                mutate: (signal) =>
+                  createDetermination(
+                    claim.id,
+                    {
+                      allocations: input.allocations,
+                      reason: input.reason,
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                requireAuthoritativeProof: true,
+                confirm: (latest) =>
+                  isCreateDeterminationProven({
+                    claimId: latest.id,
+                    determinations: asRecordList(latest.determinations),
+                    createIdempotencyKey: input.idempotencyKey,
+                  }),
+              })
+            }
+            onSubmitDraftForReview={(input) =>
+              runMutation({
+                setPhase: setDraftReviewPhase,
+                setError: setDraftReviewError,
+                preflight: (latest) => {
+                  const row =
+                    asRecordList(latest.determinations).find(
+                      (item) => stringField(item, 'id') === input.determinationId,
+                    ) ?? null;
+                  const ok = canSubmitEligibleLiabilityDraft({
+                    claimId: latest.id,
+                    claimStatus: latest.status,
+                    determination: row,
+                  });
+                  return ok
+                    ? null
+                    : 'The determination is no longer an eligible draft. Reload before continuing.';
+                },
+                mutate: (signal) =>
+                  proposeDetermination(
+                    input.determinationId,
+                    {
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                requireAuthoritativeProof: true,
+                confirm: (latest) =>
+                  isEligibleDraftReviewProven({
+                    claimId: latest.id,
+                    determinationId: input.determinationId,
+                    determinations: asRecordList(latest.determinations),
+                    proposeIdempotencyKey: input.idempotencyKey,
+                  }),
+              })
+            }
+          />
+
           <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="loss-heading">
             <h2 id="loss-heading" className="text-lg font-semibold text-gray-900">Economic loss & coverage</h2>
             <p className="mt-1 text-sm text-gray-600">{COVERAGE_INVESTIGATION_COPY}</p>
@@ -514,48 +665,6 @@ function ClaimBody() {
                     <p className="font-medium text-gray-900">{coverageSourceLabel(row.sourceKind)}</p>
                     <p className="text-gray-700">Covered amount: {displayServerAmount(row.amount, row.currency ?? claim.currency)}</p>
                     <p className="text-gray-600">Coverage source: {displayServerField(row.sourceKind)}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="dets-heading">
-            <h2 id="dets-heading" className="text-lg font-semibold text-gray-900">Determinations</h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Read-only. This workspace does not create, propose, finalize, or adjust determinations.
-            </p>
-            {allocationsByDet.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-600">No determinations.</p>
-            ) : (
-              <ul className="mt-3 space-y-4">
-                {allocationsByDet.map(({ det, allocations }, index) => (
-                  <li key={displayServerField(det.id) !== '—' ? displayServerField(det.id) : `det-${index}`} className="rounded-lg border border-gray-100 p-3">
-                    <p className="font-medium text-gray-900">{determinationRoleLabel(det)}</p>
-                    <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                      <Field label="Status" value={displayServerField(det.status)} />
-                      <Field
-                        label="Total liability amount"
-                        value={displayServerAmount(det.totalLiabilityAmount, det.currency ?? claim.currency)}
-                      />
-                      <Field
-                        label="Remaining snapshot"
-                        value={displayServerAmount(det.remainingAmountSnapshot, det.currency ?? claim.currency)}
-                      />
-                      <Field label="Reason" value={displayServerField(det.reason)} />
-                    </dl>
-                    <h3 className="mt-3 text-sm font-semibold text-gray-900">Allocations</h3>
-                    {allocations.length === 0 ? (
-                      <p className="text-sm text-gray-600">No allocations.</p>
-                    ) : (
-                      <ul className="mt-1 space-y-1 text-sm text-gray-800">
-                        {allocations.map((row, allocIndex) => (
-                          <li key={displayServerField(row.id) !== '—' ? displayServerField(row.id) : `alloc-${index}-${allocIndex}`}>
-                            {partyRoleLabel(row.partyType)} · {displayServerAmount(row.amount, row.currency ?? claim.currency)}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </li>
                 ))}
               </ul>

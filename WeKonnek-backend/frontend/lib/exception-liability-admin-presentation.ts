@@ -78,6 +78,38 @@ export const SUBJECT_MATCH_INVESTIGATION_COPY =
 export const COVERAGE_INVESTIGATION_COPY =
   'Coverage rows are read-only. Evidence and facts do not import, rewrite, or repair coverage.';
 
+export const DETERMINATION_REVIEW_COPY =
+  'Draft and Proposed determinations are review states. Financial obligations are not created until the server finalizes an eligible determination.';
+
+export const DETERMINATION_DRAFT_IMMUTABLE_COPY =
+  'This draft cannot be edited or replaced in the current workflow. Review carefully before proposing. Do not propose a draft that is incorrect merely to clear the active slot.';
+
+export const DETERMINATION_PROPOSE_CONFIRM_COPY =
+  'Proposing locks this determination for the next financial review step. It cannot be returned to Draft in the current workflow. This does not create a payment or obligation and does not finalize liability.';
+
+export const DETERMINATION_SELF_LIABILITY_COPY =
+  'At finalization, the server determines the creditor and whether an allocation produces a payable obligation.';
+
+export const LIABILITY_DETERMINATION_ACTIVE_STATUSES = [
+  'DRAFT',
+  'PROPOSED',
+] as const;
+
+export const NON_CONFORMANCE_NON_GROUNDING_FACT_TYPES = [
+  'GOODS_CONFORMANCE_CONFIRMED',
+  'NON_CONFORMANCE_ALLEGATION_UNSUPPORTED',
+] as const;
+
+export const NON_CONFORMANCE_MERCHANT_GROUNDING_FACT_TYPES = [
+  'GOODS_NON_CONFORMANCE_CONFIRMED',
+  'PARTY_NEGLIGENCE_CONFIRMED',
+] as const;
+
+export const NON_CONFORMANCE_RIDER_GROUNDING_FACT_TYPES = [
+  'PARTY_NEGLIGENCE_CONFIRMED',
+  'CUSTODY_LAST_HOLDER_CONFIRMED',
+] as const;
+
 export type MutationPhase =
   | 'idle'
   | 'submitting'
@@ -158,6 +190,176 @@ export function findRowByIdempotencyKey(
     rows.find((row) => stringField(row, 'idempotencyKey') === idempotencyKey) ??
     null
   );
+}
+
+export function findDeterminationByCreateKey(
+  rows: Array<Record<string, unknown>>,
+  idempotencyKey: string,
+): Record<string, unknown> | null {
+  return (
+    rows.find(
+      (row) => stringField(row, 'createIdempotencyKey') === idempotencyKey,
+    ) ?? null
+  );
+}
+
+export function isCreateDeterminationProven(input: {
+  claimId: string;
+  determinations: Array<Record<string, unknown>>;
+  createIdempotencyKey: string;
+}): boolean {
+  const row = findDeterminationByCreateKey(
+    input.determinations,
+    input.createIdempotencyKey,
+  );
+  if (!row) return false;
+  const ownerClaimId = stringField(row, 'exceptionClaimId');
+  if (ownerClaimId != null && ownerClaimId !== input.claimId) return false;
+  return true;
+}
+
+export function isEligibleDraftReviewProven(input: {
+  claimId: string;
+  determinationId: string;
+  determinations: Array<Record<string, unknown>>;
+  proposeIdempotencyKey?: string;
+}): boolean {
+  const row =
+    input.determinations.find(
+      (item) => stringField(item, 'id') === input.determinationId,
+    ) ?? null;
+  if (!row) return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  if (stringField(row, 'status') !== 'PROPOSED') return false;
+  if (isSuccessorDetermination(row)) return false;
+  const storedKey = stringField(row, 'proposeIdempotencyKey');
+  if (
+    storedKey &&
+    input.proposeIdempotencyKey &&
+    storedKey !== input.proposeIdempotencyKey
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export type PostMutationRefreshOutcome =
+  | 'discarded'
+  | 'success'
+  | 'unproven'
+  | 'error';
+
+/**
+ * HTTP 2xx is transport success only. Workflow success is opt-in
+ * authoritative graph proof. Frozen 14B-2A callers omit that opt-in.
+ */
+export function decidePostMutationRefreshOutcome(input: {
+  discarded: boolean;
+  hasLatest: boolean;
+  requireAuthoritativeProof: boolean;
+  confirmed: boolean;
+}): PostMutationRefreshOutcome {
+  if (input.discarded) return 'discarded';
+  if (!input.hasLatest) return 'error';
+  if (input.requireAuthoritativeProof) {
+    return input.confirmed ? 'success' : 'unproven';
+  }
+  return 'success';
+}
+
+export function isSuccessorDetermination(row: Record<string, unknown>): boolean {
+  return stringField(row, 'adjustmentOfDeterminationId') != null;
+}
+
+export function activeLiabilityDeterminations(
+  rows: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return rows.filter((row) => {
+    const status = stringField(row, 'status');
+    return (
+      status != null &&
+      (LIABILITY_DETERMINATION_ACTIVE_STATUSES as readonly string[]).includes(
+        status,
+      )
+    );
+  });
+}
+
+export function canCreateLiabilityDraft(input: {
+  claimStatus: unknown;
+  facts: Array<Record<string, unknown>>;
+  determinations: Array<Record<string, unknown>>;
+  debtorOptions: FactAttributionOption[];
+}): boolean {
+  return (
+    isActiveClaimStatus(input.claimStatus) &&
+    input.facts.length > 0 &&
+    activeLiabilityDeterminations(input.determinations).length === 0 &&
+    input.debtorOptions.length > 0
+  );
+}
+
+export function canSubmitEligibleLiabilityDraft(input: {
+  claimId: string;
+  claimStatus: unknown;
+  determination: Record<string, unknown> | null;
+}): boolean {
+  const row = input.determination;
+  if (!row) return false;
+  if (!isActiveClaimStatus(input.claimStatus)) return false;
+  if (stringField(row, 'status') !== 'DRAFT') return false;
+  if (isSuccessorDetermination(row)) return false;
+  const ownerClaimId = stringField(row, 'exceptionClaimId');
+  return ownerClaimId === input.claimId;
+}
+
+export function collectAuthoritativeDebtorOptions(
+  claim: Record<string, unknown>,
+): FactAttributionOption[] {
+  return collectAuthoritativeFactAttributionOptions(claim).map((row) => ({
+    ...row,
+    label:
+      row.partyType === 'CUSTOMER'
+        ? 'Customer'
+        : row.partyType === 'MERCHANT'
+          ? 'Merchant'
+          : 'Rider',
+  }));
+}
+
+export function isPositiveMoneyString(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/.test(trimmed)) return false;
+  if (/^0(?:\.0{1,2})?$/.test(trimmed)) return false;
+  return true;
+}
+
+export function allocationGroundingFacts(input: {
+  claimType: unknown;
+  partyType: string;
+  facts: Array<Record<string, unknown>>;
+}): Array<Record<string, unknown>> {
+  const facts = input.facts.filter((row) => stringField(row, 'id') != null);
+  if (input.claimType !== 'GOODS_NON_CONFORMANCE') return facts;
+  const allowed =
+    input.partyType === 'MERCHANT'
+      ? NON_CONFORMANCE_MERCHANT_GROUNDING_FACT_TYPES
+      : input.partyType === 'RIDER'
+        ? NON_CONFORMANCE_RIDER_GROUNDING_FACT_TYPES
+        : null;
+  return facts.filter((row) => {
+    const factType = stringField(row, 'factType');
+    if (!factType) return false;
+    if (
+      (NON_CONFORMANCE_NON_GROUNDING_FACT_TYPES as readonly string[]).includes(
+        factType,
+      )
+    ) {
+      return false;
+    }
+    if (!allowed) return true;
+    return (allowed as readonly string[]).includes(factType);
+  });
 }
 
 export function sameActorIds(left: unknown, right: unknown): boolean {

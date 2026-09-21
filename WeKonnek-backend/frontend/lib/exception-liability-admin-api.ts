@@ -1,6 +1,6 @@
 /**
- * Stage14B-2A System Admin evidentiary POSTs only.
- * No determination, settlement, coverage, or Stage9 mutation helpers.
+ * Stage14B-2A/2B System Admin POSTs: evidence, verification, facts,
+ * determination draft, and propose. No finalize, adjustment, or settlement.
  */
 import { getToken } from '@/hooks/use-auth';
 import {
@@ -18,6 +18,10 @@ export const LIABILITY_ADMIN_POST_PATHS = {
     `/exception-claims/${claimId}/evidence/${evidenceId}/verify`,
   createVerifiedFact: (claimId: string) =>
     `/exception-claims/${claimId}/verified-facts`,
+  createDetermination: (claimId: string) =>
+    `/exception-claims/${claimId}/determinations`,
+  proposeDetermination: (determinationId: string) =>
+    `/liability-determinations/${determinationId}/propose`,
 } as const;
 
 export type AddEvidenceInput = {
@@ -53,6 +57,28 @@ export type CreateVerifiedFactInput = {
   supportingEvidenceId?: string | null;
   correlationId?: string;
   idempotencyKey?: string;
+};
+
+export type DeterminationAllocationInput = {
+  partyType: string;
+  partyUserId?: string | null;
+  partyMerchantId?: number | null;
+  amount: string;
+  verifiedFactId?: string | null;
+  basis?: string | null;
+};
+
+export type CreateDeterminationInput = {
+  allocations: DeterminationAllocationInput[];
+  reason?: string;
+  correlationId: string;
+  idempotencyKey: string;
+};
+
+export type ProposeDeterminationInput = {
+  reason?: string;
+  correlationId: string;
+  idempotencyKey: string;
 };
 
 function readErrorBody(data: unknown): { code?: unknown; message?: unknown } {
@@ -181,6 +207,50 @@ export async function createVerifiedFact(
       attributedPartyUserId: input.attributedPartyUserId,
       attributedMerchantId: input.attributedMerchantId,
       supportingEvidenceId: input.supportingEvidenceId,
+      correlationId: input.correlationId,
+      idempotencyKey: input.idempotencyKey,
+    }),
+    signal,
+  );
+}
+
+export async function createDetermination(
+  claimId: string,
+  input: CreateDeterminationInput,
+  signal?: AbortSignal,
+) {
+  return adminLiabilityPost(
+    LIABILITY_ADMIN_POST_PATHS.createDetermination(claimId),
+    {
+      allocations: input.allocations.map((row) =>
+        omitEmpty({
+          partyType: row.partyType,
+          partyUserId: row.partyUserId,
+          partyMerchantId: row.partyMerchantId,
+          amount: row.amount,
+          verifiedFactId: row.verifiedFactId,
+          basis: row.basis,
+        }),
+      ),
+      ...omitEmpty({
+        reason: input.reason,
+        correlationId: input.correlationId,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    },
+    signal,
+  );
+}
+
+export async function proposeDetermination(
+  determinationId: string,
+  input: ProposeDeterminationInput,
+  signal?: AbortSignal,
+) {
+  return adminLiabilityPost(
+    LIABILITY_ADMIN_POST_PATHS.proposeDetermination(determinationId),
+    omitEmpty({
+      reason: input.reason,
       correlationId: input.correlationId,
       idempotencyKey: input.idempotencyKey,
     }),
