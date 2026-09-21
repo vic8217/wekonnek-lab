@@ -1,6 +1,7 @@
 /**
- * Stage14B-2A/2B System Admin POSTs: evidence, verification, facts,
- * determination draft, and propose. No finalize, adjustment, or settlement.
+ * Stage14B-2A/2B/2C System Admin POSTs: evidence, verification, facts,
+ * determination draft, propose, record liability, and adjustment.
+ * No settlement, coverage, or Stage9 writers.
  */
 import { getToken } from '@/hooks/use-auth';
 import {
@@ -22,6 +23,10 @@ export const LIABILITY_ADMIN_POST_PATHS = {
     `/exception-claims/${claimId}/determinations`,
   proposeDetermination: (determinationId: string) =>
     `/liability-determinations/${determinationId}/propose`,
+  recordLiabilityDetermination: (determinationId: string) =>
+    `/liability-determinations/${determinationId}/finalize`,
+  createAdjustment: (determinationId: string) =>
+    `/liability-determinations/${determinationId}/adjustments`,
 } as const;
 
 export type AddEvidenceInput = {
@@ -76,6 +81,19 @@ export type CreateDeterminationInput = {
 };
 
 export type ProposeDeterminationInput = {
+  reason?: string;
+  correlationId: string;
+  idempotencyKey: string;
+};
+
+export type CreateAdjustmentInput = {
+  allocations: DeterminationAllocationInput[];
+  reason: string;
+  correlationId: string;
+  idempotencyKey: string;
+};
+
+export type RecordLiabilityInput = {
   reason?: string;
   correlationId: string;
   idempotencyKey: string;
@@ -254,6 +272,50 @@ export async function proposeDetermination(
       correlationId: input.correlationId,
       idempotencyKey: input.idempotencyKey,
     }),
+    signal,
+  );
+}
+
+export async function recordLiabilityDetermination(
+  determinationId: string,
+  input: RecordLiabilityInput,
+  signal?: AbortSignal,
+) {
+  return adminLiabilityPost(
+    LIABILITY_ADMIN_POST_PATHS.recordLiabilityDetermination(determinationId),
+    omitEmpty({
+      reason: input.reason,
+      correlationId: input.correlationId,
+      idempotencyKey: input.idempotencyKey,
+    }),
+    signal,
+  );
+}
+
+export async function createAdjustment(
+  determinationId: string,
+  input: CreateAdjustmentInput,
+  signal?: AbortSignal,
+) {
+  return adminLiabilityPost(
+    LIABILITY_ADMIN_POST_PATHS.createAdjustment(determinationId),
+    {
+      allocations: input.allocations.map((row) =>
+        omitEmpty({
+          partyType: row.partyType,
+          partyUserId: row.partyUserId,
+          partyMerchantId: row.partyMerchantId,
+          amount: row.amount,
+          verifiedFactId: row.verifiedFactId,
+          basis: row.basis,
+        }),
+      ),
+      reason: input.reason,
+      ...omitEmpty({
+        correlationId: input.correlationId,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    },
     signal,
   );
 }

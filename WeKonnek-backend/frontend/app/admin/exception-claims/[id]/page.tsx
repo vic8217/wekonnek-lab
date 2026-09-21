@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { getUser, useAuth } from '@/hooks/use-auth';
 import {
   FinancialReconciliationApiError,
+  fetchOrderFinancialReconciliation,
 } from '@/lib/financial-reconciliation-api';
 import {
   fetchExceptionClaim,
@@ -31,6 +32,8 @@ import {
   createDetermination,
   createVerifiedFact,
   proposeDetermination,
+  recordLiabilityDetermination,
+  createAdjustment,
   verifyEvidence,
 } from '@/lib/exception-liability-admin-api';
 import {
@@ -40,11 +43,21 @@ import {
   canSubmitEligibleLiabilityDraft,
   claimWorkspacePanelKey,
   collectAuthoritativeDebtorOptions,
+  collectFinalizationDebtorOptions,
   collectAuthoritativeFactAttributionOptions,
+  mutateAfterOwnedPreflight,
   createCorrelationId,
   decidePostMutationRefreshOutcome,
   isCreateDeterminationProven,
   isEligibleDraftReviewProven,
+  isOriginalLiabilityRecordingProven,
+  isSuccessorAdjustmentProven,
+  isSuccessorLiabilityRecordingProven,
+  canRecordOriginalLiability,
+  canCreateSuccessorAdjustment,
+  canRecordSuccessorLiability,
+  analyzeSuccessorTopology,
+  reconHasSuccessorSourceInconsistency,
   findRowByIdempotencyKey,
   isAmbiguousMutationFailure,
   isCurrentClaimOwner,
@@ -112,12 +125,18 @@ function ClaimBody() {
   const [factPhase, setFactPhase] = useState<MutationPhase>('idle');
   const [createDetPhase, setCreateDetPhase] = useState<MutationPhase>('idle');
   const [draftReviewPhase, setDraftReviewPhase] = useState<MutationPhase>('idle');
+  const [originalRecordPhase, setOriginalRecordPhase] = useState<MutationPhase>('idle');
+  const [adjustmentPhase, setAdjustmentPhase] = useState<MutationPhase>('idle');
+  const [successorRecordPhase, setSuccessorRecordPhase] = useState<MutationPhase>('idle');
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [orderTermsError, setOrderTermsError] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [factError, setFactError] = useState<string | null>(null);
   const [createDetError, setCreateDetError] = useState<string | null>(null);
   const [draftReviewError, setDraftReviewError] = useState<string | null>(null);
+  const [originalRecordError, setOriginalRecordError] = useState<string | null>(null);
+  const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
+  const [successorRecordError, setSuccessorRecordError] = useState<string | null>(null);
 
   const loadClaim = async (
     claimId: string,
@@ -152,12 +171,18 @@ function ClaimBody() {
     setFactPhase('idle');
     setCreateDetPhase('idle');
     setDraftReviewPhase('idle');
+    setOriginalRecordPhase('idle');
+    setAdjustmentPhase('idle');
+    setSuccessorRecordPhase('idle');
     setEvidenceError(null);
     setOrderTermsError(null);
     setVerifyError(null);
     setFactError(null);
     setCreateDetError(null);
     setDraftReviewError(null);
+    setOriginalRecordError(null);
+    setAdjustmentError(null);
+    setSuccessorRecordError(null);
     void (async () => {
       try {
         const next = await loadClaim(id, generation, controller);
@@ -205,6 +230,22 @@ function ClaimBody() {
       routeExpectedWkOrderId: routeExpectedWkOrderIdRef.current,
       routeEpoch: routeEpochRef.current,
     });
+
+  const inspectLiveRecon = async (latest: ExceptionClaimRecord) => {
+    const orderId = latest.wkOrderId;
+    if (typeof orderId !== 'number') {
+      return 'Live reconciliation could not be loaded. The action was not sent.';
+    }
+    try {
+      const recon = await fetchOrderFinancialReconciliation(orderId);
+      if (reconHasSuccessorSourceInconsistency(recon.findings)) {
+        return 'Live reconciliation reports an inconsistent successor topology. The action was not sent.';
+      }
+      return null;
+    } catch {
+      return 'Live reconciliation could not be loaded. The action was not sent.';
+    }
+  };
 
   const refreshAfterMutation = async (
     owner: ClaimOwner,
@@ -256,7 +297,9 @@ function ClaimBody() {
     setError: (message: string | null) => void;
     mutate: (signal: AbortSignal) => Promise<unknown>;
     confirm: (latest: ExceptionClaimRecord) => boolean;
-    preflight?: (latest: ExceptionClaimRecord) => string | null;
+    preflight?: (
+      latest: ExceptionClaimRecord,
+    ) => string | null | Promise<string | null>;
     requireAuthoritativeProof?: boolean;
   }): Promise<'success' | 'unproven' | 'error' | 'discarded'> => {
     const owner = currentOwner();
@@ -300,14 +343,21 @@ function ClaimBody() {
           input.setError('The claim could not be reloaded.');
           return 'error';
         }
-        const blocked = input.preflight(latest);
-        if (blocked) {
+        const gated = await mutateAfterOwnedPreflight({
+          ownerIsCurrent: () => ownerIsCurrent(owner),
+          runPreflight: () => Promise.resolve(input.preflight!(latest)),
+          mutate: () => input.mutate(controller.signal),
+        });
+        if (gated.status === 'discarded') return 'discarded';
+        if (gated.status === 'blocked') {
           input.setPhase('error');
-          input.setError(blocked);
+          input.setError(gated.message);
           return 'error';
         }
+      } else {
+        if (!ownerIsCurrent(owner)) return 'discarded';
+        await input.mutate(controller.signal);
       }
-      await input.mutate(controller.signal);
       if (!ownerIsCurrent(owner)) return 'discarded';
       if (input.requireAuthoritativeProof) {
         input.setPhase('reconciling');
@@ -557,10 +607,19 @@ function ClaimBody() {
             debtorOptions={collectAuthoritativeDebtorOptions(
               claim as Record<string, unknown>,
             )}
+            finalizationDebtorOptions={collectFinalizationDebtorOptions(
+              claim as Record<string, unknown>,
+            )}
             createPhase={createDetPhase}
             proposePhase={draftReviewPhase}
+            originalRecordPhase={originalRecordPhase}
+            adjustmentPhase={adjustmentPhase}
+            successorRecordPhase={successorRecordPhase}
             createError={createDetError}
             proposeError={draftReviewError}
+            originalRecordError={originalRecordError}
+            adjustmentError={adjustmentError}
+            successorRecordError={successorRecordError}
             onCreateDraft={(input) =>
               runMutation({
                 setPhase: setCreateDetPhase,
@@ -632,6 +691,128 @@ function ClaimBody() {
                     determinationId: input.determinationId,
                     determinations: asRecordList(latest.determinations),
                     proposeIdempotencyKey: input.idempotencyKey,
+                  }),
+              })
+            }
+            onRecordOriginalLiability={(input) =>
+              runMutation({
+                setPhase: setOriginalRecordPhase,
+                setError: setOriginalRecordError,
+                preflight: async (latest) => {
+                  const row =
+                    asRecordList(latest.determinations).find(
+                      (item) => stringField(item, 'id') === input.determinationId,
+                    ) ?? null;
+                  const ok = canRecordOriginalLiability({
+                    claimId: latest.id,
+                    determination: row,
+                    debtorOptions: collectFinalizationDebtorOptions(
+                      latest as Record<string, unknown>,
+                    ),
+                  });
+                  if (!ok) {
+                    return 'The determination is no longer eligible. Reload before continuing.';
+                  }
+                  return inspectLiveRecon(latest);
+                },
+                mutate: (signal) =>
+                  recordLiabilityDetermination(
+                    input.determinationId,
+                    {
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                requireAuthoritativeProof: true,
+                confirm: (latest) =>
+                  isOriginalLiabilityRecordingProven({
+                    claimId: latest.id,
+                    determinationId: input.determinationId,
+                    determinations: asRecordList(latest.determinations),
+                    finalizeIdempotencyKey: input.idempotencyKey,
+                  }),
+              })
+            }
+            onCreateAdjustment={(input) =>
+              runMutation({
+                setPhase: setAdjustmentPhase,
+                setError: setAdjustmentError,
+                preflight: async (latest) => {
+                  const determinations = asRecordList(latest.determinations);
+                  const ok = canCreateSuccessorAdjustment({
+                    facts: asRecordList(latest.verifiedFacts),
+                    determinations,
+                    debtorOptions: collectFinalizationDebtorOptions(
+                      latest as Record<string, unknown>,
+                    ),
+                  });
+                  const topology = analyzeSuccessorTopology(determinations);
+                  if (!ok || topology.tipId !== input.parentDeterminationId) {
+                    return 'The claim is no longer eligible for an adjustment. Reload before continuing.';
+                  }
+                  return inspectLiveRecon(latest);
+                },
+                mutate: (signal) =>
+                  createAdjustment(
+                    input.parentDeterminationId,
+                    {
+                      allocations: input.allocations,
+                      reason: input.reason,
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                requireAuthoritativeProof: true,
+                confirm: (latest) =>
+                  isSuccessorAdjustmentProven({
+                    claimId: latest.id,
+                    parentDeterminationId: input.parentDeterminationId,
+                    determinations: asRecordList(latest.determinations),
+                    createIdempotencyKey: input.idempotencyKey,
+                  }),
+              })
+            }
+            onRecordSuccessorLiability={(input) =>
+              runMutation({
+                setPhase: setSuccessorRecordPhase,
+                setError: setSuccessorRecordError,
+                preflight: async (latest) => {
+                  const row =
+                    asRecordList(latest.determinations).find(
+                      (item) => stringField(item, 'id') === input.determinationId,
+                    ) ?? null;
+                  const ok = canRecordSuccessorLiability({
+                    claimId: latest.id,
+                    determination: row,
+                    determinations: asRecordList(latest.determinations),
+                    debtorOptions: collectFinalizationDebtorOptions(
+                      latest as Record<string, unknown>,
+                    ),
+                  });
+                  if (!ok) {
+                    return 'The successor is no longer eligible. Reload before continuing.';
+                  }
+                  return inspectLiveRecon(latest);
+                },
+                mutate: (signal) =>
+                  recordLiabilityDetermination(
+                    input.determinationId,
+                    {
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                requireAuthoritativeProof: true,
+                confirm: (latest) =>
+                  isSuccessorLiabilityRecordingProven({
+                    claimId: latest.id,
+                    successorId: input.determinationId,
+                    parentDeterminationId: input.parentDeterminationId,
+                    determinations: asRecordList(latest.determinations),
+                    finalizeIdempotencyKey: input.idempotencyKey,
                   }),
               })
             }

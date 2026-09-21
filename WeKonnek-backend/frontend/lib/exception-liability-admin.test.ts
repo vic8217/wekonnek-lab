@@ -13,12 +13,30 @@ import {
   SUBJECT_MATCH_INVESTIGATION_COPY,
   VERIFIED_FACT_TYPES,
   attributionFromOptionKey,
+  analyzeSuccessorTopology,
   canCreateLiabilityDraft,
+  canCreateSuccessorAdjustment,
+  canRecordOriginalLiability,
+  canRecordSuccessorLiability,
   canSubmitEligibleLiabilityDraft,
+  DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY,
+  DETERMINATION_ADJUSTMENT_SEMANTICS_COPY,
+  DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY,
+  DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY,
+  DETERMINATION_UNPROVABLE_ALLOCATION_COPY,
+  isOriginalLiabilityRecordingProven,
+  isSuccessorAdjustmentProven,
+  isSuccessorLiabilityRecordingProven,
+  reconHasSuccessorSourceInconsistency,
+  storedAllocationsAreBounded,
+  mutateAfterOwnedPreflight,
+  adjustmentGestureLocksPayload,
+  resolveAdjustmentMutationPayload,
   claimRefreshDecision,
   claimWorkspacePanelKey,
   collectAuthoritativeDebtorOptions,
   collectAuthoritativeFactAttributionOptions,
+  collectFinalizationDebtorOptions,
   completeGesture,
   decidePostMutationRefreshOutcome,
   evidenceHasVerifiedConclusion,
@@ -66,8 +84,6 @@ const CANDIDATE_FILES = [
 ];
 
 const FORBIDDEN_POSTS = [
-  '/finalize',
-  '/adjustments',
   '/settlements/claim',
   '/settlements/cash',
   '/acknowledge',
@@ -76,7 +92,7 @@ const FORBIDDEN_POSTS = [
   'input type="file"',
 ];
 
-test('API helpers expose evidentiary and 2B determination POST paths only', () => {
+test('API helpers expose evidentiary, 2B, and 2C determination POST paths only', () => {
   const src = read(API);
   assert.equal(src.includes('export async function addEvidence'), true);
   assert.equal(src.includes('export async function captureOrderTermsEvidence'), true);
@@ -97,11 +113,16 @@ test('API helpers expose evidentiary and 2B determination POST paths only', () =
     src.includes('/liability-determinations/${determinationId}/propose'),
     true,
   );
-  assert.equal(src.includes('/finalize'), false);
-  assert.equal(src.includes('/adjustments'), false);
-  assert.equal(src.includes('export async function createDetermination'), true);
-  assert.equal(src.includes('finalizeDetermination'), false);
-  assert.equal(src.includes('createAdjustment'), false);
+  assert.equal(
+    src.includes('/liability-determinations/${determinationId}/finalize'),
+    true,
+  );
+  assert.equal(
+    src.includes('/liability-determinations/${determinationId}/adjustments'),
+    true,
+  );
+  assert.equal(src.includes('export async function recordLiabilityDetermination'), true);
+  assert.equal(src.includes('export async function createAdjustment'), true);
   assert.equal(src.includes('Authorization'), true);
   assert.equal(src.includes('idempotencyKey'), true);
   assert.equal(src.includes('correlationId'), true);
@@ -876,14 +897,33 @@ test('determination panel remounts on expected-order context and reuses ownershi
   assert.equal(page.includes('preflight'), true);
 });
 
-test('2B finalize and adjustment firewalls', () => {
-  for (const relative of [API, PAGE, DET_PANEL]) {
-    const src = read(relative);
-    assert.equal(src.includes('/finalize'), false, relative);
-    assert.equal(src.includes('/adjustments'), false, relative);
-    assert.equal(src.includes('Finalize'), false, relative);
-    assert.equal(src.includes('Create Adjustment'), false, relative);
-  }
+test('2C uses existing Stage12 writers without exposing them on the frozen 14B-1 page surface', () => {
+  const page = read(PAGE);
+  assert.equal(page.includes('/finalize'), false);
+  assert.equal(page.includes('/adjustments'), false);
+  assert.equal(page.includes('Propose'), false);
+  assert.equal(page.includes('Finalize'), false);
+  assert.equal(page.includes('Create successor adjustment'), false);
+  assert.equal(page.includes('recordLiabilityDetermination'), true);
+  assert.equal(page.includes('createAdjustment'), true);
+  assert.equal(page.includes('inspectLiveRecon'), true);
+  assert.equal(page.includes('fetchOrderFinancialReconciliation'), true);
+  const api = read(API);
+  assert.equal(
+    api.includes('/liability-determinations/${determinationId}/finalize'),
+    true,
+  );
+  assert.equal(
+    api.includes('/liability-determinations/${determinationId}/adjustments'),
+    true,
+  );
+  const panel = read(DET_PANEL);
+  assert.equal(panel.includes('Create Adjustment'), true);
+  assert.equal(panel.includes('Record original liability'), true);
+  assert.equal(panel.includes('Record successor liability'), true);
+  assert.equal(panel.includes('`finalize:${detId}`'), true);
+  assert.equal(panel.includes('`finalize-successor:${detId}`'), true);
+  assert.equal(panel.includes('`adjust:${payload.parentDeterminationId}`'), true);
 });
 
 test('create 2xx is proven only by matching createIdempotencyKey', () => {
@@ -1136,4 +1176,995 @@ test('409 recovery still requires operation-specific confirm', () => {
     }),
     true,
   );
+});
+
+const MERCHANT_CLAIM = {
+  evidence: [
+    { evidenceKind: 'ORDER_TERMS_SNAPSHOT', metadata: { merchantId: 44 } },
+  ],
+  obligations: [],
+};
+
+function merchantOptions() {
+  return collectFinalizationDebtorOptions({
+    evidence: MERCHANT_CLAIM.evidence,
+    obligations: [{ creditorType: 'MERCHANT', creditorMerchantId: 44 }],
+  });
+}
+
+function customerOptions(userId = 'cust-1') {
+  return collectFinalizationDebtorOptions({
+    evidence: [],
+    obligations: [{ creditorType: 'CUSTOMER', creditorUserId: userId }],
+  });
+}
+
+function riderOptions(userId = 'rider-1') {
+  return collectFinalizationDebtorOptions({
+    evidence: [],
+    obligations: [{ creditorType: 'RIDER', creditorUserId: userId }],
+  });
+}
+
+test('original finalize eligibility is PROPOSED original only after stored-allocation revalidation', () => {
+  const debtors = merchantOptions();
+  const proposed = {
+    id: 'd1',
+    exceptionClaimId: 'claim-a',
+    status: 'PROPOSED',
+    allocations: [
+      { partyType: 'MERCHANT', partyMerchantId: 44, amount: '10.00' },
+    ],
+  };
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: proposed,
+      debtorOptions: debtors,
+    }),
+    true,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: { ...proposed, status: 'DRAFT' },
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        ...proposed,
+        adjustmentOfDeterminationId: 'parent',
+      },
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(proposed.allocations, debtors),
+    true,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'CUSTOMER', partyUserId: 'foreign-c', amount: '1.00' }],
+      customerOptions(),
+    ),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'RIDER', partyUserId: 'foreign-r', amount: '1.00' }],
+      riderOptions(),
+    ),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'MERCHANT', partyMerchantId: 99, amount: '1.00' }],
+      debtors,
+    ),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [
+        { partyType: 'MERCHANT', partyMerchantId: 44, amount: '1.00' },
+        { partyType: 'CUSTOMER', partyUserId: 'foreign-c', amount: '1.00' },
+      ],
+      debtors,
+    ),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'PLATFORM', partyUserId: 'x', amount: '1.00' }],
+      debtors,
+    ),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        ...proposed,
+        allocations: [
+          { partyType: 'CUSTOMER', partyUserId: 'foreign-c', amount: '1.00' },
+        ],
+      },
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        ...proposed,
+        allocations: [
+          { partyType: 'CUSTOMER', partyUserId: 'cust-1', amount: '1.00' },
+        ],
+      },
+      debtorOptions: collectAuthoritativeDebtorOptions({
+        evidence: [],
+        obligations: [],
+      }),
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        ...proposed,
+        allocations: [
+          { partyType: 'CUSTOMER', partyUserId: 'cust-1', amount: '1.00' },
+        ],
+      },
+      debtorOptions: collectAuthoritativeDebtorOptions({
+        evidence: [],
+        obligations: [
+          { creditorType: 'CUSTOMER', creditorUserId: 'cust-1' },
+          { creditorType: 'CUSTOMER', creditorUserId: 'cust-2' },
+        ],
+      }),
+    }),
+    false,
+  );
+  const panel = read(DET_PANEL);
+  assert.equal(panel.includes(DETERMINATION_UNPROVABLE_ALLOCATION_COPY), false);
+  assert.equal(panel.includes('DETERMINATION_UNPROVABLE_ALLOCATION_COPY'), true);
+  assert.equal(panel.includes('DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY'), true);
+  assert.equal(
+    DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY.includes(
+      'Finalizing makes this liability determination authoritative',
+    ),
+    true,
+  );
+  const api = read(API);
+  const recordFn = api.slice(
+    api.indexOf('export async function recordLiabilityDetermination'),
+    api.indexOf('export async function createAdjustment'),
+  );
+  assert.equal(recordFn.includes('claimId'), false);
+  assert.equal(recordFn.includes('allocations'), false);
+  assert.equal(recordFn.includes('coverage'), false);
+  assert.equal(recordFn.includes('economicLossId'), false);
+  assert.equal(recordFn.includes('correlationId: input.correlationId'), true);
+  assert.equal(recordFn.includes('idempotencyKey: input.idempotencyKey'), true);
+  const page = read(PAGE);
+  assert.equal(page.includes('canRecordOriginalLiability'), true);
+  assert.equal(page.includes('inspectLiveRecon'), true);
+});
+
+test('original finalize 2xx proof is exact FINALIZED identity', () => {
+  const gesture = submitGesture(null, 'finalize:d1');
+  const k1 = gesture.active.key;
+  assert.equal(
+    isOriginalLiabilityRecordingProven({
+      claimId: 'claim-a',
+      determinationId: 'd1',
+      determinations: [
+        {
+          id: 'd1',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+      finalizeIdempotencyKey: k1,
+    }),
+    true,
+  );
+  assert.equal(
+    isOriginalLiabilityRecordingProven({
+      claimId: 'claim-a',
+      determinationId: 'd1',
+      determinations: [
+        {
+          id: 'd1',
+          exceptionClaimId: 'claim-a',
+          status: 'PROPOSED',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+      finalizeIdempotencyKey: k1,
+    }),
+    false,
+  );
+  assert.equal(
+    isOriginalLiabilityRecordingProven({
+      claimId: 'claim-a',
+      determinationId: 'd1',
+      determinations: [
+        {
+          id: 'other',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+      finalizeIdempotencyKey: k1,
+    }),
+    false,
+  );
+  assert.equal(
+    isOriginalLiabilityRecordingProven({
+      claimId: 'claim-a',
+      determinationId: 'd1',
+      determinations: [
+        {
+          id: 'd1',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          adjustmentOfDeterminationId: 'parent',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+      finalizeIdempotencyKey: k1,
+    }),
+    false,
+  );
+  const retry = submitGesture(
+    markGestureAmbiguous(gesture.active),
+    'finalize:d1',
+  );
+  assert.equal(retry.active.key, k1);
+  assert.equal(
+    decidePostMutationRefreshOutcome({
+      discarded: false,
+      hasLatest: true,
+      requireAuthoritativeProof: true,
+      confirmed: true,
+    }),
+    'success',
+  );
+  assert.equal(
+    ownedResultDecision({
+      owner: { claimId: 'a', expectedWkOrderId: '1', epoch: 1 },
+      routeClaimId: 'a',
+      routeExpectedWkOrderId: '2',
+      routeEpoch: 2,
+      loadGeneration: 2,
+      responseGeneration: 1,
+    }),
+    'ignore',
+  );
+  assert.equal(
+    ownedResultDecision({
+      owner: { claimId: 'a', expectedWkOrderId: '1', epoch: 1 },
+      routeClaimId: 'b',
+      routeExpectedWkOrderId: '1',
+      routeEpoch: 2,
+      loadGeneration: 2,
+      responseGeneration: 1,
+    }),
+    'ignore',
+  );
+});
+
+test('successor topology uses graph identity not timestamps', () => {
+  assert.equal(
+    analyzeSuccessorTopology([
+      { id: 'orig', status: 'FINALIZED' },
+    ]).tipId,
+    'orig',
+  );
+  assert.equal(
+    analyzeSuccessorTopology([
+      { id: 'orig', status: 'FINALIZED', createdAt: '2026-01-02' },
+      {
+        id: 'child',
+        status: 'FINALIZED',
+        adjustmentOfDeterminationId: 'orig',
+        createdAt: '2020-01-01',
+        updatedAt: '2020-01-01',
+      },
+    ]).tipId,
+    'child',
+  );
+  const draftChild = analyzeSuccessorTopology([
+    { id: 'orig', status: 'FINALIZED' },
+    {
+      id: 'draft',
+      status: 'DRAFT',
+      adjustmentOfDeterminationId: 'orig',
+    },
+  ]);
+  assert.equal(draftChild.safe, false);
+  assert.equal(draftChild.reason, 'no_tip');
+  assert.equal(
+    analyzeSuccessorTopology([
+      { id: 'orig', status: 'FINALIZED' },
+      { id: 'a', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+      { id: 'b', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+    ]).reason,
+    'branch',
+  );
+  assert.equal(
+    analyzeSuccessorTopology([
+      { id: 'a', status: 'FINALIZED', adjustmentOfDeterminationId: 'b' },
+      { id: 'b', status: 'FINALIZED', adjustmentOfDeterminationId: 'a' },
+    ]).reason,
+    'cycle',
+  );
+  assert.equal(
+    analyzeSuccessorTopology([
+      {
+        id: 'orphan',
+        status: 'FINALIZED',
+        adjustmentOfDeterminationId: 'missing',
+      },
+    ]).reason,
+    'missing_parent',
+  );
+  assert.equal(
+    analyzeSuccessorTopology([
+      { id: 'r1', status: 'FINALIZED' },
+      { id: 'r2', status: 'FINALIZED' },
+    ]).reason,
+    'disconnected',
+  );
+});
+
+test('adjustment create eligibility, copy, DTO, and proof', () => {
+  const debtors = merchantOptions();
+  const facts = [{ id: 'f1', factType: 'GOODS_LOST_CONFIRMED' }];
+  const tip = {
+    id: 'orig',
+    status: 'FINALIZED',
+    remainingAmountSnapshot: '25.50',
+    allocations: [
+      { partyType: 'MERCHANT', partyMerchantId: 44, amount: '10.00' },
+    ],
+  };
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [tip],
+      debtorOptions: debtors,
+    }),
+    true,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [{ ...tip, remainingAmountSnapshot: '0.00' }],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts: [],
+      determinations: [tip],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [tip],
+      debtorOptions: [],
+    }),
+    false,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [
+        tip,
+        { id: 'child', status: 'DRAFT', adjustmentOfDeterminationId: 'orig' },
+      ],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [
+        tip,
+        { id: 'a', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+        { id: 'b', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+      ],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canCreateSuccessorAdjustment({
+      facts,
+      determinations: [
+        { id: 'a', status: 'FINALIZED', remainingAmountSnapshot: '1.00', adjustmentOfDeterminationId: 'b' },
+        { id: 'b', status: 'FINALIZED', remainingAmountSnapshot: '1.00', adjustmentOfDeterminationId: 'a' },
+      ],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(isPositiveMoneyString('10.00'), true);
+  assert.equal(isPositiveMoneyString('0'), false);
+  assert.equal(isPositiveMoneyString('-1'), false);
+  assert.equal(isPositiveMoneyString('1e2'), false);
+  assert.equal(isPositiveMoneyString('1.001'), false);
+  const panel = read(DET_PANEL);
+  assert.equal(panel.includes('DETERMINATION_ADJUSTMENT_SEMANTICS_COPY'), true);
+  assert.equal(panel.includes('DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY'), true);
+  assert.equal(
+    DETERMINATION_ADJUSTMENT_SEMANTICS_COPY.includes('additional recovery'),
+    true,
+  );
+  assert.equal(
+    DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY.includes('immutable Draft'),
+    true,
+  );
+  assert.equal(panel.includes('Party user id'), false);
+  assert.equal(panel.includes('inputMode="numeric"'), false);
+  const api = read(API);
+  const adjustFn = api.slice(api.indexOf('export async function createAdjustment'));
+  assert.equal(adjustFn.includes('creditor'), false);
+  assert.equal(adjustFn.includes('coverage'), false);
+  assert.equal(adjustFn.includes('currency'), false);
+  assert.equal(adjustFn.includes('policy'), false);
+  assert.equal(adjustFn.includes('reason: input.reason'), true);
+  const k1 = submitGesture(null, 'adjust:orig').active.key;
+  assert.equal(
+    isSuccessorAdjustmentProven({
+      claimId: 'claim-a',
+      parentDeterminationId: 'orig',
+      createIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'succ',
+          exceptionClaimId: 'claim-a',
+          adjustmentOfDeterminationId: 'orig',
+          createIdempotencyKey: k1,
+          status: 'DRAFT',
+        },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    isSuccessorAdjustmentProven({
+      claimId: 'claim-a',
+      parentDeterminationId: 'orig',
+      createIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'wrong',
+          exceptionClaimId: 'claim-a',
+          status: 'DRAFT',
+          createIdempotencyKey: 'other',
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    isSuccessorAdjustmentProven({
+      claimId: 'claim-a',
+      parentDeterminationId: 'orig',
+      createIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'foreign',
+          exceptionClaimId: 'other-claim',
+          adjustmentOfDeterminationId: 'orig',
+          createIdempotencyKey: k1,
+        },
+      ],
+    }),
+    false,
+  );
+  const retry = submitGesture(markGestureAmbiguous({ fingerprint: 'adjust:orig', key: k1 }), 'adjust:orig');
+  assert.equal(retry.active.key, k1);
+  assert.equal(read(PAGE).includes('isSuccessorAdjustmentProven'), true);
+  assert.equal(read(PAGE).includes('topology.tipId !== input.parentDeterminationId'), true);
+});
+
+test('successor finalize eligibility has no Propose and uses exact proof', () => {
+  const debtors = merchantOptions();
+  const parent = { id: 'orig', status: 'FINALIZED', exceptionClaimId: 'claim-a' };
+  const successor = {
+    id: 'succ',
+    exceptionClaimId: 'claim-a',
+    status: 'DRAFT',
+    adjustmentOfDeterminationId: 'orig',
+    allocations: [
+      { partyType: 'MERCHANT', partyMerchantId: 44, amount: '5.00' },
+    ],
+  };
+  assert.equal(
+    canRecordSuccessorLiability({
+      claimId: 'claim-a',
+      determination: successor,
+      determinations: [parent, successor],
+      debtorOptions: debtors,
+    }),
+    true,
+  );
+  assert.equal(
+    canSubmitEligibleLiabilityDraft({
+      claimId: 'claim-a',
+      claimStatus: 'FINALIZED',
+      determination: successor,
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        id: 'orig-draft',
+        exceptionClaimId: 'claim-a',
+        status: 'DRAFT',
+        allocations: successor.allocations,
+      },
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordSuccessorLiability({
+      claimId: 'claim-a',
+      determination: {
+        ...successor,
+        allocations: [
+          { partyType: 'CUSTOMER', partyUserId: 'foreign', amount: '5.00' },
+        ],
+      },
+      determinations: [parent, successor],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  assert.equal(
+    canRecordSuccessorLiability({
+      claimId: 'claim-a',
+      determination: successor,
+      determinations: [
+        parent,
+        successor,
+        { id: 'a', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+        { id: 'b', status: 'FINALIZED', adjustmentOfDeterminationId: 'orig' },
+      ],
+      debtorOptions: debtors,
+    }),
+    false,
+  );
+  const k1 = submitGesture(null, 'finalize-successor:succ').active.key;
+  assert.equal(
+    isSuccessorLiabilityRecordingProven({
+      claimId: 'claim-a',
+      successorId: 'succ',
+      parentDeterminationId: 'orig',
+      finalizeIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'succ',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          adjustmentOfDeterminationId: 'orig',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+    }),
+    true,
+  );
+  assert.equal(
+    isSuccessorLiabilityRecordingProven({
+      claimId: 'claim-a',
+      successorId: 'succ',
+      parentDeterminationId: 'orig',
+      finalizeIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'succ',
+          exceptionClaimId: 'claim-a',
+          status: 'DRAFT',
+          adjustmentOfDeterminationId: 'orig',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    isSuccessorLiabilityRecordingProven({
+      claimId: 'claim-a',
+      successorId: 'succ',
+      parentDeterminationId: 'orig',
+      finalizeIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'other',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          adjustmentOfDeterminationId: 'orig',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    isSuccessorLiabilityRecordingProven({
+      claimId: 'claim-a',
+      successorId: 'succ',
+      parentDeterminationId: 'orig',
+      finalizeIdempotencyKey: k1,
+      determinations: [
+        {
+          id: 'succ',
+          exceptionClaimId: 'claim-a',
+          status: 'FINALIZED',
+          adjustmentOfDeterminationId: 'other-parent',
+          finalizeIdempotencyKey: k1,
+        },
+      ],
+    }),
+    false,
+  );
+  const retry = submitGesture(
+    markGestureAmbiguous({ fingerprint: 'finalize-successor:succ', key: k1 }),
+    'finalize-successor:succ',
+  );
+  assert.equal(retry.active.key, k1);
+  const panel = read(DET_PANEL);
+  assert.equal(panel.includes('DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY'), true);
+  assert.equal(
+    DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY.includes(
+      'additional recovery determination',
+    ),
+    true,
+  );
+  assert.equal(read(PAGE).includes('isSuccessorLiabilityRecordingProven'), true);
+  assert.equal(read(PAGE).includes('canRecordSuccessorLiability'), true);
+});
+
+test('Stage13B source inconsistency blocks 2C actions without blanket recon blocking', () => {
+  assert.equal(
+    reconHasSuccessorSourceInconsistency([
+      { code: 'SUCCESSOR_BRANCH_DETECTED' },
+    ]),
+    true,
+  );
+  assert.equal(
+    reconHasSuccessorSourceInconsistency([
+      { code: 'SUCCESSOR_CYCLE_DETECTED' },
+    ]),
+    true,
+  );
+  assert.equal(
+    reconHasSuccessorSourceInconsistency([
+      { code: 'STAGE9_RETURN_MONEY_PENDING' },
+    ]),
+    false,
+  );
+  assert.equal(read(PAGE).includes('hasReconciliationIssue'), false);
+  assert.equal(read(PAGE).includes('reconHasSuccessorSourceInconsistency'), true);
+});
+
+test('2C financial firewall remains read-only for coverage EFO settlement Stage9 Stage14A', () => {
+  const files = [read(API), read(PAGE), read(DET_PANEL)];
+  for (const src of files) {
+    assert.equal(src.includes('Import Coverage'), false);
+    assert.equal(src.includes('Edit Coverage'), false);
+    assert.equal(src.includes('Trim Coverage'), false);
+    assert.equal(src.includes('Create EFO'), false);
+    assert.equal(src.includes('Write off'), false);
+    assert.equal(src.includes('cash-receipts'), false);
+    assert.equal(src.includes('/acknowledge'), false);
+    assert.equal(src.includes('ensureSeededPolicy'), false);
+    assert.equal(src.includes('Open Liability Claim'), false);
+    assert.equal(src.includes('auto-close'), false);
+    assert.equal(src.includes('auto-resolve'), false);
+  }
+  assert.equal(read(PAGE).includes('exception-financial-obligations'), true);
+  for (const code of [
+    'STAGE9_DETERMINATION_IN_PROGRESS',
+    'STAGE9_RETURN_MONEY_PENDING',
+    'EXCEPTION_NOTHING_REMAINING_TO_RECOVER',
+    'EXCEPTION_REMAINING_COMPENSABLE_EXCEEDED',
+    'INVALID_LIABILITY_DETERMINATION_STATE',
+    'LIABILITY_DETERMINATION_ALREADY_ACTIVE',
+    'LIABILITY_ADJUSTMENT_SOURCE_INVALID',
+    'IDEMPOTENCY_CROSS_ORDER_CONFLICT',
+    'IDEMPOTENCY_PAYLOAD_CONFLICT',
+    'LIABILITY_ALLOCATION_PARTY_INVALID',
+    'EXCEPTION_CLAIM_TERMINAL',
+    'VERIFIED_FACT_REQUIRED',
+  ]) {
+    assert.equal(
+      mapLiabilityAdminError(409, { code, message: 'x' }).includes(code),
+      true,
+      code,
+    );
+    assert.equal(
+      mapLiabilityAdminError(409, { code, message: 'x' }).includes('at Exception'),
+      false,
+    );
+  }
+});
+
+test('generic ORDER_TERMS_SNAPSHOT metadata is not 2C merchant authority', () => {
+  const attack = {
+    evidence: [
+      {
+        evidenceKind: 'ORDER_TERMS_SNAPSHOT',
+        metadata: { merchantId: 777 },
+        visibility: 'ADMIN_ONLY',
+        notes: 'Authoritative WkOrder / OrderItem terms snapshot',
+      },
+    ],
+    obligations: [],
+  };
+  const twoC = collectFinalizationDebtorOptions(attack);
+  assert.equal(
+    twoC.some((row) => row.partyType === 'MERCHANT'),
+    false,
+  );
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'MERCHANT', partyMerchantId: 777, amount: '10.00' }],
+      twoC,
+    ),
+    false,
+  );
+  assert.equal(
+    canRecordOriginalLiability({
+      claimId: 'claim-a',
+      determination: {
+        id: 'd1',
+        exceptionClaimId: 'claim-a',
+        status: 'PROPOSED',
+        allocations: [
+          { partyType: 'MERCHANT', partyMerchantId: 777, amount: '10.00' },
+        ],
+      },
+      debtorOptions: twoC,
+    }),
+    false,
+  );
+  const twoB = collectAuthoritativeDebtorOptions(attack);
+  assert.equal(
+    twoB.some((row) => row.optionKey === 'MERCHANT:777'),
+    true,
+  );
+});
+
+test('specialized-shaped snapshot alone cannot establish 2C merchant identity', () => {
+  const twoC = collectFinalizationDebtorOptions({
+    evidence: [
+      {
+        evidenceKind: 'ORDER_TERMS_SNAPSHOT',
+        metadata: { merchantId: 44, wkOrderId: 9, lines: [] },
+      },
+    ],
+    obligations: [],
+  });
+  assert.equal(
+    twoC.some((row) => row.partyType === 'MERCHANT'),
+    false,
+  );
+});
+
+test('2C merchant authority is unique same-claim MERCHANT creditor only', () => {
+  const one = collectFinalizationDebtorOptions({
+    evidence: [
+      { evidenceKind: 'ORDER_TERMS_SNAPSHOT', metadata: { merchantId: 99 } },
+    ],
+    obligations: [{ creditorType: 'MERCHANT', creditorMerchantId: 44 }],
+  });
+  assert.equal(one.some((row) => row.optionKey === 'MERCHANT:44'), true);
+  assert.equal(one.some((row) => row.optionKey === 'MERCHANT:99'), false);
+  const many = collectFinalizationDebtorOptions({
+    evidence: [],
+    obligations: [
+      { creditorType: 'MERCHANT', creditorMerchantId: 44 },
+      { creditorType: 'MERCHANT', creditorMerchantId: 12 },
+    ],
+  });
+  assert.equal(
+    many.some((row) => row.partyType === 'MERCHANT'),
+    false,
+  );
+});
+
+test('generic snapshot cannot poison 2C merchant uniqueness', () => {
+  const mixed = collectFinalizationDebtorOptions({
+    evidence: [
+      { evidenceKind: 'ORDER_TERMS_SNAPSHOT', metadata: { merchantId: 99 } },
+    ],
+    obligations: [{ creditorType: 'MERCHANT', creditorMerchantId: 44 }],
+  });
+  assert.equal(mixed.map((row) => row.optionKey).join(','), 'MERCHANT:44');
+  assert.equal(
+    storedAllocationsAreBounded(
+      [{ partyType: 'MERCHANT', partyMerchantId: 99, amount: '1.00' }],
+      mixed,
+    ),
+    false,
+  );
+});
+
+test('original finalize does not POST after A/X→A/Y during recon preflight', async () => {
+  let owner = { claimId: 'A', expectedWkOrderId: 'X' };
+  let posted = 0;
+  let release: () => void = () => undefined;
+  const pending = new Promise<string | null>((resolve) => {
+    release = () => resolve(null);
+  });
+  const run = mutateAfterOwnedPreflight({
+    ownerIsCurrent: () =>
+      owner.claimId === 'A' && owner.expectedWkOrderId === 'X',
+    runPreflight: () => pending,
+    mutate: async () => {
+      posted += 1;
+    },
+  });
+  owner = { claimId: 'A', expectedWkOrderId: 'Y' };
+  release();
+  const result = await run;
+  assert.equal(result.status, 'discarded');
+  assert.equal(posted, 0);
+});
+
+test('adjustment create does not POST after A/X→A/Y during recon preflight', async () => {
+  let owner = { claimId: 'A', expectedWkOrderId: 'X' };
+  let posted = 0;
+  let release: () => void = () => undefined;
+  const pending = new Promise<string | null>((resolve) => {
+    release = () => resolve(null);
+  });
+  const run = mutateAfterOwnedPreflight({
+    ownerIsCurrent: () =>
+      owner.claimId === 'A' && owner.expectedWkOrderId === 'X',
+    runPreflight: () => pending,
+    mutate: async () => {
+      posted += 1;
+    },
+  });
+  owner = { claimId: 'A', expectedWkOrderId: 'Y' };
+  release();
+  assert.equal((await run).status, 'discarded');
+  assert.equal(posted, 0);
+});
+
+test('successor finalize does not POST after A/X→A/Y during recon preflight', async () => {
+  let owner = { claimId: 'A', expectedWkOrderId: 'X' };
+  let posted = 0;
+  let release: () => void = () => undefined;
+  const pending = new Promise<string | null>((resolve) => {
+    release = () => resolve(null);
+  });
+  const run = mutateAfterOwnedPreflight({
+    ownerIsCurrent: () =>
+      owner.claimId === 'A' && owner.expectedWkOrderId === 'X',
+    runPreflight: () => pending,
+    mutate: async () => {
+      posted += 1;
+    },
+  });
+  owner = { claimId: 'A', expectedWkOrderId: 'Y' };
+  release();
+  assert.equal((await run).status, 'discarded');
+  assert.equal(posted, 0);
+});
+
+test('owned preflight does not POST A after navigate A→B', async () => {
+  let owner = 'A';
+  let posted = 0;
+  let release: () => void = () => undefined;
+  const pending = new Promise<string | null>((resolve) => {
+    release = () => resolve(null);
+  });
+  const run = mutateAfterOwnedPreflight({
+    ownerIsCurrent: () => owner === 'A',
+    runPreflight: () => pending,
+    mutate: async () => {
+      posted += 1;
+    },
+  });
+  owner = 'B';
+  release();
+  const result = await run;
+  assert.equal(result.status, 'discarded');
+  assert.equal(posted, 0);
+  const page = read(PAGE);
+  assert.equal(page.includes('mutateAfterOwnedPreflight'), true);
+  assert.equal(page.includes('onRecordOriginalLiability'), true);
+  assert.equal(page.includes('onCreateAdjustment'), true);
+  assert.equal(page.includes('onRecordSuccessorLiability'), true);
+  assert.equal(page.includes("gated.status === 'discarded'"), true);
+});
+
+test('ambiguous adjustment retry keeps frozen payload and K1', () => {
+  const first = {
+    parentDeterminationId: 'orig',
+    allocations: [
+      {
+        partyType: 'MERCHANT',
+        partyMerchantId: 44,
+        amount: '100.00',
+        verifiedFactId: null,
+        basis: null,
+      },
+    ],
+    reason: 'R1',
+  };
+  const edited = {
+    parentDeterminationId: 'orig',
+    allocations: [
+      {
+        partyType: 'MERCHANT',
+        partyMerchantId: 44,
+        amount: '200.00',
+        verifiedFactId: null,
+        basis: null,
+      },
+    ],
+    reason: 'R2',
+  };
+  const gesture = markGestureAmbiguous(submitGesture(null, 'adjust:orig').active);
+  assert.equal(adjustmentGestureLocksPayload(gesture), true);
+  const retry = resolveAdjustmentMutationPayload({
+    frozen: first,
+    live: edited,
+  });
+  assert.equal(retry.allocations[0]?.amount, '100.00');
+  assert.equal(retry.reason, 'R1');
+  const sameKey = submitGesture(gesture, 'adjust:orig');
+  assert.equal(sameKey.active.key, gesture?.key);
+  const panel = read(DET_PANEL);
+  assert.equal(panel.includes('disabled={adjustmentLocked}'), true);
+  assert.equal(panel.includes('Retry same request'), true);
+  assert.equal(panel.includes('resolveAdjustmentMutationPayload'), true);
+});
+
+test('finalize POST omits reason so retained key cannot hash a later reason', () => {
+  const page = read(PAGE);
+  const original = page.slice(
+    page.indexOf('onRecordOriginalLiability'),
+    page.indexOf('onCreateAdjustment'),
+  );
+  const successor = page.slice(page.indexOf('onRecordSuccessorLiability'));
+  assert.equal(original.includes('recordLiabilityDetermination'), true);
+  assert.equal(original.includes('reason:'), false);
+  assert.equal(successor.includes('recordLiabilityDetermination'), true);
+  assert.equal(
+    successor.includes('idempotencyKey: input.idempotencyKey'),
+    true,
+  );
+  const api = read(API);
+  const recordFn = api.slice(
+    api.indexOf('export async function recordLiabilityDetermination'),
+    api.indexOf('export async function createAdjustment'),
+  );
+  assert.equal(recordFn.includes('reason: input.reason'), true);
 });

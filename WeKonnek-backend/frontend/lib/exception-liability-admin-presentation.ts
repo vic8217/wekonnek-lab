@@ -90,6 +90,32 @@ export const DETERMINATION_PROPOSE_CONFIRM_COPY =
 export const DETERMINATION_SELF_LIABILITY_COPY =
   'At finalization, the server determines the creditor and whether an allocation produces a payable obligation.';
 
+export const DETERMINATION_CREDITOR_COPY =
+  'The server determines the creditor from the loss and order context. This workspace does not select a creditor.';
+
+export const DETERMINATION_SELF_LIABILITY_OBSERVATION_COPY =
+  'A debtor that is also the server-resolved creditor may cover part of the loss without creating a payable obligation for that allocation.';
+
+export const DETERMINATION_UNPROVABLE_ALLOCATION_COPY =
+  'The stored allocation cannot be verified against the current authoritative party information. Finalization is unavailable.';
+
+export const DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY =
+  'Finalizing makes this liability determination authoritative. The server may record coverage for the loss, create payable financial obligations for non-self allocations, resolve the creditor from the order/loss context, and mark the determination and claim finalized. The original determination cannot be edited afterward. Not every allocation creates an obligation.';
+
+export const DETERMINATION_ADJUSTMENT_SEMANTICS_COPY =
+  'An adjustment is additional recovery against remaining uncovered loss. It does not replace the prior finalized determination, reduce prior principal, reverse prior obligations, void prior coverage, or net prior settlement.';
+
+export const DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY =
+  'The adjustment becomes an immutable Draft. It cannot be edited, cancelled, deleted or replaced in the current workflow. Do not create it unless the allocations are correct. Finalizing is not a way to clear a mistaken draft.';
+
+export const DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY =
+  'This finalizes an additional recovery determination against remaining uncovered loss. The server may create additional coverage and financial obligations. It does not replace or reduce earlier finalized obligations.';
+
+export const SUCCESSOR_SOURCE_INCONSISTENCY_CODES = [
+  'SUCCESSOR_BRANCH_DETECTED',
+  'SUCCESSOR_CYCLE_DETECTED',
+] as const;
+
 export const LIABILITY_DETERMINATION_ACTIVE_STATUSES = [
   'DRAFT',
   'PROPOSED',
@@ -327,10 +353,397 @@ export function collectAuthoritativeDebtorOptions(
   }));
 }
 
+/**
+ * Stage14B-2C financial identity. Merchant authority is only the unique
+ * same-claim MERCHANT obligation creditorMerchantId. ORDER_TERMS_SNAPSHOT
+ * metadata is evidence, not a debtor identity source: generic
+ * POST /evidence can reproduce evidenceKind + metadata.merchantId.
+ */
+export function collectFinalizationDebtorOptions(
+  claim: Record<string, unknown>,
+): FactAttributionOption[] {
+  const parties = collectObligationPartyIds(claim);
+  const options: FactAttributionOption[] = [];
+  const customers = uniqueStrings(parties.customerIds);
+  if (customers.length === 1) {
+    const id = customers[0];
+    options.push({
+      partyType: 'CUSTOMER',
+      partyUserId: id,
+      partyMerchantId: null,
+      label: 'Customer',
+      source: 'obligations[].creditorUserId where creditorType=CUSTOMER',
+      optionKey: `CUSTOMER:${id}`,
+    });
+  }
+  const merchants = uniqueNumbers(parties.creditorMerchantIds);
+  if (merchants.length === 1) {
+    const id = merchants[0];
+    options.push({
+      partyType: 'MERCHANT',
+      partyUserId: null,
+      partyMerchantId: id,
+      label: `Merchant (${id})`,
+      source: 'obligations[].creditorMerchantId where creditorType=MERCHANT',
+      optionKey: `MERCHANT:${id}`,
+    });
+  }
+  const riders = uniqueStrings(parties.riderIds);
+  if (riders.length === 1) {
+    const id = riders[0];
+    options.push({
+      partyType: 'RIDER',
+      partyUserId: id,
+      partyMerchantId: null,
+      label: 'Rider',
+      source: 'obligations[].creditorUserId where creditorType=RIDER',
+      optionKey: `RIDER:${id}`,
+    });
+  }
+  return options;
+}
+
+export type FrozenAdjustmentMutation = {
+  parentDeterminationId: string;
+  allocations: Array<{
+    partyType: string;
+    partyUserId?: string | null;
+    partyMerchantId?: number | null;
+    amount: string;
+    verifiedFactId?: string | null;
+    basis?: string | null;
+  }>;
+  reason: string;
+};
+
+export function adjustmentGestureLocksPayload(
+  gesture: ActiveGesture | null,
+): boolean {
+  return (
+    gesture != null &&
+    (gesture.status === 'in_flight' || gesture.status === 'ambiguous')
+  );
+}
+
+export function resolveAdjustmentMutationPayload(input: {
+  frozen: FrozenAdjustmentMutation | null;
+  live: FrozenAdjustmentMutation;
+}): FrozenAdjustmentMutation {
+  return input.frozen ?? input.live;
+}
+
+/**
+ * After the last awaited preflight (including live reconciliation),
+ * re-check route ownership and only then POST. Discarded stale owners
+ * must not mutate and must not paint success/error onto the new route.
+ */
+export async function mutateAfterOwnedPreflight<T>(input: {
+  ownerIsCurrent: () => boolean;
+  runPreflight: () => Promise<string | null>;
+  mutate: () => Promise<T>;
+}): Promise<
+  | { status: 'discarded' }
+  | { status: 'blocked'; message: string }
+  | { status: 'posted'; value: T }
+> {
+  const blocked = await input.runPreflight();
+  if (!input.ownerIsCurrent()) return { status: 'discarded' };
+  if (blocked) return { status: 'blocked', message: blocked };
+  const value = await input.mutate();
+  return { status: 'posted', value };
+}
+
 export function isPositiveMoneyString(raw: string): boolean {
   const trimmed = raw.trim();
   if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/.test(trimmed)) return false;
   if (/^0(?:\.0{1,2})?$/.test(trimmed)) return false;
+  return true;
+}
+
+export function serverSnapshotShowsRemaining(value: unknown): boolean {
+  return typeof value === 'string' && isPositiveMoneyString(value);
+}
+
+export function storedAllocationsAreBounded(
+  allocations: Array<Record<string, unknown>>,
+  debtorOptions: FactAttributionOption[],
+): boolean {
+  if (allocations.length === 0) return false;
+  return allocations.every((row) => {
+    const partyType = stringField(row, 'partyType');
+    if (
+      partyType !== 'CUSTOMER' &&
+      partyType !== 'MERCHANT' &&
+      partyType !== 'RIDER'
+    ) {
+      return false;
+    }
+    if (partyType === 'MERCHANT') {
+      const merchantId = integerId(row.partyMerchantId);
+      if (merchantId == null) return false;
+      return debtorOptions.some(
+        (option) =>
+          option.partyType === 'MERCHANT' &&
+          option.partyMerchantId === merchantId,
+      );
+    }
+    const userId = stringField(row, 'partyUserId');
+    if (!userId) return false;
+    return debtorOptions.some(
+      (option) => option.partyType === partyType && option.partyUserId === userId,
+    );
+  });
+}
+
+export type SuccessorTopologyReason =
+  | 'ok'
+  | 'empty'
+  | 'cycle'
+  | 'branch'
+  | 'missing_parent'
+  | 'disconnected'
+  | 'multiple_tips'
+  | 'no_tip';
+
+export type SuccessorTopology = {
+  safe: boolean;
+  reason: SuccessorTopologyReason;
+  tipId: string | null;
+};
+
+export function analyzeSuccessorTopology(
+  determinations: Array<Record<string, unknown>>,
+): SuccessorTopology {
+  const rows = determinations.filter((row) => stringField(row, 'id') != null);
+  if (rows.length === 0) {
+    return { safe: false, reason: 'empty', tipId: null };
+  }
+  const byId = new Map(
+    rows.map((row) => [stringField(row, 'id') as string, row]),
+  );
+  const children = new Map<string, string[]>();
+  const roots: string[] = [];
+
+  for (const row of rows) {
+    const id = stringField(row, 'id') as string;
+    const parentId = stringField(row, 'adjustmentOfDeterminationId');
+    if (!parentId) {
+      roots.push(id);
+      continue;
+    }
+    if (!byId.has(parentId)) {
+      return { safe: false, reason: 'missing_parent', tipId: null };
+    }
+    const list = children.get(parentId) ?? [];
+    list.push(id);
+    children.set(parentId, list);
+  }
+
+  for (const start of rows) {
+    const seen = new Set<string>();
+    let current = stringField(start, 'id');
+    while (current) {
+      if (seen.has(current)) {
+        return { safe: false, reason: 'cycle', tipId: null };
+      }
+      seen.add(current);
+      const node = byId.get(current);
+      current = node ? stringField(node, 'adjustmentOfDeterminationId') : null;
+    }
+  }
+
+  for (const kids of children.values()) {
+    if (kids.length > 1) {
+      return { safe: false, reason: 'branch', tipId: null };
+    }
+  }
+
+  if (roots.length > 1) {
+    return { safe: false, reason: 'disconnected', tipId: null };
+  }
+  if (roots.length === 0) {
+    return { safe: false, reason: 'cycle', tipId: null };
+  }
+
+  const finalizedTips = rows.filter((row) => {
+    const id = stringField(row, 'id') as string;
+    return (
+      stringField(row, 'status') === 'FINALIZED' &&
+      (children.get(id) ?? []).length === 0
+    );
+  });
+  if (finalizedTips.length === 0) {
+    return { safe: false, reason: 'no_tip', tipId: null };
+  }
+  if (finalizedTips.length > 1) {
+    return { safe: false, reason: 'multiple_tips', tipId: null };
+  }
+  return {
+    safe: true,
+    reason: 'ok',
+    tipId: stringField(finalizedTips[0], 'id'),
+  };
+}
+
+export function reconHasSuccessorSourceInconsistency(
+  findings: unknown,
+): boolean {
+  if (!Array.isArray(findings)) return false;
+  return findings.some((row) => {
+    if (!row || typeof row !== 'object') return false;
+    const code = stringField(row as Record<string, unknown>, 'code');
+    return (
+      code != null &&
+      (SUCCESSOR_SOURCE_INCONSISTENCY_CODES as readonly string[]).includes(code)
+    );
+  });
+}
+
+export function canRecordOriginalLiability(input: {
+  claimId: string;
+  determination: Record<string, unknown> | null;
+  debtorOptions: FactAttributionOption[];
+}): boolean {
+  const row = input.determination;
+  if (!row) return false;
+  if (isSuccessorDetermination(row)) return false;
+  if (stringField(row, 'status') !== 'PROPOSED') return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  return storedAllocationsAreBounded(
+    asRecordList(row.allocations),
+    input.debtorOptions,
+  );
+}
+
+export function canCreateSuccessorAdjustment(input: {
+  facts: Array<Record<string, unknown>>;
+  determinations: Array<Record<string, unknown>>;
+  debtorOptions: FactAttributionOption[];
+}): boolean {
+  if (input.facts.length === 0) return false;
+  if (input.debtorOptions.length === 0) return false;
+  if (activeLiabilityDeterminations(input.determinations).length > 0) {
+    return false;
+  }
+  const topology = analyzeSuccessorTopology(input.determinations);
+  if (!topology.safe || !topology.tipId) return false;
+  const tip =
+    input.determinations.find(
+      (row) => stringField(row, 'id') === topology.tipId,
+    ) ?? null;
+  if (!tip || stringField(tip, 'status') !== 'FINALIZED') return false;
+  return serverSnapshotShowsRemaining(tip.remainingAmountSnapshot);
+}
+
+export function canRecordSuccessorLiability(input: {
+  claimId: string;
+  determination: Record<string, unknown> | null;
+  determinations: Array<Record<string, unknown>>;
+  debtorOptions: FactAttributionOption[];
+}): boolean {
+  const row = input.determination;
+  if (!row) return false;
+  const detId = stringField(row, 'id');
+  if (!detId) return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  if (stringField(row, 'status') !== 'DRAFT') return false;
+  const parentId = stringField(row, 'adjustmentOfDeterminationId');
+  if (!parentId) return false;
+  const topology = analyzeSuccessorTopology(input.determinations);
+  if (
+    topology.reason === 'cycle' ||
+    topology.reason === 'branch' ||
+    topology.reason === 'missing_parent' ||
+    topology.reason === 'disconnected' ||
+    topology.reason === 'multiple_tips'
+  ) {
+    return false;
+  }
+  const parent =
+    input.determinations.find((item) => stringField(item, 'id') === parentId) ??
+    null;
+  if (!parent || stringField(parent, 'status') !== 'FINALIZED') return false;
+  const hasChild = input.determinations.some(
+    (item) => stringField(item, 'adjustmentOfDeterminationId') === detId,
+  );
+  if (hasChild) return false;
+  return storedAllocationsAreBounded(
+    asRecordList(row.allocations),
+    input.debtorOptions,
+  );
+}
+
+export function isOriginalLiabilityRecordingProven(input: {
+  claimId: string;
+  determinationId: string;
+  determinations: Array<Record<string, unknown>>;
+  finalizeIdempotencyKey?: string;
+}): boolean {
+  const row =
+    input.determinations.find(
+      (item) => stringField(item, 'id') === input.determinationId,
+    ) ?? null;
+  if (!row) return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  if (stringField(row, 'status') !== 'FINALIZED') return false;
+  if (isSuccessorDetermination(row)) return false;
+  const storedKey = stringField(row, 'finalizeIdempotencyKey');
+  if (
+    storedKey &&
+    input.finalizeIdempotencyKey &&
+    storedKey !== input.finalizeIdempotencyKey
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isSuccessorAdjustmentProven(input: {
+  claimId: string;
+  parentDeterminationId: string;
+  determinations: Array<Record<string, unknown>>;
+  createIdempotencyKey: string;
+}): boolean {
+  const row = findDeterminationByCreateKey(
+    input.determinations,
+    input.createIdempotencyKey,
+  );
+  if (!row) return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  return (
+    stringField(row, 'adjustmentOfDeterminationId') ===
+    input.parentDeterminationId
+  );
+}
+
+export function isSuccessorLiabilityRecordingProven(input: {
+  claimId: string;
+  successorId: string;
+  parentDeterminationId: string;
+  determinations: Array<Record<string, unknown>>;
+  finalizeIdempotencyKey?: string;
+}): boolean {
+  const row =
+    input.determinations.find(
+      (item) => stringField(item, 'id') === input.successorId,
+    ) ?? null;
+  if (!row) return false;
+  if (stringField(row, 'exceptionClaimId') !== input.claimId) return false;
+  if (stringField(row, 'status') !== 'FINALIZED') return false;
+  if (
+    stringField(row, 'adjustmentOfDeterminationId') !==
+    input.parentDeterminationId
+  ) {
+    return false;
+  }
+  const storedKey = stringField(row, 'finalizeIdempotencyKey');
+  if (
+    storedKey &&
+    input.finalizeIdempotencyKey &&
+    storedKey !== input.finalizeIdempotencyKey
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -536,28 +949,11 @@ function uniqueNumbers(values: number[]): number[] {
   return [...new Set(values)];
 }
 
-/**
- * Attribution options from frozen claim GET only.
- * Merchant: ORDER_TERMS_SNAPSHOT.metadata.merchantId and/or obligation
- * creditorMerchantId where creditorType=MERCHANT (server resolveCreditor).
- * Customer/Rider: obligation creditorUserId where creditorType matches
- * (server resolveCreditor). Debtor/allocation/fact IDs are not used.
- * More than one distinct id for a type → omit that type.
- */
-export function collectAuthoritativeFactAttributionOptions(
-  claim: Record<string, unknown>,
-): FactAttributionOption[] {
-  const snapshotMerchantIds: number[] = [];
-  for (const row of asRecordList(claim.evidence)) {
-    if (stringField(row, 'evidenceKind') !== 'ORDER_TERMS_SNAPSHOT') continue;
-    const metadata =
-      row.metadata && typeof row.metadata === 'object'
-        ? (row.metadata as Record<string, unknown>)
-        : null;
-    const merchantId = integerId(metadata?.merchantId);
-    if (merchantId != null) snapshotMerchantIds.push(merchantId);
-  }
-
+function collectObligationPartyIds(claim: Record<string, unknown>): {
+  customerIds: string[];
+  riderIds: string[];
+  creditorMerchantIds: number[];
+} {
   const customerIds: string[] = [];
   const riderIds: string[] = [];
   const creditorMerchantIds: number[] = [];
@@ -576,9 +972,35 @@ export function collectAuthoritativeFactAttributionOptions(
       if (id != null) creditorMerchantIds.push(id);
     }
   }
+  return { customerIds, riderIds, creditorMerchantIds };
+}
+
+/**
+ * Attribution options from frozen claim GET only.
+ * Merchant (2B draft / fact attribution): ORDER_TERMS_SNAPSHOT.metadata.merchantId
+ * and/or obligation creditorMerchantId where creditorType=MERCHANT.
+ * Stage14B-2C finalization does not use this merchant union.
+ * Customer/Rider: obligation creditorUserId where creditorType matches.
+ * More than one distinct id for a type → omit that type.
+ */
+export function collectAuthoritativeFactAttributionOptions(
+  claim: Record<string, unknown>,
+): FactAttributionOption[] {
+  const snapshotMerchantIds: number[] = [];
+  for (const row of asRecordList(claim.evidence)) {
+    if (stringField(row, 'evidenceKind') !== 'ORDER_TERMS_SNAPSHOT') continue;
+    const metadata =
+      row.metadata && typeof row.metadata === 'object'
+        ? (row.metadata as Record<string, unknown>)
+        : null;
+    const merchantId = integerId(metadata?.merchantId);
+    if (merchantId != null) snapshotMerchantIds.push(merchantId);
+  }
+
+  const parties = collectObligationPartyIds(claim);
 
   const options: FactAttributionOption[] = [];
-  const customers = uniqueStrings(customerIds);
+  const customers = uniqueStrings(parties.customerIds);
   if (customers.length === 1) {
     const id = customers[0];
     options.push({
@@ -593,7 +1015,7 @@ export function collectAuthoritativeFactAttributionOptions(
 
   const merchants = uniqueNumbers([
     ...snapshotMerchantIds,
-    ...creditorMerchantIds,
+    ...parties.creditorMerchantIds,
   ]);
   if (merchants.length === 1) {
     const id = merchants[0];
@@ -610,7 +1032,7 @@ export function collectAuthoritativeFactAttributionOptions(
     });
   }
 
-  const riders = uniqueStrings(riderIds);
+  const riders = uniqueStrings(parties.riderIds);
   if (riders.length === 1) {
     const id = riders[0];
     options.push({

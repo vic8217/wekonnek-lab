@@ -7,23 +7,38 @@ import {
   partyRoleLabel,
 } from '@/lib/authoritative-domain-presentation';
 import {
+  DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY,
+  DETERMINATION_ADJUSTMENT_SEMANTICS_COPY,
+  DETERMINATION_CREDITOR_COPY,
   DETERMINATION_DRAFT_IMMUTABLE_COPY,
   DETERMINATION_PROPOSE_CONFIRM_COPY,
+  DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY,
+  DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY,
   DETERMINATION_REVIEW_COPY,
   DETERMINATION_SELF_LIABILITY_COPY,
+  DETERMINATION_SELF_LIABILITY_OBSERVATION_COPY,
+  DETERMINATION_UNPROVABLE_ALLOCATION_COPY,
   allocationGroundingFacts,
+  analyzeSuccessorTopology,
   asRecordList,
   attributionFromOptionKey,
+  adjustmentGestureLocksPayload,
   canCreateLiabilityDraft,
+  canCreateSuccessorAdjustment,
+  canRecordOriginalLiability,
+  canRecordSuccessorLiability,
   canSubmitEligibleLiabilityDraft,
   completeGesture,
   isPositiveMoneyString,
   isSuccessorDetermination,
   markGestureAmbiguous,
+  resolveAdjustmentMutationPayload,
+  storedAllocationsAreBounded,
   stringField,
   submitGesture,
   type ActiveGesture,
   type FactAttributionOption,
+  type FrozenAdjustmentMutation,
   type MutationPhase,
 } from '@/lib/exception-liability-admin-presentation';
 
@@ -45,10 +60,17 @@ type Props = {
   determinations: Array<Record<string, unknown>>;
   determinationRoleLabel: (determination: Record<string, unknown>) => string;
   debtorOptions: FactAttributionOption[];
+  finalizationDebtorOptions: FactAttributionOption[];
   createPhase: MutationPhase;
   proposePhase: MutationPhase;
+  originalRecordPhase: MutationPhase;
+  adjustmentPhase: MutationPhase;
+  successorRecordPhase: MutationPhase;
   createError: string | null;
   proposeError: string | null;
+  originalRecordError: string | null;
+  adjustmentError: string | null;
+  successorRecordError: string | null;
   onCreateDraft: (input: {
     allocations: Array<{
       partyType: string;
@@ -64,6 +86,28 @@ type Props = {
   onSubmitDraftForReview: (input: {
     determinationId: string;
     reason?: string;
+    idempotencyKey: string;
+  }) => Promise<'success' | 'unproven' | 'error' | 'discarded'>;
+  onRecordOriginalLiability: (input: {
+    determinationId: string;
+    idempotencyKey: string;
+  }) => Promise<'success' | 'unproven' | 'error' | 'discarded'>;
+  onCreateAdjustment: (input: {
+    parentDeterminationId: string;
+    allocations: Array<{
+      partyType: string;
+      partyUserId?: string | null;
+      partyMerchantId?: number | null;
+      amount: string;
+      verifiedFactId?: string | null;
+      basis?: string | null;
+    }>;
+    reason: string;
+    idempotencyKey: string;
+  }) => Promise<'success' | 'unproven' | 'error' | 'discarded'>;
+  onRecordSuccessorLiability: (input: {
+    determinationId: string;
+    parentDeterminationId: string;
     idempotencyKey: string;
   }) => Promise<'success' | 'unproven' | 'error' | 'discarded'>;
 };
@@ -101,26 +145,67 @@ export function LiabilityDeterminationPanel({
   determinations,
   determinationRoleLabel,
   debtorOptions,
+  finalizationDebtorOptions,
   createPhase,
   proposePhase,
+  originalRecordPhase,
+  adjustmentPhase,
+  successorRecordPhase,
   createError,
   proposeError,
+  originalRecordError,
+  adjustmentError,
+  successorRecordError,
   onCreateDraft,
   onSubmitDraftForReview,
+  onRecordOriginalLiability,
+  onCreateAdjustment,
+  onRecordSuccessorLiability,
 }: Props) {
   const createBusy =
     createPhase === 'submitting' || createPhase === 'reconciling';
   const proposeBusy =
     proposePhase === 'submitting' || proposePhase === 'reconciling';
+  const originalBusy =
+    originalRecordPhase === 'submitting' || originalRecordPhase === 'reconciling';
+  const adjustmentBusy =
+    adjustmentPhase === 'submitting' || adjustmentPhase === 'reconciling';
+  const successorBusy =
+    successorRecordPhase === 'submitting' ||
+    successorRecordPhase === 'reconciling';
+  const anyBusy =
+    createBusy || proposeBusy || originalBusy || adjustmentBusy || successorBusy;
   const [rows, setRows] = useState<AllocationDraftRow[]>([emptyRow()]);
   const [reason, setReason] = useState('');
+  const [adjustmentRows, setAdjustmentRows] = useState<AllocationDraftRow[]>([
+    emptyRow(),
+  ]);
+  const [adjustmentReason, setAdjustmentReason] = useState('');
   const [createGesture, setCreateGesture] = useState<ActiveGesture | null>(null);
   const [proposeGesture, setProposeGesture] = useState<ActiveGesture | null>(
+    null,
+  );
+  const [originalGesture, setOriginalGesture] = useState<ActiveGesture | null>(
+    null,
+  );
+  const [adjustmentGesture, setAdjustmentGesture] =
+    useState<ActiveGesture | null>(null);
+  const [successorGesture, setSuccessorGesture] = useState<ActiveGesture | null>(
     null,
   );
   const [confirmingProposeId, setConfirmingProposeId] = useState<string | null>(
     null,
   );
+  const [confirmingOriginalId, setConfirmingOriginalId] = useState<string | null>(
+    null,
+  );
+  const [confirmingSuccessorId, setConfirmingSuccessorId] = useState<
+    string | null
+  >(null);
+  const [confirmingAdjustment, setConfirmingAdjustment] = useState(false);
+  const [frozenAdjustment, setFrozenAdjustment] =
+    useState<FrozenAdjustmentMutation | null>(null);
+  const adjustmentLocked = adjustmentGestureLocksPayload(adjustmentGesture);
 
   const mayCreate = canCreateLiabilityDraft({
     claimStatus,
@@ -128,6 +213,16 @@ export function LiabilityDeterminationPanel({
     determinations,
     debtorOptions,
   });
+  const topology = analyzeSuccessorTopology(determinations);
+  const mayAdjust = canCreateSuccessorAdjustment({
+    facts,
+    determinations,
+    debtorOptions: finalizationDebtorOptions,
+  });
+  const usedAdjustmentKeys = useMemo(
+    () => new Set(adjustmentRows.map((row) => row.optionKey).filter(Boolean)),
+    [adjustmentRows],
+  );
 
   const usedOptionKeys = useMemo(
     () => new Set(rows.map((row) => row.optionKey).filter(Boolean)),
@@ -144,6 +239,16 @@ export function LiabilityDeterminationPanel({
       </h2>
       <p className="mt-1 text-sm text-gray-600">{DETERMINATION_REVIEW_COPY}</p>
       <p className="mt-2 text-sm text-gray-600">{DETERMINATION_SELF_LIABILITY_COPY}</p>
+      <p className="mt-2 text-sm text-gray-600">{DETERMINATION_CREDITOR_COPY}</p>
+      <p className="mt-2 text-sm text-gray-600">
+        {DETERMINATION_SELF_LIABILITY_OBSERVATION_COPY}
+      </p>
+      {(topology.reason === 'cycle' || topology.reason === 'branch') && (
+        <p role="alert" className="mt-2 text-sm text-amber-800">
+          Successor topology on this claim is inconsistent. Adjustment and successor
+          recording are unavailable.
+        </p>
+      )}
 
       <h3 className="mt-4 text-sm font-semibold text-gray-900">Economic loss</h3>
       {loss ? (
@@ -209,6 +314,31 @@ export function LiabilityDeterminationPanel({
               claimStatus,
               determination: det,
             });
+            const originalEligible = canRecordOriginalLiability({
+              claimId,
+              determination: det,
+              debtorOptions: finalizationDebtorOptions,
+            });
+            const successorEligible = canRecordSuccessorLiability({
+              claimId,
+              determination: det,
+              determinations,
+              debtorOptions: finalizationDebtorOptions,
+            });
+            const unprovableStored =
+              Boolean(detId) &&
+              ((stringField(det, 'status') === 'PROPOSED' &&
+                !successor &&
+                !storedAllocationsAreBounded(
+                  allocations,
+                  finalizationDebtorOptions,
+                )) ||
+                (stringField(det, 'status') === 'DRAFT' &&
+                  successor &&
+                  !storedAllocationsAreBounded(
+                    allocations,
+                    finalizationDebtorOptions,
+                  )));
             return (
               <li
                 key={detId ?? `det-${index}`}
@@ -248,10 +378,20 @@ export function LiabilityDeterminationPanel({
                     {DETERMINATION_DRAFT_IMMUTABLE_COPY}
                   </p>
                 )}
+                {stringField(det, 'status') === 'DRAFT' && successor && (
+                  <p className="mt-2 text-sm text-amber-800">
+                    {DETERMINATION_DRAFT_IMMUTABLE_COPY}
+                  </p>
+                )}
+                {unprovableStored && (
+                  <p className="mt-2 text-sm text-amber-800">
+                    {DETERMINATION_UNPROVABLE_ALLOCATION_COPY}
+                  </p>
+                )}
                 {proposeEligible && detId && confirmingProposeId !== detId && (
                   <button
                     type="button"
-                    disabled={proposeBusy || createBusy}
+                    disabled={anyBusy}
                     className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
                     onClick={() => setConfirmingProposeId(detId)}
                   >
@@ -279,10 +419,10 @@ export function LiabilityDeterminationPanel({
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        disabled={proposeBusy}
+                        disabled={anyBusy}
                         className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
                         onClick={() => {
-                          if (proposeBusy) return;
+                          if (anyBusy) return;
                           const next = submitGesture(proposeGesture, detId);
                           setProposeGesture(next.active);
                           void (async () => {
@@ -305,9 +445,161 @@ export function LiabilityDeterminationPanel({
                       </button>
                       <button
                         type="button"
-                        disabled={proposeBusy}
+                        disabled={anyBusy}
                         className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900"
                         onClick={() => setConfirmingProposeId(null)}
+                      >
+                        Back
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {originalEligible && detId && confirmingOriginalId !== detId && (
+                  <button
+                    type="button"
+                    disabled={anyBusy}
+                    className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    onClick={() => setConfirmingOriginalId(detId)}
+                  >
+                    Record original liability
+                  </button>
+                )}
+                {originalEligible && detId && confirmingOriginalId === detId && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-sm text-gray-700">
+                      {DETERMINATION_RECORD_ORIGINAL_CONFIRM_COPY}
+                    </p>
+                    {originalRecordError && (
+                      <p role="alert" className="text-sm text-red-700">
+                        {originalRecordError}
+                      </p>
+                    )}
+                    {originalRecordPhase === 'success' && (
+                      <p className="text-sm text-green-800">
+                        Liability recorded. Claim reloaded from the server. Return to
+                        the follow-up and refresh live reconciliation there.
+                      </p>
+                    )}
+                    {originalRecordPhase === 'reconciling' && (
+                      <p className="text-sm text-gray-700">
+                        Checking whether the server already recorded this action…
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={anyBusy}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                        onClick={() => {
+                          if (anyBusy) return;
+                          const next = submitGesture(
+                            originalGesture,
+                            `finalize:${detId}`,
+                          );
+                          setOriginalGesture(next.active);
+                          void (async () => {
+                            const outcome = await onRecordOriginalLiability({
+                              determinationId: detId,
+                              idempotencyKey: next.active.key,
+                            });
+                            if (outcome === 'success') {
+                              setOriginalGesture(completeGesture(next.active));
+                              setConfirmingOriginalId(null);
+                            } else if (outcome === 'discarded') {
+                              return;
+                            } else {
+                              setOriginalGesture(markGestureAmbiguous(next.active));
+                            }
+                          })();
+                        }}
+                      >
+                        {originalBusy ? 'Recording…' : 'Confirm original liability'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={anyBusy}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900"
+                        onClick={() => setConfirmingOriginalId(null)}
+                      >
+                        Back
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {successorEligible && detId && confirmingSuccessorId !== detId && (
+                  <button
+                    type="button"
+                    disabled={anyBusy}
+                    className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    onClick={() => setConfirmingSuccessorId(detId)}
+                  >
+                    Record successor liability
+                  </button>
+                )}
+                {successorEligible && detId && confirmingSuccessorId === detId && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-sm text-gray-700">
+                      {DETERMINATION_RECORD_SUCCESSOR_CONFIRM_COPY}
+                    </p>
+                    {successorRecordError && (
+                      <p role="alert" className="text-sm text-red-700">
+                        {successorRecordError}
+                      </p>
+                    )}
+                    {successorRecordPhase === 'success' && (
+                      <p className="text-sm text-green-800">
+                        Successor liability recorded. Claim reloaded from the server.
+                        Return to the follow-up and refresh live reconciliation there.
+                      </p>
+                    )}
+                    {successorRecordPhase === 'reconciling' && (
+                      <p className="text-sm text-gray-700">
+                        Checking whether the server already recorded this action…
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={anyBusy}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                        onClick={() => {
+                          if (anyBusy) return;
+                          const parentId = stringField(
+                            det,
+                            'adjustmentOfDeterminationId',
+                          );
+                          if (!parentId) return;
+                          const next = submitGesture(
+                            successorGesture,
+                            `finalize-successor:${detId}`,
+                          );
+                          setSuccessorGesture(next.active);
+                          void (async () => {
+                            const outcome = await onRecordSuccessorLiability({
+                              determinationId: detId,
+                              parentDeterminationId: parentId,
+                              idempotencyKey: next.active.key,
+                            });
+                            if (outcome === 'success') {
+                              setSuccessorGesture(completeGesture(next.active));
+                              setConfirmingSuccessorId(null);
+                            } else if (outcome === 'discarded') {
+                              return;
+                            } else {
+                              setSuccessorGesture(
+                                markGestureAmbiguous(next.active),
+                              );
+                            }
+                          })();
+                        }}
+                      >
+                        {successorBusy ? 'Recording…' : 'Confirm successor liability'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={anyBusy}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900"
+                        onClick={() => setConfirmingSuccessorId(null)}
                       >
                         Back
                       </button>
@@ -325,7 +617,7 @@ export function LiabilityDeterminationPanel({
           className="mt-5 space-y-3 border-t border-gray-100 pt-4"
           onSubmit={(event) => {
             event.preventDefault();
-            if (createBusy) return;
+            if (anyBusy) return;
             const built = rows.flatMap((row) => {
               const selected = attributionFromOptionKey(row.optionKey, debtorOptions);
               if (!selected || !isPositiveMoneyString(row.amount)) return [];
@@ -526,7 +818,7 @@ export function LiabilityDeterminationPanel({
           )}
           <button
             type="submit"
-            disabled={createBusy || proposeBusy}
+            disabled={anyBusy}
             className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
             {createBusy ? 'Recording…' : 'Create Draft'}
@@ -543,6 +835,286 @@ export function LiabilityDeterminationPanel({
             </p>
           )}
         </div>
+      )}
+
+      {mayAdjust && topology.tipId && (
+        <form
+          className="mt-5 space-y-3 border-t border-gray-100 pt-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (anyBusy || !confirmingAdjustment) return;
+            if (!topology.tipId) return;
+            const built = adjustmentRows.flatMap((row) => {
+              const selected = attributionFromOptionKey(
+                row.optionKey,
+                finalizationDebtorOptions,
+              );
+              if (!selected || !isPositiveMoneyString(row.amount)) return [];
+              return [
+                {
+                  partyType: selected.partyType,
+                  partyUserId: selected.partyUserId,
+                  partyMerchantId: selected.partyMerchantId,
+                  amount: row.amount.trim(),
+                  verifiedFactId: row.verifiedFactId || null,
+                  basis: row.basis.trim() || null,
+                },
+              ];
+            });
+            const live: FrozenAdjustmentMutation | null =
+              built.length > 0 &&
+              built.length === adjustmentRows.length &&
+              adjustmentReason.trim()
+                ? {
+                    parentDeterminationId: topology.tipId,
+                    allocations: built,
+                    reason: adjustmentReason.trim(),
+                  }
+                : null;
+            if (!frozenAdjustment && !live) return;
+            const payload = resolveAdjustmentMutationPayload({
+              frozen: frozenAdjustment,
+              live: live ?? (frozenAdjustment as FrozenAdjustmentMutation),
+            });
+            if (!frozenAdjustment) setFrozenAdjustment(payload);
+            const next = submitGesture(
+              adjustmentGesture,
+              `adjust:${payload.parentDeterminationId}`,
+            );
+            setAdjustmentGesture(next.active);
+            void (async () => {
+              const outcome = await onCreateAdjustment({
+                parentDeterminationId: payload.parentDeterminationId,
+                allocations: payload.allocations,
+                reason: payload.reason,
+                idempotencyKey: next.active.key,
+              });
+              if (outcome === 'success') {
+                setAdjustmentGesture(completeGesture(next.active));
+                setFrozenAdjustment(null);
+                setAdjustmentRows([emptyRow()]);
+                setAdjustmentReason('');
+                setConfirmingAdjustment(false);
+              } else if (outcome === 'discarded') {
+                return;
+              } else {
+                setAdjustmentGesture(markGestureAmbiguous(next.active));
+              }
+            })();
+          }}
+        >
+          <h3 className="text-sm font-semibold text-gray-900">Create Adjustment</h3>
+          <p className="text-sm text-gray-600">{DETERMINATION_ADJUSTMENT_SEMANTICS_COPY}</p>
+          <p className="text-sm text-amber-800">{DETERMINATION_ADJUSTMENT_IMMUTABLE_COPY}</p>
+          {adjustmentLocked && (
+            <p className="text-sm text-gray-700">
+              This request is unresolved. Retry sends the same adjustment. Fields
+              cannot change until it is proven.
+            </p>
+          )}
+          {adjustmentRows.map((row) => {
+            const selected = attributionFromOptionKey(
+              row.optionKey,
+              finalizationDebtorOptions,
+            );
+            const grounding = allocationGroundingFacts({
+              claimType,
+              partyType: selected?.partyType ?? '',
+              facts,
+            });
+            return (
+              <div
+                key={row.rowId}
+                className="space-y-2 rounded-lg border border-gray-100 p-3"
+              >
+                <label className="block text-sm text-gray-700">
+                  Debtor
+                  <select
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    value={row.optionKey}
+                    onChange={(event) =>
+                      setAdjustmentRows((current) =>
+                        current.map((item) =>
+                          item.rowId === row.rowId
+                            ? {
+                                ...item,
+                                optionKey: event.target.value,
+                                verifiedFactId: '',
+                              }
+                            : item,
+                        ),
+                      )
+                    }
+                    required
+                    disabled={adjustmentLocked}
+                  >
+                    <option value="">Select debtor</option>
+                    {finalizationDebtorOptions.map((option) => (
+                      <option
+                        key={option.optionKey}
+                        value={option.optionKey}
+                        disabled={
+                          usedAdjustmentKeys.has(option.optionKey) &&
+                          option.optionKey !== row.optionKey
+                        }
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm text-gray-700">
+                  Amount
+                  <input
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    value={row.amount}
+                    onChange={(event) =>
+                      setAdjustmentRows((current) =>
+                        current.map((item) =>
+                          item.rowId === row.rowId
+                            ? { ...item, amount: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    inputMode="decimal"
+                    required
+                    disabled={adjustmentLocked}
+                  />
+                </label>
+                <label className="block text-sm text-gray-700">
+                  Optional verified fact
+                  <select
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    value={row.verifiedFactId}
+                    onChange={(event) =>
+                      setAdjustmentRows((current) =>
+                        current.map((item) =>
+                          item.rowId === row.rowId
+                            ? { ...item, verifiedFactId: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    disabled={adjustmentLocked}
+                  >
+                    <option value="">None</option>
+                    {grounding.map((fact) => {
+                      const id = stringField(fact, 'id');
+                      if (!id) return null;
+                      return (
+                        <option key={id} value={id}>
+                          {displayServerField(fact.factType)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+                <label className="block text-sm text-gray-700">
+                  Basis
+                  <textarea
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    rows={2}
+                    maxLength={2000}
+                    value={row.basis}
+                    onChange={(event) =>
+                      setAdjustmentRows((current) =>
+                        current.map((item) =>
+                          item.rowId === row.rowId
+                            ? { ...item, basis: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    disabled={adjustmentLocked}
+                  />
+                </label>
+                {adjustmentRows.length > 1 && !adjustmentLocked && (
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-gray-700"
+                    onClick={() =>
+                      setAdjustmentRows((current) =>
+                        current.filter((item) => item.rowId !== row.rowId),
+                      )
+                    }
+                  >
+                    Remove row
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {finalizationDebtorOptions.length > adjustmentRows.length &&
+            !adjustmentLocked && (
+            <button
+              type="button"
+              className="text-sm font-medium text-gray-900"
+              onClick={() =>
+                setAdjustmentRows((current) => [...current, emptyRow()])
+              }
+            >
+              Add allocation row
+            </button>
+          )}
+          <label className="block text-sm text-gray-700">
+            Reason
+            <textarea
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              rows={3}
+              maxLength={2000}
+              value={adjustmentReason}
+              onChange={(event) => setAdjustmentReason(event.target.value)}
+              required
+              disabled={adjustmentLocked}
+            />
+          </label>
+          {adjustmentError && (
+            <p role="alert" className="text-sm text-red-700">{adjustmentError}</p>
+          )}
+          {adjustmentPhase === 'success' && (
+            <p className="text-sm text-green-800">
+              Adjustment draft recorded. Claim reloaded from the server.
+            </p>
+          )}
+          {adjustmentPhase === 'reconciling' && (
+            <p className="text-sm text-gray-700">
+              Checking whether the server already recorded this adjustment…
+            </p>
+          )}
+          {!confirmingAdjustment ? (
+            <button
+              type="button"
+              disabled={anyBusy}
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={() => setConfirmingAdjustment(true)}
+            >
+              Review adjustment
+            </button>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={anyBusy}
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {adjustmentBusy
+                  ? 'Recording…'
+                  : adjustmentLocked
+                    ? 'Retry same request'
+                    : 'Confirm Create Adjustment'}
+              </button>
+              <button
+                type="button"
+                disabled={anyBusy || adjustmentLocked}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900"
+                onClick={() => setConfirmingAdjustment(false)}
+              >
+                Back
+              </button>
+            </div>
+          )}
+        </form>
       )}
     </section>
   );
