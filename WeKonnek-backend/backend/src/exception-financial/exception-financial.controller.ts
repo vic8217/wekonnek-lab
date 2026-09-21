@@ -116,6 +116,8 @@ export class ExceptionFinancialController {
       metadata?: Record<string, unknown>;
     },
   ) {
+        // Extra JSON fields (provenance, source type, attested flags) are not
+        // in this DTO and are never forwarded. Callers cannot opt into trusted insert.
     return this.exceptions.addEvidence({
       claimId: id,
       actorUserId: req.user.id,

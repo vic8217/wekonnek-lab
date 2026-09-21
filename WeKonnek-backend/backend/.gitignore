@@ -51,4 +51,8 @@ node_modules
 .env.stage14a.regression.test
 !.env.stage14a.test.example
 !.env.stage14a.regression.test.example
+.env.stage15a.test
+.env.stage15a.regression.test
+!.env.stage15a.test.example
+!.env.stage15a.regression.test.example
 i18n/

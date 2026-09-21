@@ -4508,6 +4508,12 @@ enum ClaimEvidenceKind {
   OTHER
 }
 
+/// Stage15A: server-controlled evidence provenance. NULL on disk means
+/// historical/unverified. Never backfill existing rows as trusted.
+enum ClaimEvidenceProvenance {
+  SERVER_ATTESTED_ORDER_TERMS
+}
+
 enum ClaimVerificationStatus {
   PENDING
   VERIFIED
@@ -4759,6 +4765,8 @@ model ExceptionClaimEvidence {
   contentType          String?                 @map("content_type") @db.VarChar(120)
   notes                String?                 @db.VarChar(2000)
   metadata             Json?
+  /// Stage15A server-attested provenance. NULL = historical/unverified.
+  provenance           ClaimEvidenceProvenance?
   submittedByActorType OrderDomainActorType    @map("submitted_by_actor_type")
   submittedByActorId   String                  @map("submitted_by_actor_id") @db.Uuid
   idempotencyKey       String?                 @map("idempotency_key") @db.VarChar(64)

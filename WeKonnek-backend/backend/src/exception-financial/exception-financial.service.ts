@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   ClaimEvidenceKind,
+  ClaimEvidenceProvenance,
   ClaimEvidenceVisibility,
   ClaimVerificationStatus,
   CustodyEventType,
@@ -36,6 +37,9 @@ import {
   EXCEPTION_CLAIM_ACTIVE_STATUSES,
   EXCEPTION_FINANCIAL_CODES as CODES,
   EXCEPTION_LIABILITY_POLICY_V1,
+  isServerReservedEvidenceKind,
+  isTrustedOrderTermsSnapshot,
+  presentClaimEvidenceProvenance,
   evaluateNonConformanceFactAttribution,
   evaluateNonConformanceLiabilityBasis,
   evaluateNonConformanceReasonForOpen,
@@ -434,6 +438,8 @@ export class ExceptionFinancialService {
 
   /**
    * Attach an ORDER_TERMS_SNAPSHOT evidence row to a claim (admin-only).
+   * Trusted internal writer: sets SERVER_ATTESTED_ORDER_TERMS. No HTTP caller
+   * can opt into this provenance.
    */
   async attachOrderTermsEvidence(input: {
     claimId: string;
@@ -441,6 +447,7 @@ export class ExceptionFinancialService {
     correlationId: string;
     idempotencyKey?: string;
   }) {
+    const actor = await this.requireAdmin(input.actorUserId);
     const claim = await this.prisma.exceptionClaim.findUnique({
       where: { id: input.claimId },
     });
@@ -451,15 +458,24 @@ export class ExceptionFinancialService {
       });
     }
     const snapshot = await this.snapshotOrderTerms(claim.wkOrderId);
-    return this.addEvidence({
+    const payloadHash = this.stablePayloadHash({
+      action: 'attachOrderTermsEvidence',
       claimId: input.claimId,
-      actorUserId: input.actorUserId,
+      wkOrderId: snapshot.wkOrderId,
+      merchantId: snapshot.merchantId,
+      orderCode: snapshot.orderCode,
+    });
+    return this.persistClaimEvidence({
+      actor,
+      claimId: input.claimId,
       evidenceKind: ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
       visibility: ClaimEvidenceVisibility.ADMIN_ONLY,
       notes: 'Authoritative WkOrder / OrderItem terms snapshot',
       metadata: snapshot,
+      provenance: ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS,
       correlationId: input.correlationId,
       idempotencyKey: input.idempotencyKey,
+      payloadHash,
     });
   }
 
@@ -838,8 +854,14 @@ export class ExceptionFinancialService {
         message: 'Invalid evidence visibility',
       });
     }
+    if (isServerReservedEvidenceKind(kind)) {
+      throw new BadRequestException({
+        code: CODES.EVIDENCE_KIND_RESERVED,
+        message:
+          'Evidence kind is server-reserved and cannot be submitted through the generic evidence route',
+      });
+    }
 
-    const idemKey = this.truncKey(input.idempotencyKey);
     const payloadHash = this.stablePayloadHash({
       action: 'addEvidence',
       claimId: input.claimId,
@@ -848,10 +870,47 @@ export class ExceptionFinancialService {
       notes: input.notes ?? null,
       storageReference: input.storageReference ?? null,
     });
+    return this.persistClaimEvidence({
+      actor,
+      claimId: input.claimId,
+      evidenceKind: kind,
+      visibility,
+      notes: input.notes,
+      storageReference: input.storageReference,
+      contentHash: input.contentHash,
+      contentType: input.contentType,
+      metadata: input.metadata,
+      provenance: null,
+      correlationId: input.correlationId,
+      idempotencyKey: input.idempotencyKey,
+      payloadHash,
+    });
+  }
+
+  /**
+   * Shared evidence insert. Provenance is never taken from an HTTP DTO —
+   * only the specialized order-terms writer passes SERVER_ATTESTED_ORDER_TERMS.
+   */
+  private async persistClaimEvidence(input: {
+    actor: { type: 'SYSTEM_ADMIN'; id: string };
+    claimId: string;
+    evidenceKind: ClaimEvidenceKind;
+    visibility: ClaimEvidenceVisibility;
+    notes?: string;
+    storageReference?: string;
+    contentHash?: string;
+    contentType?: string;
+    metadata?: Prisma.InputJsonValue;
+    provenance: ClaimEvidenceProvenance | null;
+    correlationId?: string;
+    idempotencyKey?: string;
+    payloadHash: string;
+  }) {
+    const idemKey = this.truncKey(input.idempotencyKey);
 
     if (idemKey) {
       const prior = await this.prisma.exceptionClaimEvidence.findFirst({
-        where: { submittedByActorId: actor.id, idempotencyKey: idemKey },
+        where: { submittedByActorId: input.actor.id, idempotencyKey: idemKey },
       });
       if (prior) {
         if (prior.exceptionClaimId !== input.claimId) {
@@ -860,7 +919,7 @@ export class ExceptionFinancialService {
             message: 'Evidence idempotency key scoped to another claim',
           });
         }
-        if (prior.payloadHash !== payloadHash) {
+        if (prior.payloadHash !== input.payloadHash) {
           throw new ConflictException({
             code: CODES.IDEMPOTENCY_PAYLOAD_CONFLICT,
             message: 'Idempotency key reused with different payload',
@@ -885,17 +944,18 @@ export class ExceptionFinancialService {
             data: {
               id: evidenceId,
               exceptionClaimId: claim.id,
-              evidenceKind: kind,
-              visibility,
+              evidenceKind: input.evidenceKind,
+              visibility: input.visibility,
               storageReference: input.storageReference?.slice(0, 1000) ?? null,
               contentHash: input.contentHash?.slice(0, 64) ?? null,
               contentType: input.contentType?.slice(0, 120) ?? null,
               notes: input.notes?.slice(0, 2000) ?? null,
               metadata: input.metadata,
-              submittedByActorType: actor.type,
-              submittedByActorId: actor.id,
+              provenance: input.provenance ?? undefined,
+              submittedByActorType: input.actor.type,
+              submittedByActorId: input.actor.id,
               idempotencyKey: idemKey,
-              payloadHash: idemKey ? payloadHash : null,
+              payloadHash: idemKey ? input.payloadHash : null,
               correlationId: input.correlationId?.slice(0, 64) ?? null,
             },
           });
@@ -915,10 +975,14 @@ export class ExceptionFinancialService {
               claim.status === ExceptionClaimStatus.OPEN
                 ? ExceptionClaimStatus.EVIDENCE_REVIEW
                 : claim.status,
-            actor,
+            actor: input.actor,
             reason: input.notes ?? null,
             correlationId: input.correlationId,
-            metadata: { evidenceId, evidenceKind: kind, visibility },
+            metadata: {
+              evidenceId,
+              evidenceKind: input.evidenceKind,
+              visibility: input.visibility,
+            },
           });
 
           return {
@@ -2150,7 +2214,10 @@ export class ExceptionFinancialService {
       });
     }
     if (viewer === 'ADMIN') {
-      return { code: 'EXCEPTION_CLAIM', claim };
+      return {
+        code: 'EXCEPTION_CLAIM',
+        claim: this.presentAdminClaim(claim),
+      };
     }
     return {
       code: 'EXCEPTION_CLAIM',
@@ -2161,11 +2228,7 @@ export class ExceptionFinancialService {
           .filter(
             (e) => e.visibility === ClaimEvidenceVisibility.ALL_ORDER_PARTIES,
           )
-          .map((e) => ({
-            id: e.id,
-            evidenceKind: e.evidenceKind,
-            createdAt: e.createdAt,
-          })),
+          .map((e) => this.presentPartyEvidence(e)),
         obligations: claim.obligations
           .filter((o) => this.obligationInvolves(o, viewerUserId))
           .map((o) => ({
@@ -2188,31 +2251,77 @@ export class ExceptionFinancialService {
         message: 'Not authorized',
       });
     }
+    if (viewer === 'ADMIN') {
+      const rows = await this.prisma.exceptionClaim.findMany({
+        where: { wkOrderId },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          economicLoss: { include: { coverages: true } },
+          events: { orderBy: { createdAt: 'asc' } },
+          evidence: { orderBy: { createdAt: 'asc' } },
+          verifications: { orderBy: { createdAt: 'asc' } },
+          verifiedFacts: { orderBy: { createdAt: 'asc' } },
+          determinations: {
+            orderBy: { createdAt: 'asc' },
+            include: { allocations: true },
+          },
+          obligations: { orderBy: { createdAt: 'asc' } },
+        },
+      });
+      return {
+        code: 'EXCEPTION_CLAIMS',
+        claims: rows.map((c) => this.presentAdminClaim(c)),
+      };
+    }
     const rows = await this.prisma.exceptionClaim.findMany({
       where: { wkOrderId },
       orderBy: { createdAt: 'desc' },
-      include:
-        viewer === 'ADMIN'
-          ? {
-              economicLoss: { include: { coverages: true } },
-              events: { orderBy: { createdAt: 'asc' } },
-              evidence: { orderBy: { createdAt: 'asc' } },
-              verifications: { orderBy: { createdAt: 'asc' } },
-              verifiedFacts: { orderBy: { createdAt: 'asc' } },
-              determinations: {
-                orderBy: { createdAt: 'asc' },
-                include: { allocations: true },
-              },
-              obligations: { orderBy: { createdAt: 'asc' } },
-            }
-          : undefined,
     });
-    if (viewer === 'ADMIN') {
-      return { code: 'EXCEPTION_CLAIMS', claims: rows };
-    }
     return {
       code: 'EXCEPTION_CLAIMS',
       claims: rows.map((c) => this.minimalClaim(c)),
+    };
+  }
+
+  private presentEvidenceProvenance(e: {
+    evidenceKind: ClaimEvidenceKind;
+    provenance: ClaimEvidenceProvenance | null;
+  }) {
+    return {
+      provenance: presentClaimEvidenceProvenance(e.provenance),
+      isTrustedOrderTermsSnapshot: isTrustedOrderTermsSnapshot(
+        e.evidenceKind,
+        e.provenance,
+      ),
+    };
+  }
+
+  private presentPartyEvidence(e: {
+    id: string;
+    evidenceKind: ClaimEvidenceKind;
+    createdAt: Date;
+    provenance: ClaimEvidenceProvenance | null;
+  }) {
+    return {
+      id: e.id,
+      evidenceKind: e.evidenceKind,
+      createdAt: e.createdAt,
+      ...this.presentEvidenceProvenance(e),
+    };
+  }
+
+  private presentAdminClaim<
+    T extends { evidence: Array<{
+      evidenceKind: ClaimEvidenceKind;
+      provenance: ClaimEvidenceProvenance | null;
+    }> },
+  >(claim: T) {
+    return {
+      ...claim,
+      evidence: claim.evidence.map((e) => ({
+        ...e,
+        ...this.presentEvidenceProvenance(e),
+      })),
     };
   }
 

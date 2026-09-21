@@ -6,6 +6,8 @@
  * gate helpers below.
  */
 import {
+  ClaimEvidenceKind,
+  ClaimEvidenceProvenance,
   EconomicLossCoverageSourceKind,
   EconomicLossKind,
   ExceptionClaimStatus,
@@ -69,6 +71,7 @@ export const EXCEPTION_FINANCIAL_CODES = {
   CLAIM_STATE_INVALID: 'INVALID_EXCEPTION_CLAIM_STATE',
   SUBJECT_REF_REQUIRED: 'EXCEPTION_CLAIM_SUBJECT_REF_REQUIRED',
   EVIDENCE_KIND_INVALID: 'EXCEPTION_CLAIM_EVIDENCE_KIND_INVALID',
+  EVIDENCE_KIND_RESERVED: 'EXCEPTION_CLAIM_EVIDENCE_KIND_RESERVED',
   EVIDENCE_NOT_FOUND: 'EXCEPTION_CLAIM_EVIDENCE_NOT_FOUND',
   VERIFICATION_STATUS_INVALID: 'EXCEPTION_CLAIM_VERIFICATION_INVALID',
   VERIFIED_EVIDENCE_REQUIRED: 'EXCEPTION_CLAIM_VERIFIED_EVIDENCE_REQUIRED',
@@ -108,6 +111,48 @@ export const EXCEPTION_LIABLE_PARTY_TYPES: ExceptionLiablePartyType[] = [
 
 export function isLiablePartyType(value: string): boolean {
   return (EXCEPTION_LIABLE_PARTY_TYPES as string[]).includes(value);
+}
+
+/**
+ * Stage15A: kinds that generic POST /evidence must not create.
+ * ORDER_TERMS_SNAPSHOT is exclusively written by the specialized server path.
+ */
+export const SERVER_RESERVED_CLAIM_EVIDENCE_KINDS: ClaimEvidenceKind[] = [
+  ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
+];
+
+export const CLAIM_EVIDENCE_PROVENANCE_API = {
+  LEGACY_UNVERIFIED: 'LEGACY_UNVERIFIED',
+  SERVER_ATTESTED_ORDER_TERMS: 'SERVER_ATTESTED_ORDER_TERMS',
+} as const;
+
+export type ClaimEvidenceProvenanceApi =
+  (typeof CLAIM_EVIDENCE_PROVENANCE_API)[keyof typeof CLAIM_EVIDENCE_PROVENANCE_API];
+
+export function isServerReservedEvidenceKind(
+  kind: ClaimEvidenceKind | string,
+): boolean {
+  return (SERVER_RESERVED_CLAIM_EVIDENCE_KINDS as string[]).includes(kind);
+}
+
+/** DB NULL (and any non-attested value) is historical/unverified — never inferred as trusted. */
+export function presentClaimEvidenceProvenance(
+  provenance: ClaimEvidenceProvenance | null | undefined,
+): ClaimEvidenceProvenanceApi {
+  if (provenance === ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS) {
+    return CLAIM_EVIDENCE_PROVENANCE_API.SERVER_ATTESTED_ORDER_TERMS;
+  }
+  return CLAIM_EVIDENCE_PROVENANCE_API.LEGACY_UNVERIFIED;
+}
+
+export function isTrustedOrderTermsSnapshot(
+  evidenceKind: ClaimEvidenceKind | string,
+  provenance: ClaimEvidenceProvenance | null | undefined,
+): boolean {
+  return (
+    evidenceKind === ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT &&
+    provenance === ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS
+  );
 }
 
 const CLAIM_TYPE_TO_LOSS_KIND: Record<ExceptionClaimType, EconomicLossKind> = {

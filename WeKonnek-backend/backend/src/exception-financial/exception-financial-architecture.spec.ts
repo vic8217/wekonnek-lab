@@ -1,6 +1,8 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
+  ClaimEvidenceKind,
+  ClaimEvidenceProvenance,
   EconomicLossCoverageSourceKind,
   EconomicLossKind,
   ExceptionClaimStatus,
@@ -27,9 +29,14 @@ import {
   evaluateStage9FinalizeGate,
   evaluateStage9Stage12OverlapGuard,
   hasBlockingStage9Determination,
+  isServerReservedEvidenceKind,
   isStage9ReturnMoneyEligible,
+  isTrustedOrderTermsSnapshot,
   lossKindForClaimType,
   maxImportableCoverage,
+  presentClaimEvidenceProvenance,
+  CLAIM_EVIDENCE_PROVENANCE_API,
+  SERVER_RESERVED_CLAIM_EVIDENCE_KINDS,
   remainingCompensable,
   stage9ObligationCoversLossKind,
   stage9OrderMoneyOverlapsSubject,
@@ -643,5 +650,114 @@ describe('Stage 12 exception-financial architecture', () => {
         new RegExp(`${model}\\.(create|update|delete|upsert)`),
       );
     }
+  });
+});
+
+describe('Stage15A trusted evidence provenance architecture', () => {
+  const serviceSrc = readFileSync(
+    resolve(__dirname, './exception-financial.service.ts'),
+    'utf8',
+  );
+  const controllerSrc = readFileSync(
+    resolve(__dirname, './exception-financial.controller.ts'),
+    'utf8',
+  );
+  const policySrc = readFileSync(
+    resolve(__dirname, './exception-financial.policy.ts'),
+    'utf8',
+  );
+  const migrationSql = readFileSync(
+    resolve(
+      __dirname,
+      '../../prisma/migrations/20260921120000_stage15a_trusted_evidence_provenance/migration.sql',
+    ),
+    'utf8',
+  );
+
+  it('reserves only ORDER_TERMS_SNAPSHOT on the generic writer', () => {
+    expect(SERVER_RESERVED_CLAIM_EVIDENCE_KINDS).toEqual([
+      ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
+    ]);
+    expect(isServerReservedEvidenceKind(ClaimEvidenceKind.PHOTO_REFERENCE)).toBe(
+      false,
+    );
+    expect(isServerReservedEvidenceKind(ClaimEvidenceKind.SYSTEM_RECORD)).toBe(
+      false,
+    );
+    expect(
+      isServerReservedEvidenceKind(ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT),
+    ).toBe(true);
+  });
+
+  it('does not treat kind alone as trusted', () => {
+    expect(
+      isTrustedOrderTermsSnapshot(
+        ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
+        null,
+      ),
+    ).toBe(false);
+    expect(
+      isTrustedOrderTermsSnapshot(
+        ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      isTrustedOrderTermsSnapshot(
+        ClaimEvidenceKind.ORDER_TERMS_SNAPSHOT,
+        ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS,
+      ),
+    ).toBe(true);
+    expect(
+      presentClaimEvidenceProvenance(null),
+    ).toBe(CLAIM_EVIDENCE_PROVENANCE_API.LEGACY_UNVERIFIED);
+    expect(
+      presentClaimEvidenceProvenance(
+        ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS,
+      ),
+    ).toBe(CLAIM_EVIDENCE_PROVENANCE_API.SERVER_ATTESTED_ORDER_TERMS);
+  });
+
+  it('generic HTTP DTO cannot carry provenance into addEvidence', () => {
+    const start = controllerSrc.indexOf(
+      "Post('exception-claims/:id/evidence')",
+    );
+    const end = controllerSrc.indexOf(
+      "Post('exception-claims/:id/evidence/:evidenceId/verify')",
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const addBlock = controllerSrc.slice(start, end);
+    expect(addBlock).toContain('this.exceptions.addEvidence({');
+    expect(addBlock).not.toContain('provenance:');
+    expect(addBlock).not.toContain('sourceType:');
+    expect(addBlock).not.toContain('serverAttested:');
+  });
+
+  it('specialized order-terms path is the only HTTP mutation for snapshots', () => {
+    expect(controllerSrc).toContain(
+      "Post('exception-claims/:id/order-terms-evidence')",
+    );
+    expect(controllerSrc).toContain('UserRole.admin');
+    expect(serviceSrc).toContain(
+      'ClaimEvidenceProvenance.SERVER_ATTESTED_ORDER_TERMS',
+    );
+    expect(serviceSrc).toContain('persistClaimEvidence');
+    expect(serviceSrc).not.toContain('return this.addEvidence(');
+  });
+
+  it('does not expand order-terms snapshot content', () => {
+    expect(policySrc).toContain("kind: 'ORDER_TERMS_SNAPSHOT'");
+    expect(policySrc).not.toContain('customerId: input.customerId');
+    expect(policySrc).not.toContain('agreementHash');
+  });
+
+  it('migration is additive with nullable provenance and no historical rewrite', () => {
+    expect(migrationSql).toContain('ClaimEvidenceProvenance');
+    expect(migrationSql).toContain('SERVER_ATTESTED_ORDER_TERMS');
+    expect(migrationSql).toContain('ADD COLUMN IF NOT EXISTS "provenance"');
+    expect(migrationSql).not.toMatch(/UPDATE\s+"exception_claim_evidence"/i);
+    expect(migrationSql).not.toMatch(/DELETE\s+FROM\s+"exception_claim_evidence"/i);
+    expect(migrationSql).not.toMatch(/DEFAULT\s+'SERVER_ATTESTED_ORDER_TERMS'/);
   });
 });
