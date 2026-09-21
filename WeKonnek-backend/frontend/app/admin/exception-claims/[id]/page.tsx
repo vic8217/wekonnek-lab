@@ -25,6 +25,30 @@ import {
   isFinancialReconciliationAdmin,
   nextGeneration,
 } from '@/lib/financial-reconciliation-presentation';
+import {
+  addEvidence,
+  captureOrderTermsEvidence,
+  createVerifiedFact,
+  verifyEvidence,
+} from '@/lib/exception-liability-admin-api';
+import {
+  COVERAGE_INVESTIGATION_COPY,
+  asRecordList,
+  claimWorkspacePanelKey,
+  collectAuthoritativeFactAttributionOptions,
+  createCorrelationId,
+  findRowByIdempotencyKey,
+  isAmbiguousMutationFailure,
+  isCurrentClaimOwner,
+  mayAbortRouteLoad,
+  normalizeExpectedWkOrderId,
+  ownedResultDecision,
+  type ClaimOwner,
+  type MutationPhase,
+} from '@/lib/exception-liability-admin-presentation';
+import { ClaimEvidencePanel } from './claim-evidence-panel';
+import { VerifiedFactsPanel } from './verified-facts-panel';
+import { ClaimEventTimeline } from './claim-event-timeline';
 
 function AccessDenied() {
   return (
@@ -34,14 +58,6 @@ function AccessDenied() {
         Access denied. System admin only.
       </p>
     </div>
-  );
-}
-
-function asRecords(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (row): row is Record<string, unknown> =>
-      typeof row === 'object' && row !== null,
   );
 }
 
@@ -67,15 +83,48 @@ function ClaimBody() {
   const search = useSearchParams();
   const id = String(params.id ?? '');
   const expectedWkOrderId = search.get('expectedWkOrderId');
+  const normalizedExpectedWkOrderId = normalizeExpectedWkOrderId(expectedWkOrderId);
   const generationRef = useRef(0);
+  const routeEpochRef = useRef(0);
+  const routeClaimIdRef = useRef(id);
+  const routeExpectedWkOrderIdRef = useRef(normalizedExpectedWkOrderId);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  routeClaimIdRef.current = id;
+  routeExpectedWkOrderIdRef.current = normalizedExpectedWkOrderId;
   const [claim, setClaim] = useState<ExceptionClaimRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [httpStatus, setHttpStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [orderMismatch, setOrderMismatch] = useState(false);
+  const [evidencePhase, setEvidencePhase] = useState<MutationPhase>('idle');
+  const [orderTermsPhase, setOrderTermsPhase] = useState<MutationPhase>('idle');
+  const [verifyPhase, setVerifyPhase] = useState<MutationPhase>('idle');
+  const [factPhase, setFactPhase] = useState<MutationPhase>('idle');
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [orderTermsError, setOrderTermsError] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [factError, setFactError] = useState<string | null>(null);
+
+  const loadClaim = async (
+    claimId: string,
+    generation: number,
+    controller: AbortController,
+  ) => {
+    const next = await fetchExceptionClaim(claimId, controller.signal);
+    if (!isCurrentGeneration(generationRef.current, generation)) return null;
+    return next;
+  };
 
   useEffect(() => {
+    loadAbortRef.current?.abort();
     const controller = new AbortController();
+    loadAbortRef.current = controller;
+    routeEpochRef.current += 1;
+    const loadOwner: ClaimOwner = {
+      claimId: id,
+      expectedWkOrderId: normalizeExpectedWkOrderId(expectedWkOrderId),
+      epoch: routeEpochRef.current,
+    };
     const generation = nextGeneration(generationRef.current);
     generationRef.current = generation;
     setLoading(true);
@@ -83,21 +132,31 @@ function ClaimBody() {
     setHttpStatus(null);
     setOrderMismatch(false);
     setClaim(null);
+    setEvidencePhase('idle');
+    setOrderTermsPhase('idle');
+    setVerifyPhase('idle');
+    setFactPhase('idle');
+    setEvidenceError(null);
+    setOrderTermsError(null);
+    setVerifyError(null);
+    setFactError(null);
     void (async () => {
       try {
-        const next = await fetchExceptionClaim(id, controller.signal);
+        const next = await loadClaim(id, generation, controller);
+        if (!ownerIsCurrent(loadOwner)) return;
         if (!isCurrentGeneration(generationRef.current, generation)) return;
         if (!next) {
           setError('Liability claim not found.');
           return;
         }
-        if (!expectedOrderMatches(expectedWkOrderId, next.wkOrderId)) {
+        if (!expectedOrderMatches(loadOwner.expectedWkOrderId, next.wkOrderId)) {
           setOrderMismatch(true);
           setClaim(null);
           return;
         }
         setClaim(next);
       } catch (err) {
+        if (!ownerIsCurrent(loadOwner)) return;
         if (!isCurrentGeneration(generationRef.current, generation)) return;
         if (isAbortError(err)) return;
         const apiError = err instanceof FinancialReconciliationApiError ? err : null;
@@ -107,6 +166,7 @@ function ClaimBody() {
             (err instanceof Error ? err.message : 'Unable to load liability claim.'),
         );
       } finally {
+        if (!ownerIsCurrent(loadOwner)) return;
         if (!isCurrentGeneration(generationRef.current, generation)) return;
         setLoading(false);
       }
@@ -114,22 +174,142 @@ function ClaimBody() {
     return () => controller.abort();
   }, [id, expectedWkOrderId]);
 
+  const currentOwner = (): ClaimOwner => ({
+    claimId: routeClaimIdRef.current,
+    expectedWkOrderId: routeExpectedWkOrderIdRef.current,
+    epoch: routeEpochRef.current,
+  });
+
+  const ownerIsCurrent = (owner: ClaimOwner) =>
+    isCurrentClaimOwner({
+      owner,
+      routeClaimId: routeClaimIdRef.current,
+      routeExpectedWkOrderId: routeExpectedWkOrderIdRef.current,
+      routeEpoch: routeEpochRef.current,
+    });
+
+  const refreshAfterMutation = async (
+    owner: ClaimOwner,
+  ): Promise<ExceptionClaimRecord | null | 'discarded'> => {
+    if (!ownerIsCurrent(owner)) return 'discarded';
+    if (
+      mayAbortRouteLoad({
+        owner: {
+          claimId: owner.claimId,
+          expectedWkOrderId: owner.expectedWkOrderId,
+        },
+        route: {
+          claimId: routeClaimIdRef.current,
+          expectedWkOrderId: routeExpectedWkOrderIdRef.current,
+        },
+      })
+    ) {
+      loadAbortRef.current?.abort();
+    }
+    if (!ownerIsCurrent(owner)) return 'discarded';
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const generation = nextGeneration(generationRef.current);
+    generationRef.current = generation;
+    const next = await loadClaim(owner.claimId, generation, controller);
+    if (
+      ownedResultDecision({
+        owner,
+        routeClaimId: routeClaimIdRef.current,
+        routeExpectedWkOrderId: routeExpectedWkOrderIdRef.current,
+        routeEpoch: routeEpochRef.current,
+        loadGeneration: generationRef.current,
+        responseGeneration: generation,
+      }) === 'ignore'
+    ) {
+      return 'discarded';
+    }
+    if (next && !expectedOrderMatches(owner.expectedWkOrderId, next.wkOrderId)) {
+      setOrderMismatch(true);
+      setClaim(null);
+      return null;
+    }
+    if (next) setClaim(next);
+    return next;
+  };
+
+  const runMutation = async (input: {
+    setPhase: (phase: MutationPhase) => void;
+    setError: (message: string | null) => void;
+    mutate: (signal: AbortSignal) => Promise<unknown>;
+    confirm: (latest: ExceptionClaimRecord) => boolean;
+  }): Promise<'success' | 'unproven' | 'error' | 'discarded'> => {
+    const owner = currentOwner();
+    if (!ownerIsCurrent(owner)) return 'discarded';
+    input.setPhase('submitting');
+    input.setError(null);
+    const controller = new AbortController();
+    try {
+      await input.mutate(controller.signal);
+      if (!ownerIsCurrent(owner)) return 'discarded';
+      const latest = await refreshAfterMutation(owner);
+      if (latest === 'discarded' || !ownerIsCurrent(owner)) return 'discarded';
+      if (latest) {
+        input.setPhase('success');
+        return 'success';
+      }
+      input.setPhase('error');
+      return 'error';
+    } catch (err) {
+      if (!ownerIsCurrent(owner)) return 'discarded';
+      if (isAbortError(err)) return 'discarded';
+      const apiError = err instanceof FinancialReconciliationApiError ? err : null;
+      const status = apiError?.status ?? null;
+      if (status === 409 || isAmbiguousMutationFailure(status)) {
+        input.setPhase('reconciling');
+        try {
+          const latest = await refreshAfterMutation(owner);
+          if (latest === 'discarded' || !ownerIsCurrent(owner)) return 'discarded';
+          if (latest && input.confirm(latest)) {
+            input.setPhase('success');
+            input.setError(null);
+            return 'success';
+          }
+          input.setPhase('error');
+          input.setError(
+            apiError?.message ??
+              (err instanceof Error ? err.message : 'The claim was not changed.'),
+          );
+          return 'unproven';
+        } catch (refreshErr) {
+          if (!ownerIsCurrent(owner)) return 'discarded';
+          input.setPhase('error');
+          input.setError(
+            refreshErr instanceof Error ? refreshErr.message : 'Unable to reload the claim.',
+          );
+          return 'unproven';
+        }
+      }
+      input.setPhase('error');
+      input.setError(
+        apiError?.message ??
+          (err instanceof Error ? err.message : 'The claim was not changed.'),
+      );
+      return 'error';
+    }
+  };
+
   const currency = displayServerField(claim?.currency);
   const loss =
     claim?.economicLoss && typeof claim.economicLoss === 'object'
       ? (claim.economicLoss as Record<string, unknown>)
       : null;
-  const coverages = asRecords(loss?.coverages);
-  const determinations = asRecords(claim?.determinations);
+  const coverages = asRecordList(loss?.coverages);
+  const determinations = asRecordList(claim?.determinations);
   const allocationsByDet = determinations.map((det) => ({
     det,
-    allocations: asRecords(det.allocations),
+    allocations: asRecordList(det.allocations),
   }));
-  const obligations = asRecords(claim?.obligations);
-  const evidence = asRecords(claim?.evidence);
-  const verifications = asRecords(claim?.verifications);
-  const facts = asRecords(claim?.verifiedFacts);
-  const events = asRecords(claim?.events);
+  const obligations = asRecordList(claim?.obligations);
+  const evidence = asRecordList(claim?.evidence);
+  const verifications = asRecordList(claim?.verifications);
+  const facts = asRecordList(claim?.verifiedFacts);
+  const events = asRecordList(claim?.events);
 
   return (
     <div className="w-full space-y-6">
@@ -140,6 +320,12 @@ function ClaimBody() {
         <h1 className="text-2xl font-bold text-gray-900">Liability claim</h1>
         <p className="mt-1 text-sm text-gray-600">
           Read-only inspection. This page does not settle, acknowledge, finalize, or change coverage.
+        </p>
+        <p className="mt-1 text-sm text-gray-600">
+          On an active claim, System Admin may record evidence, record verification, and conclude
+          verified facts. Those actions do not create a determination, propose, finalize, adjust,
+          or open a claim. Return to the follow-up and refresh live reconciliation there. This page
+          does not close the follow-up.
         </p>
       </header>
 
@@ -165,7 +351,7 @@ function ClaimBody() {
       {claim && (
         <>
           <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="claim-heading">
-            <h2 id="claim-heading" className="text-lg font-semibold text-gray-900">Claim</h2>
+            <h2 id="claim-heading" className="text-lg font-semibold text-gray-900">Claim overview</h2>
             <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
               <Field label="Status" value={displayServerField(claim.status)} />
               <Field label="Type" value={displayServerField(claim.claimType)} />
@@ -192,8 +378,117 @@ function ClaimBody() {
             </div>
           </section>
 
+          <ClaimEvidencePanel
+            key={claimWorkspacePanelKey(id, expectedWkOrderId, 'evidence')}
+            claimId={claim.id}
+            status={claim.status}
+            evidence={evidence}
+            verifications={verifications}
+            evidencePhase={evidencePhase}
+            orderTermsPhase={orderTermsPhase}
+            verifyPhase={verifyPhase}
+            evidenceError={evidenceError ?? verifyError}
+            orderTermsError={orderTermsError}
+            onRecordEvidence={(input) =>
+              runMutation({
+                setPhase: setEvidencePhase,
+                setError: setEvidenceError,
+                mutate: (signal) =>
+                  addEvidence(
+                    claim.id,
+                    {
+                      ...input,
+                      correlationId: createCorrelationId(),
+                    },
+                    signal,
+                  ),
+                confirm: (latest) =>
+                  Boolean(
+                    findRowByIdempotencyKey(asRecordList(latest.evidence), input.idempotencyKey),
+                  ),
+              })
+            }
+            onCaptureOrderTerms={(idempotencyKey) =>
+              runMutation({
+                setPhase: setOrderTermsPhase,
+                setError: setOrderTermsError,
+                mutate: (signal) =>
+                  captureOrderTermsEvidence(
+                    claim.id,
+                    { correlationId: createCorrelationId(), idempotencyKey },
+                    signal,
+                  ),
+                confirm: (latest) =>
+                  Boolean(
+                    findRowByIdempotencyKey(asRecordList(latest.evidence), idempotencyKey),
+                  ),
+              })
+            }
+            onRecordVerification={(input) =>
+              runMutation({
+                setPhase: setVerifyPhase,
+                setError: setVerifyError,
+                mutate: (signal) =>
+                  verifyEvidence(
+                    claim.id,
+                    input.evidenceId,
+                    {
+                      verificationStatus: input.verificationStatus,
+                      notes: input.notes,
+                      correlationId: createCorrelationId(),
+                      idempotencyKey: input.idempotencyKey,
+                    },
+                    signal,
+                  ),
+                confirm: (latest) =>
+                  Boolean(
+                    findRowByIdempotencyKey(
+                      asRecordList(latest.verifications),
+                      input.idempotencyKey,
+                    ),
+                  ),
+              })
+            }
+          />
+
+          <VerifiedFactsPanel
+            key={claimWorkspacePanelKey(id, expectedWkOrderId, 'facts')}
+            status={claim.status}
+            facts={facts}
+            evidence={evidence}
+            verifications={verifications}
+            attributionOptions={collectAuthoritativeFactAttributionOptions(
+              claim as Record<string, unknown>,
+            )}
+            phase={factPhase}
+            error={factError}
+            onConcludeFact={(input) =>
+              runMutation({
+                setPhase: setFactPhase,
+                setError: setFactError,
+                mutate: (signal) =>
+                  createVerifiedFact(
+                    claim.id,
+                    {
+                      ...input,
+                      correlationId: createCorrelationId(),
+                    },
+                    signal,
+                  ),
+                confirm: (latest) =>
+                  Boolean(
+                    findRowByIdempotencyKey(
+                      asRecordList(latest.verifiedFacts),
+                      input.idempotencyKey,
+                    ),
+                  ),
+              })
+            }
+          />
+
           <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="loss-heading">
-            <h2 id="loss-heading" className="text-lg font-semibold text-gray-900">Economic loss</h2>
+            <h2 id="loss-heading" className="text-lg font-semibold text-gray-900">Economic loss & coverage</h2>
+            <p className="mt-1 text-sm text-gray-600">{COVERAGE_INVESTIGATION_COPY}</p>
             {loss ? (
               <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                 <Field label="Loss kind" value={displayServerField(loss.lossKind)} />
@@ -206,10 +501,7 @@ function ClaimBody() {
             ) : (
               <p className="mt-2 text-sm text-gray-600">No economic loss on this claim.</p>
             )}
-          </section>
-
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="coverage-heading">
-            <h2 id="coverage-heading" className="text-lg font-semibold text-gray-900">Coverage</h2>
+            <h3 className="mt-4 text-sm font-semibold text-gray-900">Coverage</h3>
             <p className="mt-1 text-sm text-gray-600">
               Coverage is not settlement. These rows are read-only coverage source records.
             </p>
@@ -228,53 +520,11 @@ function ClaimBody() {
             )}
           </section>
 
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="evidence-heading">
-            <h2 id="evidence-heading" className="text-lg font-semibold text-gray-900">Evidence</h2>
-            {evidence.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-600">No evidence.</p>
-            ) : (
-              <ul className="mt-3 space-y-2 text-sm text-gray-800">
-                {evidence.map((row, index) => (
-                  <li key={displayServerField(row.id) !== '—' ? displayServerField(row.id) : `evidence-${index}`}>
-                    {displayServerField(row.evidenceKind)} · {displayServerField(row.visibility)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="verify-heading">
-            <h2 id="verify-heading" className="text-lg font-semibold text-gray-900">Evidence verifications</h2>
-            {verifications.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-600">No verifications.</p>
-            ) : (
-              <ul className="mt-3 space-y-2 text-sm text-gray-800">
-                {verifications.map((row, index) => (
-                  <li key={displayServerField(row.id) !== '—' ? displayServerField(row.id) : `verify-${index}`}>
-                    {displayServerField(row.outcome ?? row.result ?? row.status)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="facts-heading">
-            <h2 id="facts-heading" className="text-lg font-semibold text-gray-900">Verified facts</h2>
-            {facts.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-600">No verified facts.</p>
-            ) : (
-              <ul className="mt-3 space-y-2 text-sm text-gray-800">
-                {facts.map((row, index) => (
-                  <li key={displayServerField(row.id) !== '—' ? displayServerField(row.id) : `fact-${index}`}>
-                    {displayServerField(row.factType ?? row.kind)} · {displayServerField(row.statement ?? row.body)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
           <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="dets-heading">
             <h2 id="dets-heading" className="text-lg font-semibold text-gray-900">Determinations</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Read-only. This workspace does not create, propose, finalize, or adjust determinations.
+            </p>
             {allocationsByDet.length === 0 ? (
               <p className="mt-2 text-sm text-gray-600">No determinations.</p>
             ) : (
@@ -314,6 +564,9 @@ function ClaimBody() {
 
           <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="obls-heading">
             <h2 id="obls-heading" className="text-lg font-semibold text-gray-900">Obligations</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Read-only. System Admin cannot claim, acknowledge, reject, record cash, or mark WRITTEN_OFF here.
+            </p>
             {obligations.length === 0 ? (
               <p className="mt-2 text-sm text-gray-600">No obligations.</p>
             ) : (
@@ -337,20 +590,7 @@ function ClaimBody() {
             )}
           </section>
 
-          <section className="rounded-2xl border border-gray-200 bg-white p-5" aria-labelledby="events-heading">
-            <h2 id="events-heading" className="text-lg font-semibold text-gray-900">Domain events</h2>
-            {events.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-600">No domain events.</p>
-            ) : (
-              <ol className="mt-3 space-y-1 text-sm text-gray-800">
-                {events.map((row, index) => (
-                  <li key={displayServerField(row.id) !== '—' ? displayServerField(row.id) : `event-${index}`}>
-                    {displayServerField(row.eventType ?? row.type)}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+          <ClaimEventTimeline events={events} />
         </>
       )}
     </div>
