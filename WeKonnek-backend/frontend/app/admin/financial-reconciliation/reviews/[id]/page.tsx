@@ -1,14 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getUser, useAuth } from '@/hooks/use-auth';
-import { FinancialReconciliationApiError } from '@/lib/financial-reconciliation-api';
+import {
+  FinancialReconciliationApiError,
+  fetchOrderFinancialReconciliation,
+} from '@/lib/financial-reconciliation-api';
+import {
+  fetchExceptionClaimsForOrder,
+  fetchReturnFinancialResolution,
+} from '@/lib/authoritative-domain-api';
+import {
+  resolveAuthoritativeWorkflow,
+  type AuthoritativeWorkflowView,
+} from '@/lib/financial-reconciliation-workflow';
 import {
   findingExplanation,
   findingTitle,
+  isAbortError,
+  isCurrentGeneration,
   isFinancialReconciliationAdmin,
+  nextGeneration,
   partyLabel,
   reviewRouteLabel,
   reviewStatusLabel,
@@ -52,12 +66,22 @@ function ReviewDetailBody({ adminUserId }: { adminUserId: string }) {
   const [reason, setReason] = useState('');
   const [waitingParty, setWaitingParty] = useState<'CUSTOMER' | 'MERCHANT' | 'RIDER'>('CUSTOMER');
   const [busy, setBusy] = useState(false);
+  const [workflow, setWorkflow] = useState<AuthoritativeWorkflowView | null>(null);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
+  const reviewGenerationRef = useRef(0);
+  const workflowGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = nextGeneration(reviewGenerationRef.current);
+    reviewGenerationRef.current = generation;
     try {
-      setReview(await getFinancialReconciliationReview(id));
+      const next = await getFinancialReconciliationReview(id);
+      if (!isCurrentGeneration(reviewGenerationRef.current, generation)) return;
+      setReview(next);
       setError(null);
     } catch (err) {
+      if (!isCurrentGeneration(reviewGenerationRef.current, generation)) return;
       setError(err instanceof FinancialReconciliationApiError ? err.message : 'Unable to load follow-up.');
     }
   }, [id]);
@@ -65,6 +89,85 @@ function ReviewDetailBody({ adminUserId }: { adminUserId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!review) {
+      setWorkflow(null);
+      return;
+    }
+    const controller = new AbortController();
+    const generation = nextGeneration(workflowGenerationRef.current);
+    workflowGenerationRef.current = generation;
+    setWorkflowLoading(true);
+    setWorkflowError(null);
+    void (async () => {
+      try {
+        if (review.needsRefresh || review.stale) {
+          const view = resolveAuthoritativeWorkflow({
+            review,
+            liveReconciliation: {
+              wkOrderId: review.wkOrderId,
+              items: [],
+              findings: [],
+              relatedItems: [],
+              hasOutstanding: false,
+              hasDispute: false,
+              hasReconciliationIssue: false,
+            },
+          });
+          if (!isCurrentGeneration(workflowGenerationRef.current, generation)) return;
+          setWorkflow(view);
+          return;
+        }
+        const live = await fetchOrderFinancialReconciliation(
+          review.wkOrderId,
+          controller.signal,
+        );
+        const needsStage12 = [
+          'STAGE9_COVERAGE_MISSING',
+          'STAGE9_COVERAGE_AMOUNT_MISMATCH',
+          'COVERAGE_WRONG_LOSS',
+          'SUBJECT_MATCH_UNKNOWN',
+          'EXCEPTION_DUPLICATE_ACTIVE_EXPOSURE',
+          'SUCCESSOR_REVIEW_REQUIRED',
+        ].includes(review.findingCode);
+        const needsStage9 =
+          review.findingCode === 'RA_RETURN_RESTRICTION_MISSING' ||
+          review.findingCode === 'RA_RETURN_DOUBLE_COLLECTIBLE';
+        const claims = needsStage12
+          ? await fetchExceptionClaimsForOrder(review.wkOrderId, controller.signal)
+          : [];
+        let stage9ReturnFinancialStatus: string | null = null;
+        if (needsStage9) {
+          const resolution = await fetchReturnFinancialResolution(
+            review.wkOrderId,
+            controller.signal,
+          );
+          stage9ReturnFinancialStatus = resolution.returnFinancialStatus ?? null;
+        }
+        const view = resolveAuthoritativeWorkflow({
+          review,
+          liveReconciliation: live,
+          domainContext: { claims, stage9ReturnFinancialStatus },
+        });
+        if (!isCurrentGeneration(workflowGenerationRef.current, generation)) return;
+        setWorkflow(view);
+      } catch (err) {
+        if (!isCurrentGeneration(workflowGenerationRef.current, generation)) return;
+        if (isAbortError(err)) return;
+        setWorkflow(null);
+        setWorkflowError(
+          err instanceof FinancialReconciliationApiError
+            ? err.message
+            : 'Unable to resolve authoritative workflow.',
+        );
+      } finally {
+        if (!isCurrentGeneration(workflowGenerationRef.current, generation)) return;
+        setWorkflowLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [review]);
 
   const run = async (fn: () => Promise<ReviewDetail | void>) => {
     setBusy(true);
@@ -126,6 +229,65 @@ function ReviewDetailBody({ adminUserId }: { adminUserId: string }) {
 
       {error && (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      )}
+
+      {review && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3" aria-labelledby="workflow-heading">
+          <h2 id="workflow-heading" className="text-lg font-semibold text-gray-900">Authoritative workflow</h2>
+          <p className="text-sm text-gray-600">
+            Opening a domain page does not settle, acknowledge, or close this follow-up.
+          </p>
+          {workflowLoading && <p className="text-sm text-gray-500">Loading workflow…</p>}
+          {workflowError && (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {workflowError}
+            </p>
+          )}
+          {workflow && (
+            <>
+              <p
+                role="status"
+                className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-800"
+              >
+                {workflow.liveStatus}
+              </p>
+              <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-gray-500">Workflow</dt>
+                  <dd className="font-medium text-gray-900">{workflow.title}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Finding</dt>
+                  <dd className="font-medium text-gray-900">{findingTitle(review.findingCode)}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Required actor</dt>
+                  <dd className="font-medium text-gray-900">{workflow.requiredActor}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Recommended next step</dt>
+                  <dd className="font-medium text-gray-900">{workflow.safeAction}</dd>
+                </div>
+              </dl>
+              {workflow.blockedReason && (
+                <p className="text-sm text-amber-900">{workflow.blockedReason}</p>
+              )}
+              {workflow.notes.map((item) => (
+                <p key={item} className="text-sm text-gray-700">{item}</p>
+              ))}
+              {workflow.destinationHref && workflow.destinationLabel && !workflow.blocked ? (
+                <Link
+                  href={workflow.destinationHref}
+                  className="inline-flex rounded-lg bg-[#DB0002] px-4 py-2 text-sm font-medium text-white"
+                >
+                  {workflow.destinationLabel}
+                </Link>
+              ) : (
+                <p className="text-sm text-gray-600">No money action.</p>
+              )}
+            </>
+          )}
+        </section>
       )}
 
       {review && !closed && (

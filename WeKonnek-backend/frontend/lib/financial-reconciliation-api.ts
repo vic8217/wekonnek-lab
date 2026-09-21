@@ -62,6 +62,18 @@ export type FinancialObligationDto = {
   relatedItems: RelatedFinancialItemDto[];
   createdAt: string;
   lastFinancialActivityAt?: string;
+  sourceType?: string;
+  sourceId?: string;
+  economicLossId?: string;
+  determinationId?: string;
+  riderAdvanceId?: string;
+  returnFinancialDeterminationId?: string;
+  sourceRefs?: {
+    settlementIds?: string[];
+    acknowledgedSettlementIds?: string[];
+    coverageIds?: string[];
+    successorDeterminationId?: string;
+  };
 };
 
 export type ReconciliationFindingDto = {
@@ -72,6 +84,10 @@ export type ReconciliationFindingDto = {
   involvedItems: Array<{ rail: string; obligationId: string }>;
   explanationCode: string;
   wkOrderId?: number;
+  subjectMatch?: string;
+  expectedRelationship?: string;
+  observedRelationship?: string;
+  evidenceRefs?: string[];
 };
 
 export type FinancialReconciliationDetailDto = {
