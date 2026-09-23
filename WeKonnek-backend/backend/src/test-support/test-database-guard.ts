@@ -298,6 +298,72 @@ export function isRecognizedCurrentSchemaDisposableName(
   return isSafeCurrentSchemaDisposableSuffix(match[2]);
 }
 
+/**
+ * UCE-H0 disposable acceptance names. Harness identity only — not product
+ * authority, not current-schema provision, not cleanup/truncate permission.
+ *
+ * Canonical grammar (anchored, lowercase, exact suffix `_test`):
+ *   wekonnek_uce{numericId}_{cursor|terra}_test
+ *   wekonnek_uce_{letterId}_{cursor|terra}_test
+ *
+ * numericId: 1 | 1b | 2 | 3a | 3b | 4 | 5 | 6 | 7
+ *            (bare `3` is not in grammar; use 3a / 3b)
+ * letterId:  c1 | h0 | h1
+ *
+ * Letter-led UCE ids use a separator underscore so `uce_c1` is distinct from
+ * numeric `uce1`. Numeric ids must NOT use that extra underscore.
+ *
+ * Name recognition does not create, drop, truncate, or migrate databases.
+ */
+const UCE_NUMERIC_ID = '(?:1b|3a|3b|[124567])';
+const UCE_LETTER_ID = '(?:c1|h0|h1)';
+const UCE_EXECUTOR = '(?:cursor|terra)';
+const UCE_DISPOSABLE_RE = new RegExp(
+  `^wekonnek_uce(?:${UCE_NUMERIC_ID}|_${UCE_LETTER_ID})_${UCE_EXECUTOR}_test$`,
+);
+
+export function isRecognizedUceDisposableName(database: string): boolean {
+  if (!database) return false;
+  return UCE_DISPOSABLE_RE.test(database);
+}
+
+export function assertRecognizedUceDisposableName(
+  database: string,
+  operation: string,
+): void {
+  if (!isRecognizedUceDisposableName(database)) {
+    throw new Error(
+      `${operation} refused: ${database} is not a recognized UCE disposable name ` +
+        `(expected wekonnek_uce{1|1b|2|3a|3b|4|5|6|7}_{cursor|terra}_test or ` +
+        `wekonnek_uce_{c1|h0|h1}_{cursor|terra}_test)`,
+    );
+  }
+}
+
+/**
+ * Fail-closed UCE identity: the approved name must match grammar AND equal
+ * the live current_database(). A matching DATABASE_URL name is not enough.
+ * Does not grant provision, drop, truncate, or migration authority.
+ */
+export function assertUceDisposableIdentity(
+  identity: { database: string; user: string },
+  approvedDatabase: string,
+  operation: string,
+): void {
+  assertRecognizedUceDisposableName(approvedDatabase, operation);
+  if (!identity.database) {
+    throw new Error(
+      `${operation} refused: current_database() is empty; refuse to continue`,
+    );
+  }
+  if (identity.database !== approvedDatabase) {
+    throw new Error(
+      `${operation} refused: current_database=${identity.database} user=${identity.user} ` +
+        `does not match approved UCE disposable ${approvedDatabase}`,
+    );
+  }
+}
+
 export function isStage12TerraDisposableDatabase(database: string): boolean {
   return STAGE12_EPHEMERAL_DISPOSABLE_RE.test(database);
 }
