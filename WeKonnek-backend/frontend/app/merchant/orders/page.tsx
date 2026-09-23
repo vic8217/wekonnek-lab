@@ -604,6 +604,15 @@ export default function MerchantOrdersPage() {
 
   return (
     <div className="space-y-0 lg:space-y-6">
+      <Link
+        href="/merchant/orders/rider-pickup"
+        className="mb-3 flex min-h-14 items-center justify-center rounded-xl bg-[#DB0002] px-4 py-3 text-center text-base font-black tracking-wide text-white shadow-lg"
+      >
+        SCAN RIDER PICKUP QR
+      </Link>
+      <p className="-mt-2 mb-3 text-center text-xs text-gray-500">
+        Rider delivery handoff. Customer pick-up orders stay on the Pick-up tab.
+      </p>
       {requestedStatus === 'completed' && (
         <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
