@@ -66,4 +66,24 @@ export class TrackingService {
       orderBy: { recordedAt: 'asc' },
     });
   }
+
+  /**
+   * Latest canonical sample for one WkOrder. Never reads the legacy orderId
+   * column, so an orders_v2 trail cannot leak into this contract.
+   */
+  async getLatestByWkOrderId(wkOrderId: number) {
+    return this.prisma.riderLocation.findFirst({
+      where: { wkOrderId },
+      orderBy: { recordedAt: 'desc' },
+      select: {
+        riderId: true,
+        lat: true,
+        lng: true,
+        accuracy: true,
+        heading: true,
+        speed: true,
+        recordedAt: true,
+      },
+    });
+  }
 }

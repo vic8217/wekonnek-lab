@@ -995,6 +995,7 @@ model WkOrder {
   returnHandoffTokens   MerchantReturnHandoffToken[]
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
   deliveryAttempts      DeliveryAttempt[]
+  riderLocations        RiderLocation[]
   operationalCases      OperationalCase[]
   returnFinancialDeterminations ReturnFinancialDetermination[]
   returnFinancialObligations    ReturnFinancialObligation[]
@@ -1905,15 +1906,26 @@ model Address {
 model RiderLocation {
   id         String   @id @default(uuid()) @db.Uuid
   riderId    String   @map("rider_id")
+  /// Legacy orders_v2 UUID. Written only by the legacy /tracking socket.
   orderId    String?  @map("order_id")
+  /// UCE-2: canonical WkOrder this sample belongs to. Exactly one of
+  /// orderId / wkOrderId identifies a sample; they are never both set.
+  wkOrderId  Int?     @map("wk_order_id")
   lat        Float
   lng        Float
+  /// UCE-2: horizontal accuracy in metres as the device reported it.
+  /// Null when the source could not supply one. Never inferred or defaulted.
+  accuracy   Float?
   heading    Float?
   speed      Float?
   recordedAt DateTime @default(now()) @map("recorded_at")
 
+  wkOrder WkOrder? @relation(fields: [wkOrderId], references: [id], onDelete: Cascade)
+
   @@index([riderId])
   @@index([riderId, recordedAt])
+  @@index([orderId])
+  @@index([wkOrderId, recordedAt])
   @@map("rider_locations")
 }
 

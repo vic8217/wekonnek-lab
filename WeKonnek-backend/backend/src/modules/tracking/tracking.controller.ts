@@ -11,7 +11,11 @@ import { TrackingService } from './tracking.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthActorService } from '../../fulfillment/auth-actor.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, ParseIntPipe } from '@nestjs/common';
+import {
+  decideLocationRead,
+  projectCanonicalLocation,
+} from './tracking.canonical-read';
 
 @ApiTags('Tracking')
 @Controller('tracking')
@@ -25,6 +29,47 @@ export class TrackingController {
     const fulfillment = await this.prisma.orderFulfillment.findUnique({ where: { orderV2Id: orderId } });
     if (!fulfillment || !(actor.type === 'SYSTEM_ADMIN' || (actor.type === 'CUSTOMER' && actor.id === fulfillment.customerId) || (actor.type === 'RIDER' && actor.id === fulfillment.activeRiderId))) throw new ForbiddenException('Tracking access denied');
     return fulfillment;
+  }
+
+  @Get('orders/:wkOrderId/location')
+  @ApiOperation({
+    summary: 'Latest canonical Rider location for one WkOrder',
+  })
+  async getCanonicalLocation(
+    @Req() req: { user?: { id?: string } },
+    @Param('wkOrderId', ParseIntPipe) wkOrderId: number,
+  ) {
+    const actor = await this.actors.resolve(req.user);
+    const fulfillment = await this.prisma.orderFulfillment.findUnique({
+      where: { wkOrderId },
+      select: {
+        id: true,
+        wkOrderId: true,
+        customerId: true,
+        activeRiderId: true,
+        physicalCustodianRiderId: true,
+      },
+    });
+    const decision = decideLocationRead({
+      actor,
+      fulfillment: fulfillment ?? {
+        wkOrderId: null,
+        customerId: null,
+        activeRiderId: null,
+        physicalCustodianRiderId: null,
+      },
+    });
+    if (!decision.ok || !fulfillment || fulfillment.wkOrderId == null) {
+      throw new ForbiddenException('Tracking access denied');
+    }
+    const sample = await this.trackingService.getLatestByWkOrderId(
+      fulfillment.wkOrderId,
+    );
+    return projectCanonicalLocation({
+      wkOrderId: fulfillment.wkOrderId,
+      fulfillmentId: fulfillment.id,
+      sample,
+    });
   }
 
   @Get('rider/:riderId/latest')

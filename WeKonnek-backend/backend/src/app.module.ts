@@ -70,6 +70,7 @@ import { RiderAdvanceSettlementModule } from './rider-advance-settlement/rider-a
 import { ReturnHandoffModule } from './return-handoff/return-handoff.module';
 import { RiderCustodyHandoffModule } from './rider-custody-handoff/rider-custody-handoff.module';
 import { OrderOperationalStateModule } from './order-operational-state/order-operational-state.module';
+import { RiderAssignmentsModule } from './rider-assignments/rider-assignments.module';
 import { DeliveryFailureModule } from './delivery-failure/delivery-failure.module';
 import { ReturnFinancialModule } from './return-financial/return-financial.module';
 import { RedeliveryModule } from './redelivery/redelivery.module';
@@ -100,6 +101,7 @@ import { FinancialReconciliationReviewModule } from './financial-reconciliation-
     ReturnHandoffModule,
     RiderCustodyHandoffModule,
     OrderOperationalStateModule,
+    RiderAssignmentsModule,
     DeliveryFailureModule,
     ReturnFinancialModule,
     RedeliveryModule,
