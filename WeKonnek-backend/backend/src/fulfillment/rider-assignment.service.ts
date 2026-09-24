@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { withSerializableRetry } from '../prisma/serializable-retry';
 import { RiderAdvanceService } from '../rider-advance/rider-advance.service';
+import { resolveAssignmentMerchantAuthContext } from './assignment-merchant-authority';
 import {
   assertOperationAllowed,
   AuthActor,
@@ -46,7 +47,9 @@ export interface AssignRiderInput {
   correlationId?: string;
   /** When true, supersede existing ACTIVE assignment. */
   allowReassignment?: boolean;
+  /** Caller hint only. Not an assignment authorization source (UCE-1B-A). */
   actorMerchantIds?: number[];
+  /** Caller hint only. Not an assignment authorization source (UCE-1B-A). */
   merchantOwnerUserId?: string | null;
 }
 
@@ -73,6 +76,11 @@ export class RiderAssignmentService {
     const previousStatus = fulfillment.status;
     const previousRiderId = fulfillment.activeRiderId;
     const currentVersion = fulfillment.assignmentVersion;
+    const merchantAuth = await resolveAssignmentMerchantAuthContext(
+      tx,
+      input.actor,
+      fulfillment,
+    );
 
     assertOperationAllowed(
       input.actor,
@@ -81,12 +89,12 @@ export class RiderAssignmentService {
         : 'assign_rider',
       {
         customerId: fulfillment.customerId,
-        merchantId: fulfillment.merchantId,
+        merchantId: merchantAuth.merchantId,
         shopId: fulfillment.shopId,
         activeRiderId: fulfillment.activeRiderId,
         status: fulfillment.status,
-        actorMerchantIds: input.actorMerchantIds,
-        merchantOwnerUserId: input.merchantOwnerUserId,
+        actorMerchantIds: merchantAuth.actorMerchantIds,
+        merchantOwnerUserId: merchantAuth.merchantOwnerUserId,
       },
     );
 
@@ -724,8 +732,10 @@ export class RiderAssignmentService {
     input: AssignRiderInput,
   ) {
     if (input.wkOrderId != null) {
-      const orderRows = await tx.$queryRaw<Array<{ id: number }>>`
-        SELECT id FROM "orders" WHERE id = ${input.wkOrderId} FOR UPDATE
+      const orderRows = await tx.$queryRaw<
+        Array<{ id: number; merchant_id: number | null }>
+      >`
+        SELECT id, merchant_id FROM "orders" WHERE id = ${input.wkOrderId} FOR UPDATE
       `;
       if (!orderRows.length) throw new NotFoundException('Order not found');
       const fulfillmentRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -740,6 +750,12 @@ export class RiderAssignmentService {
       if (!fulfillment) throw new NotFoundException('Fulfillment not found');
       if (input.fulfillmentId && input.fulfillmentId !== fulfillment.id) {
         throw new BadRequestException('fulfillmentId does not match wkOrderId');
+      }
+      if (fulfillment.merchantId !== orderRows[0].merchant_id) {
+        throw new ConflictException({
+          code: 'MERCHANT_IDENTITY_MISMATCH',
+          message: 'Order and fulfillment merchant identity disagree',
+        });
       }
       return fulfillment;
     }

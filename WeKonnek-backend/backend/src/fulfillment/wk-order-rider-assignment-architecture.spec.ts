@@ -60,17 +60,25 @@ describe('UCE-1 canonical WkOrder rider-assignment architecture', () => {
     expect(controller).toContain('this.assignments.assign({');
   });
 
-  it('wkOrderId terminal commerce block is present; UCE-1B shared policies are absent', () => {
+  it('wkOrderId terminal commerce block is present; UCE-1B-B rider policy is absent', () => {
     expect(service).toContain('TERMINAL_WKORDER_STATUSES');
     expect(service).toContain('ORDER_TERMINAL');
     expect(service).not.toContain('INELIGIBLE_RIDER_STATUSES');
     expect(service).not.toContain('RIDER_NOT_ELIGIBLE');
-    expect(service).not.toContain('merchant?.userId ?? null');
-    expect(service).toContain('merchantOwnerUserId: input.merchantOwnerUserId');
     expect(controller).toContain('AuthActorService');
     expect(controller).toContain('this.actors.resolve');
     expect(controller).toContain('actor.actorMerchantIds.includes(orderRow.merchantId)');
     expect(controller).toContain('ForbiddenException');
     expect(controller).not.toContain('allowReassignment:');
+  });
+
+  it('UCE-1B-A assignment authority is persisted merchant membership, not caller owner id', () => {
+    expect(service).toContain('resolveAssignmentMerchantAuthContext');
+    expect(service).not.toContain(
+      'merchantOwnerUserId: input.merchantOwnerUserId',
+    );
+    expect(service).toContain('SELECT id, merchant_id FROM "orders"');
+    expect(service).toContain('MERCHANT_IDENTITY_MISMATCH');
+    expect(service).not.toContain('INELIGIBLE_RIDER_STATUSES');
   });
 });
