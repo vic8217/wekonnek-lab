@@ -24,9 +24,20 @@ import {
 } from './fulfillment-authorization';
 import { OrderDomainEventService } from './order-domain-event.service';
 
+/** WkOrder commerce statuses that must not receive a new initial dispatch. */
+const TERMINAL_WKORDER_STATUSES = new Set([
+  'cancelled',
+  'rejected',
+  'refunded',
+  'completed',
+  'delivered',
+]);
+
 export interface AssignRiderInput {
   fulfillmentId?: string;
   orderV2Id?: string;
+  /** Canonical WkOrder.id. Locks orders then order_fulfillments. */
+  wkOrderId?: number;
   riderId: string;
   actor: AuthActor;
   reason?: string;
@@ -115,6 +126,20 @@ export class RiderAssignmentService {
       );
     }
     const isMidDelivery = midDeliveryStatuses.includes(previousStatus);
+
+    if (input.wkOrderId != null) {
+      const order = await tx.wkOrder.findUnique({
+        where: { id: input.wkOrderId },
+        select: { status: true },
+      });
+      if (!order) throw new NotFoundException('Order not found');
+      if (TERMINAL_WKORDER_STATUSES.has(String(order.status).toLowerCase())) {
+        throw new ConflictException({
+          code: 'ORDER_TERMINAL',
+          message: 'Cannot assign a rider on a terminal commerce order',
+        });
+      }
+    }
 
     const rider = await tx.user.findUnique({
       where: { id: input.riderId },
@@ -698,6 +723,27 @@ export class RiderAssignmentService {
     tx: Prisma.TransactionClient,
     input: AssignRiderInput,
   ) {
+    if (input.wkOrderId != null) {
+      const orderRows = await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM "orders" WHERE id = ${input.wkOrderId} FOR UPDATE
+      `;
+      if (!orderRows.length) throw new NotFoundException('Order not found');
+      const fulfillmentRows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "order_fulfillments" WHERE wk_order_id = ${input.wkOrderId} FOR UPDATE
+      `;
+      if (!fulfillmentRows.length) {
+        throw new NotFoundException('Fulfillment not found');
+      }
+      const fulfillment = await tx.orderFulfillment.findUnique({
+        where: { id: fulfillmentRows[0].id },
+      });
+      if (!fulfillment) throw new NotFoundException('Fulfillment not found');
+      if (input.fulfillmentId && input.fulfillmentId !== fulfillment.id) {
+        throw new BadRequestException('fulfillmentId does not match wkOrderId');
+      }
+      return fulfillment;
+    }
+
     if (input.fulfillmentId) {
       const rows = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM "order_fulfillments" WHERE id = ${input.fulfillmentId}::uuid FOR UPDATE
@@ -747,6 +793,8 @@ export class RiderAssignmentService {
       return fulfillment;
     }
 
-    throw new BadRequestException('fulfillmentId or orderV2Id is required');
+    throw new BadRequestException(
+      'wkOrderId, fulfillmentId, or orderV2Id is required',
+    );
   }
 }

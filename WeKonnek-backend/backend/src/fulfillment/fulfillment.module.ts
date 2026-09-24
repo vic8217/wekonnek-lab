@@ -6,9 +6,11 @@ import { FulfillmentTransitionService } from './fulfillment-transition.service';
 import { OrderDomainEventService } from './order-domain-event.service';
 import { RiderAssignmentService } from './rider-assignment.service';
 import { AuthActorService } from './auth-actor.service';
+import { WkOrderRiderAssignmentController } from './wk-order-rider-assignment.controller';
 
 @Module({
   imports: [PrismaModule, forwardRef(() => RiderAdvanceModule)],
+  controllers: [WkOrderRiderAssignmentController],
   providers: [
     OrderDomainEventService,
     RiderAssignmentService,
