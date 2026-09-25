@@ -14,6 +14,8 @@ import { FULFILLMENT_TRANSITIONS } from '../fulfillment/fulfillment-state-machin
 import { assertOperationAllowed } from '../fulfillment/fulfillment-authorization';
 import { ForbiddenException } from '@nestjs/common';
 import { RiderAdvanceStatus } from '@prisma/client';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 describe('Stage 5A delivery handoff architecture', () => {
   it('binds QR version and round-trips payload without leaking weak PIN semantics', () => {
@@ -129,5 +131,41 @@ describe('Stage 5A delivery handoff architecture', () => {
         'picked_up',
       ),
     ).not.toThrow();
+  });
+});
+
+describe('UCE-4 delivery recipient architecture', () => {
+  const service = readFileSync(join(__dirname, 'delivery-handoff.service.ts'), 'utf8');
+  const custody = readFileSync(
+    join(__dirname, '../agreements/custody-event.service.ts'),
+    'utf8',
+  );
+  const controller = readFileSync(join(__dirname, 'delivery-handoff.controller.ts'), 'utf8');
+
+  it('keeps Stage 5A issue as the only delivery-token route', () => {
+    expect(controller).toContain("@Post('orders/:orderId/delivery-token')");
+    expect(controller).toContain("@Get('orders/:orderId/delivery-recipient')");
+    expect(controller).toContain("@Post('orders/:orderId/delivery-recipient')");
+    expect(controller).toContain("@Post('orders/:orderId/delivery-recipient/revoke')");
+    expect(controller).not.toContain('@Patch(');
+    expect(controller).not.toContain('@Delete(');
+  });
+
+  it('closes public CUSTOMER_RECEIVED without changing RETURN_INITIATED', () => {
+    expect(custody).toContain('CUSTOMER_RECEIVED_REQUIRES_HANDOFF');
+    expect(custody).toContain('recordSecureCustomerDeliveryInTx');
+    expect(custody).toContain('CustodyEventType.RETURN_INITIATED');
+    expect(service).toContain('recordSecureCustomerDeliveryInTx');
+    expect(service).not.toContain('eventType: CustodyEventType.CUSTOMER_RECEIVED');
+    expect(service).toContain('assertPossessionDependentRiderAuthority');
+  });
+
+  it('does not put the recipient display name in recipient domain events', () => {
+    const authorized = service.indexOf("'DELIVERY_RECIPIENT_AUTHORIZED'");
+    const revoked = service.indexOf("'DELIVERY_RECIPIENT_REVOKED'");
+    expect(authorized).toBeGreaterThan(0);
+    expect(revoked).toBeGreaterThan(authorized);
+    expect(service.slice(authorized, revoked)).not.toContain('recipientDisplayName');
+    expect(service).toContain('authorizationBound:');
   });
 });

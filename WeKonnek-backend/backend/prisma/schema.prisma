@@ -991,6 +991,7 @@ model WkOrder {
   pickupHandoffTokens   PickupHandoffToken[]
   riderAdvances         RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
+  deliveryAuthorizations CustomerDeliveryAuthorization[]
   riderAdvanceSettlements RiderAdvanceSettlement[]
   returnHandoffTokens   MerchantReturnHandoffToken[]
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
@@ -1330,6 +1331,7 @@ model User {
   riderAdvancesAsCustomer    RiderAdvance[]             @relation("RiderAdvanceCustomer")
   deliveryHandoffTokensAsRider    CustomerDeliveryHandoffToken[] @relation("DeliveryHandoffRider")
   deliveryHandoffTokensAsCustomer CustomerDeliveryHandoffToken[] @relation("DeliveryHandoffCustomer")
+  deliveryAuthorizationsAuthorized CustomerDeliveryAuthorization[] @relation("DeliveryAuthorizationCustomer")
   settlementsAsCustomer      RiderAdvanceSettlement[]   @relation("SettlementCustomer")
   settlementsAsCreditor      RiderAdvanceSettlement[]   @relation("SettlementCreditor")
   returnHandoffTokensAsRider MerchantReturnHandoffToken[] @relation("ReturnHandoffRider")
@@ -2900,6 +2902,7 @@ model OrderFulfillment {
   pickupHandoffTokens PickupHandoffToken[]
   riderAdvances       RiderAdvance[]
   deliveryHandoffTokens CustomerDeliveryHandoffToken[]
+  deliveryAuthorizations CustomerDeliveryAuthorization[]
   returnHandoffTokens MerchantReturnHandoffToken[]
   riderCustodyHandoffTokens RiderCustodyHandoffToken[]
   deliveryAttempts    DeliveryAttempt[]
@@ -3534,6 +3537,52 @@ model RiderAdvanceSettlement {
 }
 
 // ═══════════════════════════════════════════════════════
+// UCE-4 — Delivery recipient authorization
+// Customer-self delivery has no row. Alternate recipients are evidence.
+// ═══════════════════════════════════════════════════════
+
+enum DeliveryRecipientCategory {
+  HOUSEHOLD_MEMBER
+  AUTHORIZED_PERSON
+}
+
+enum CustomerDeliveryAuthorizationStatus {
+  ACTIVE
+  REVOKED
+  CONSUMED
+}
+
+/// Order-scoped alternate recipient. One ACTIVE row per fulfillment
+/// (partial unique index in the UCE-4 migration). Rows are not deleted.
+model CustomerDeliveryAuthorization {
+  id                      String                              @id @default(uuid()) @db.Uuid
+  wkOrderId               Int                                 @map("wk_order_id")
+  fulfillmentId           String                              @map("fulfillment_id") @db.Uuid
+  authorizedByCustomerId  String                              @map("authorized_by_customer_id") @db.Uuid
+  recipientDisplayName    String                              @map("recipient_display_name") @db.VarChar(80)
+  recipientCategory       DeliveryRecipientCategory           @map("recipient_category")
+  status                  CustomerDeliveryAuthorizationStatus @default(ACTIVE)
+  idempotencyKey          String                              @map("idempotency_key") @db.VarChar(64)
+  payloadHash             String                              @map("payload_hash") @db.VarChar(64)
+  correlationId           String?                             @map("correlation_id") @db.VarChar(64)
+  createdAt               DateTime                            @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt               DateTime?                           @map("revoked_at") @db.Timestamptz
+  consumedAt              DateTime?                           @map("consumed_at") @db.Timestamptz
+  updatedAt               DateTime                            @updatedAt @map("updated_at") @db.Timestamptz
+
+  wkOrder    WkOrder          @relation(fields: [wkOrderId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fulfillment OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  authorizedBy User           @relation("DeliveryAuthorizationCustomer", fields: [authorizedByCustomerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  deliveryHandoffTokens CustomerDeliveryHandoffToken[]
+
+  @@unique([authorizedByCustomerId, idempotencyKey], map: "customer_delivery_authorizations_customer_idempotency_key")
+  @@index([fulfillmentId, status])
+  @@index([wkOrderId, status])
+  @@index([authorizedByCustomerId, status])
+  @@map("customer_delivery_authorizations")
+}
+
+// ═══════════════════════════════════════════════════════
 // Stage 5A — Secure Customer Delivery Handoff
 // ═══════════════════════════════════════════════════════
 
@@ -3563,6 +3612,8 @@ model CustomerDeliveryHandoffToken {
   deliveryRiderId          String                             @map("delivery_rider_id") @db.Uuid
   riderAssignmentId        String                             @map("rider_assignment_id") @db.Uuid
   assignmentVersion        Int                                @map("assignment_version")
+  /// Null: customer-self. Non-null: alternate recipient bound at issue.
+  authorizationId          String?                            @map("authorization_id") @db.Uuid
   expiresAt                DateTime                           @map("expires_at") @db.Timestamptz
   consumedAt               DateTime?                          @map("consumed_at") @db.Timestamptz
   consumedByUserId         String?                            @map("consumed_by_user_id") @db.Uuid
@@ -3582,8 +3633,10 @@ model CustomerDeliveryHandoffToken {
   fulfillment   OrderFulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Restrict)
   customer      User             @relation("DeliveryHandoffCustomer", fields: [customerId], references: [id], onDelete: Restrict)
   deliveryRider User             @relation("DeliveryHandoffRider", fields: [deliveryRiderId], references: [id], onDelete: Restrict)
+  authorization CustomerDeliveryAuthorization? @relation(fields: [authorizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([fulfillmentId, status])
+  @@index([authorizationId])
   @@index([wkOrderId, status])
   @@index([customerId, status])
   @@index([deliveryRiderId, status])

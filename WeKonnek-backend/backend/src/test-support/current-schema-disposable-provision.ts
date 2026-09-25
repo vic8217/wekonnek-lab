@@ -73,6 +73,8 @@ export const CURRENT_SCHEMA_POST_TEMPLATE_MIGRATION_PROBES: Record<
     `SELECT 1 AS ok FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'liability_determinations_one_child_per_parent'`,
   '20260922060000_uce2_canonical_rider_location':
     `SELECT 1 AS ok FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'rider_locations' AND column_name = 'wk_order_id'`,
+  '20260925120000_uce4_delivery_recipient_authorization':
+    `SELECT 1 AS ok FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'customer_delivery_authorizations_one_active_per_fulfillment'`,
 };
 
 const POST_TEMPLATE_MIGRATION_FLOOR = '20260919120000';

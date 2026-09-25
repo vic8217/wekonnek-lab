@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  CustodyEventType,
+  CustomerDeliveryAuthorizationStatus,
   CustomerDeliveryHandoffPurpose,
   CustomerDeliveryHandoffTokenStatus,
   FulfillmentStatus,
@@ -33,6 +34,12 @@ import {
   parseDeliveryQrPayload,
   secretsMatch,
 } from './delivery-token';
+import {
+  customerSelfPreview,
+  parseRecipientAuthorization,
+  type RecipientAuthorizationInput,
+  type RecipientPreview,
+} from './delivery-recipient';
 
 type SafeFailure = {
   ok: false;
@@ -58,6 +65,7 @@ type TokenRow = {
   customerConfirmedByUserId: string | null;
   custodyEventId: string | null;
   confirmIdempotencyKey: string | null;
+  authorizationId: string | null;
 };
 
 @Injectable()
@@ -103,7 +111,13 @@ export class DeliveryHandoffService {
           where: { id: input.wkOrderId },
         });
         if (!order) throw new NotFoundException('Order not found');
-        if (['cancelled', 'rejected', 'refunded'].includes(order.status)) {
+        await tx.$queryRaw`
+          SELECT id FROM "orders" WHERE id = ${order.id} FOR UPDATE
+        `;
+        const lockedOrder = await tx.wkOrder.findUniqueOrThrow({
+          where: { id: order.id },
+        });
+        if (['cancelled', 'rejected', 'refunded'].includes(lockedOrder.status)) {
           throw new ForbiddenException({
             code: 'ORDER_TERMINAL',
             message: 'Order is not eligible for delivery handoff',
@@ -146,7 +160,7 @@ export class DeliveryHandoffService {
           pendingCustodyIncomingRiderId: locked.pendingCustodyIncomingRiderId,
           action: 'delivery_capability',
         });
-        if (!locked.customerId || locked.customerId !== order.userId) {
+        if (!locked.customerId || locked.customerId !== lockedOrder.userId) {
           throw new ForbiddenException({
             code: 'CUSTOMER_SCOPE_MISMATCH',
             message: 'Fulfillment customer does not match order',
@@ -168,6 +182,22 @@ export class DeliveryHandoffService {
           });
         }
 
+        await tx.$queryRaw`
+          SELECT id FROM "customer_delivery_authorizations"
+          WHERE fulfillment_id = ${locked.id}::uuid AND status = 'ACTIVE'
+          FOR UPDATE
+        `;
+        await tx.$queryRaw`
+          SELECT id FROM "customer_delivery_handoff_tokens"
+          WHERE fulfillment_id = ${locked.id}::uuid AND status = 'ACTIVE'
+          FOR UPDATE
+        `;
+        const activeAuthorization = await tx.customerDeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: locked.id,
+            status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+          },
+        });
         const priorActive = await tx.customerDeliveryHandoffToken.findMany({
           where: {
             fulfillmentId: locked.id,
@@ -213,12 +243,13 @@ export class DeliveryHandoffService {
             otpHash: hashDeliveryOtp(otp),
             purpose: CustomerDeliveryHandoffPurpose.CUSTOMER_DELIVERY_HANDOFF,
             status: CustomerDeliveryHandoffTokenStatus.ACTIVE,
-            wkOrderId: order.id,
+            wkOrderId: lockedOrder.id,
             fulfillmentId: locked.id,
-            customerId: order.userId,
+            customerId: lockedOrder.userId,
             deliveryRiderId: input.actorUserId,
             riderAssignmentId: assignment.id,
             assignmentVersion: locked.assignmentVersion,
+            authorizationId: activeAuthorization?.id ?? null,
             expiresAt,
             createdByUserId: input.actorUserId,
             correlationId: input.correlationId,
@@ -240,7 +271,8 @@ export class DeliveryHandoffService {
             assignmentVersion: locked.assignmentVersion,
             expiresAt: expiresAt.toISOString(),
             purpose: CustomerDeliveryHandoffPurpose.CUSTOMER_DELIVERY_HANDOFF,
-            // Never log raw secret / OTP
+            authorizationBound: Boolean(activeAuthorization),
+            // Never log raw secret, OTP, or recipient display name
           },
         });
 
@@ -250,9 +282,15 @@ export class DeliveryHandoffService {
           otp,
           expiresAt,
           purpose: CustomerDeliveryHandoffPurpose.CUSTOMER_DELIVERY_HANDOFF,
-          wkOrderId: order.id,
+          wkOrderId: lockedOrder.id,
           fulfillmentId: locked.id,
           assignmentVersion: locked.assignmentVersion,
+          recipient: activeAuthorization
+            ? {
+                recipientDisplayName: activeAuthorization.recipientDisplayName,
+                recipientCategory: activeAuthorization.recipientCategory,
+              }
+            : null,
           note: 'Legacy deliveryPin is not used on the secured delivery path',
         };
       },
@@ -261,7 +299,7 @@ export class DeliveryHandoffService {
   }
 
   async validate(input: {
-    actorUserId: string;
+    actorUserId?: string;
     qrPayload?: string;
     otp?: string;
     orderId?: number;
@@ -271,13 +309,8 @@ export class DeliveryHandoffService {
     if (!resolved.ok) return this.deny(resolved);
 
     const { token } = resolved;
-    if (token.customerId !== input.actorUserId) {
-      return this.deny({
-        ok: false,
-        code: 'CUSTOMER_UNAUTHORIZED',
-        message: 'Delivery handoff not authorized',
-      });
-    }
+    const actorGate = this.assertDeliveryActor(token, input.actorUserId);
+    if (!actorGate.ok) return this.deny(actorGate);
 
     if (resolved.mode === 'otp') {
       if (
@@ -323,7 +356,7 @@ export class DeliveryHandoffService {
         aggregateId: token.fulfillmentId,
         fulfillmentId: token.fulfillmentId,
         wkOrderId: token.wkOrderId,
-        actorId: input.actorUserId,
+        actorId: input.actorUserId ?? null,
         actorType: 'CUSTOMER',
         action: 'DELIVERY_TOKEN_REPLAY_REJECTED',
         correlationId: input.correlationId,
@@ -345,16 +378,18 @@ export class DeliveryHandoffService {
       aggregateId: token.fulfillmentId,
       fulfillmentId: token.fulfillmentId,
       wkOrderId: token.wkOrderId,
-      actorId: input.actorUserId,
+      actorId: input.actorUserId ?? null,
       actorType: 'CUSTOMER',
       action: 'DELIVERY_TOKEN_VALIDATED',
       correlationId: input.correlationId,
       metadata: {
         tokenId: token.id,
         assignmentVersion: token.assignmentVersion,
+        authorizationBound: Boolean(token.authorizationId),
       },
     });
 
+    const recipient = await this.recipientPreviewForToken(token);
     return {
       ok: true as const,
       preview: {
@@ -365,20 +400,21 @@ export class DeliveryHandoffService {
         expiresAt: token.expiresAt,
         purpose: token.purpose,
         eligible: true,
+        recipient,
         note: 'Preview does not consume the token or change fulfillment/custody',
       },
     };
   }
 
   async confirm(input: {
-    actorUserId: string;
+    actorUserId?: string;
     qrPayload?: string;
     otp?: string;
     orderId?: number;
     correlationId?: string;
     idempotencyKey?: string;
   }) {
-    if (input.idempotencyKey) {
+    if (input.idempotencyKey && input.actorUserId) {
       const prior = await this.prisma.customerDeliveryHandoffToken.findUnique({
         where: { confirmIdempotencyKey: input.idempotencyKey },
         include: { fulfillment: true },
@@ -417,6 +453,13 @@ export class DeliveryHandoffService {
             SELECT id FROM "order_fulfillments"
             WHERE id = ${resolved.token.fulfillmentId}::uuid FOR UPDATE
           `;
+          if (resolved.token.authorizationId) {
+            await tx.$queryRaw`
+              SELECT id FROM "customer_delivery_authorizations"
+              WHERE id = ${resolved.token.authorizationId}::uuid
+              FOR UPDATE
+            `;
+          }
           await tx.$queryRaw`
             SELECT id FROM "customer_delivery_handoff_tokens" WHERE id = ${resolved.token.id}::uuid FOR UPDATE
           `;
@@ -425,13 +468,8 @@ export class DeliveryHandoffService {
             include: { fulfillment: true },
           });
 
-        if (token.customerId !== input.actorUserId) {
-          return this.deny({
-            ok: false,
-            code: 'CUSTOMER_UNAUTHORIZED',
-            message: 'Delivery handoff not authorized',
-          });
-        }
+        const actorGate = this.assertDeliveryActor(token, input.actorUserId);
+        if (!actorGate.ok) return this.deny(actorGate);
 
         if (
           token.status === CustomerDeliveryHandoffTokenStatus.CONSUMED &&
@@ -462,6 +500,23 @@ export class DeliveryHandoffService {
           if (!otpGate.ok) return this.deny(otpGate);
         }
 
+        if (
+          token.status === CustomerDeliveryHandoffTokenStatus.CONSUMED &&
+          !input.actorUserId &&
+          token.authorizationId &&
+          token.customerConfirmedByUserId === token.customerId
+        ) {
+          return {
+            ok: true as const,
+            idempotent: true,
+            tokenId: token.id,
+            wkOrderId: token.wkOrderId,
+            fulfillmentId: token.fulfillmentId,
+            custodyEventId: token.custodyEventId,
+            fulfillmentStatus: token.fulfillment.status,
+          };
+        }
+
         const checks = await this.validateTokenState({
           token,
           consume: true,
@@ -484,21 +539,20 @@ export class DeliveryHandoffService {
         }
 
         const now = new Date();
-        const custody = await this.custody.record({
+        const custody = await this.custody.recordSecureCustomerDeliveryInTx({
           tx,
-          actorUserId: input.actorUserId,
-          eventType: CustodyEventType.CUSTOMER_RECEIVED,
+          actorUserId: token.customerId,
           wkOrderId: token.wkOrderId,
           fulfillmentId: token.fulfillmentId,
-          fromPartyRole: 'RIDER',
-          toPartyRole: 'CUSTOMER',
           fromUserId: token.deliveryRiderId,
           toUserId: token.customerId,
           correlationId: input.correlationId,
           metadata: {
             customerDeliveryHandoffTokenId: token.id,
             assignmentVersion: token.assignmentVersion,
-            customerAuthenticatedConfirmation: true,
+            authorizationBound: Boolean(token.authorizationId),
+            customerAuthenticatedConfirmation: input.actorUserId === token.customerId,
+            credentialConfirmation: input.actorUserId == null,
             paymentUnchanged: true,
             agreementAcceptanceUnchanged: true,
             riderAdvanceUnchanged: true,
@@ -512,7 +566,7 @@ export class DeliveryHandoffService {
             fulfillmentId: token.fulfillmentId,
             targetStatus: 'delivered',
             actor: {
-              id: input.actorUserId,
+              id: token.customerId,
               type: 'INTERNAL_SERVICE',
             },
             reason: 'customer_delivery_handoff_confirmed',
@@ -522,14 +576,35 @@ export class DeliveryHandoffService {
           'delivered',
         );
 
+        if (token.authorizationId) {
+          const consumed = await tx.customerDeliveryAuthorization.updateMany({
+            where: {
+              id: token.authorizationId,
+              fulfillmentId: token.fulfillmentId,
+              wkOrderId: token.wkOrderId,
+              status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+            },
+            data: {
+              status: CustomerDeliveryAuthorizationStatus.CONSUMED,
+              consumedAt: now,
+            },
+          });
+          if (consumed.count !== 1) {
+            throw new ConflictException({
+              code: 'AUTHORIZATION_MISMATCH',
+              message: 'Delivery handoff not authorized',
+            });
+          }
+        }
+
         await tx.customerDeliveryHandoffToken.update({
           where: { id: token.id },
           data: {
             status: CustomerDeliveryHandoffTokenStatus.CONSUMED,
             consumedAt: now,
-            consumedByUserId: input.actorUserId,
+            consumedByUserId: token.customerId,
             customerConfirmedAt: now,
-            customerConfirmedByUserId: input.actorUserId,
+            customerConfirmedByUserId: token.customerId,
             custodyEventId: custody.id,
             confirmIdempotencyKey: input.idempotencyKey,
           },
@@ -578,7 +653,7 @@ export class DeliveryHandoffService {
                   occurredAt: now,
                   reportedAt: now,
                   reportedByActorType: 'CUSTOMER',
-                  reportedByActorId: input.actorUserId,
+                  reportedByActorId: token.customerId,
                   notes: 'stage10_redelivery_successful_handoff',
                   correlationId: input.correlationId,
                   requestPayloadHash: `stage10:${activatedRedelivery.id}`,
@@ -594,7 +669,7 @@ export class DeliveryHandoffService {
           aggregateId: token.fulfillmentId,
           fulfillmentId: token.fulfillmentId,
           wkOrderId: token.wkOrderId,
-          actorId: input.actorUserId,
+          actorId: token.customerId,
           actorType: 'CUSTOMER',
           action: 'CUSTOMER_DELIVERY_HANDOFF_CONFIRMED',
           previousState: token.fulfillment.status,
@@ -968,6 +1043,411 @@ export class DeliveryHandoffService {
       };
     }
 
+    try {
+      assertPossessionDependentRiderAuthority({
+        actorUserId: input.token.deliveryRiderId,
+        status: fulfillment.status,
+        activeRiderId: fulfillment.activeRiderId,
+        physicalCustodianRiderId: fulfillment.physicalCustodianRiderId,
+        pendingCustodyIncomingRiderId: fulfillment.pendingCustodyIncomingRiderId,
+        action: 'delivery_capability',
+      });
+    } catch (err) {
+      if (err instanceof ForbiddenException) {
+        const body = err.getResponse();
+        const code =
+          typeof body === 'object' && body && 'code' in body
+            ? String((body as { code: string }).code)
+            : 'RIDER_NOT_PHYSICAL_CUSTODIAN';
+        return {
+          ok: false,
+          code,
+          message: 'Delivery handoff not authorized',
+        };
+      }
+      throw err;
+    }
+
+    const activeAuthorization = await db.customerDeliveryAuthorization.findFirst({
+      where: {
+        fulfillmentId: input.token.fulfillmentId,
+        status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+      },
+    });
+    if (input.token.authorizationId == null) {
+      if (activeAuthorization) {
+        return {
+          ok: false,
+          code: 'AUTHORIZATION_MISMATCH',
+          message: 'Delivery handoff not authorized',
+        };
+      }
+    } else if (
+      !activeAuthorization ||
+      activeAuthorization.id !== input.token.authorizationId ||
+      activeAuthorization.wkOrderId !== input.token.wkOrderId ||
+      activeAuthorization.fulfillmentId !== input.token.fulfillmentId
+    ) {
+      return {
+        ok: false,
+        code: 'AUTHORIZATION_MISMATCH',
+        message: 'Delivery handoff not authorized',
+      };
+    }
+
     return { ok: true };
+  }
+
+  async currentRecipient(input: { wkOrderId: number; actorUserId: string }) {
+    const scoped = await this.readOwnedOrder(input.wkOrderId, input.actorUserId);
+    const active = await this.prisma.customerDeliveryAuthorization.findFirst({
+      where: {
+        fulfillmentId: scoped.fulfillment.id,
+        status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+      },
+    });
+    if (!active) return customerSelfPreview();
+    return this.previewFromAuthorization(active);
+  }
+
+  async authorizeRecipient(input: {
+    wkOrderId: number;
+    actorUserId: string;
+    body: RecipientAuthorizationInput;
+    correlationId?: string;
+  }) {
+    const parsed = parseRecipientAuthorization(input.body);
+    if (!parsed.ok) {
+      throw new BadRequestException({ code: parsed.code, message: parsed.message });
+    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        const scoped = await this.lockOwnedFulfillment(tx, input.wkOrderId, input.actorUserId);
+        const existing = await tx.customerDeliveryAuthorization.findUnique({
+          where: {
+            authorizedByCustomerId_idempotencyKey: {
+              authorizedByCustomerId: input.actorUserId,
+              idempotencyKey: parsed.value.idempotencyKey,
+            },
+          },
+        });
+        if (existing) {
+          if (existing.payloadHash !== parsed.value.payloadHash) {
+            throw new ConflictException({
+              code: 'IDEMPOTENCY_PAYLOAD_CONFLICT',
+              message: 'Idempotency key payload conflict',
+            });
+          }
+          return {
+            idempotent: true,
+            authorization: this.previewFromAuthorization(existing),
+          };
+        }
+        await tx.$queryRaw`
+          SELECT id FROM "customer_delivery_authorizations"
+          WHERE fulfillment_id = ${scoped.fulfillment.id}::uuid AND status = 'ACTIVE'
+          FOR UPDATE
+        `;
+        const previous = await tx.customerDeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: scoped.fulfillment.id,
+            status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+          },
+        });
+        if (previous) {
+          await tx.customerDeliveryAuthorization.update({
+            where: { id: previous.id },
+            data: {
+              status: CustomerDeliveryAuthorizationStatus.REVOKED,
+              revokedAt: new Date(),
+            },
+          });
+        }
+        await this.revokeActiveDeliveryTokens(tx, {
+          fulfillmentId: scoped.fulfillment.id,
+          wkOrderId: scoped.order.id,
+          actorUserId: input.actorUserId,
+          reason: previous ? 'authorization_replaced' : 'authorization_created',
+          correlationId: input.correlationId,
+        });
+        const created = await tx.customerDeliveryAuthorization.create({
+          data: {
+            id: randomUUID(),
+            wkOrderId: scoped.order.id,
+            fulfillmentId: scoped.fulfillment.id,
+            authorizedByCustomerId: input.actorUserId,
+            recipientDisplayName: parsed.value.recipientDisplayName,
+            recipientCategory: parsed.value.recipientCategory,
+            status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+            idempotencyKey: parsed.value.idempotencyKey,
+            payloadHash: parsed.value.payloadHash,
+            correlationId: input.correlationId,
+          },
+        });
+        await this.events.record({
+          tx,
+          aggregateType: 'ORDER_FULFILLMENT',
+          aggregateId: scoped.fulfillment.id,
+          fulfillmentId: scoped.fulfillment.id,
+          wkOrderId: scoped.order.id,
+          actorId: input.actorUserId,
+          actorType: 'CUSTOMER',
+          action: previous
+            ? 'DELIVERY_RECIPIENT_REPLACED'
+            : 'DELIVERY_RECIPIENT_AUTHORIZED',
+          correlationId: input.correlationId,
+          metadata: {
+            authorizationId: created.id,
+            recipientCategory: created.recipientCategory,
+            replacedAuthorizationId: previous?.id ?? null,
+          },
+        });
+        return {
+          idempotent: false,
+          authorization: this.previewFromAuthorization(created),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  async revokeRecipient(input: {
+    wkOrderId: number;
+    actorUserId: string;
+    correlationId?: string;
+  }) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const scoped = await this.lockOwnedFulfillment(tx, input.wkOrderId, input.actorUserId);
+        await tx.$queryRaw`
+          SELECT id FROM "customer_delivery_authorizations"
+          WHERE fulfillment_id = ${scoped.fulfillment.id}::uuid
+            AND status IN ('ACTIVE', 'REVOKED', 'CONSUMED')
+          FOR UPDATE
+        `;
+        const active = await tx.customerDeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: scoped.fulfillment.id,
+            status: CustomerDeliveryAuthorizationStatus.ACTIVE,
+          },
+        });
+        if (active) {
+          await tx.customerDeliveryAuthorization.update({
+            where: { id: active.id },
+            data: {
+              status: CustomerDeliveryAuthorizationStatus.REVOKED,
+              revokedAt: new Date(),
+            },
+          });
+          await this.revokeActiveDeliveryTokens(tx, {
+            fulfillmentId: scoped.fulfillment.id,
+            wkOrderId: scoped.order.id,
+            actorUserId: input.actorUserId,
+            reason: 'authorization_revoked',
+            correlationId: input.correlationId,
+          });
+          await this.events.record({
+            tx,
+            aggregateType: 'ORDER_FULFILLMENT',
+            aggregateId: scoped.fulfillment.id,
+            fulfillmentId: scoped.fulfillment.id,
+            wkOrderId: scoped.order.id,
+            actorId: input.actorUserId,
+            actorType: 'CUSTOMER',
+            action: 'DELIVERY_RECIPIENT_REVOKED',
+            correlationId: input.correlationId,
+            metadata: { authorizationId: active.id },
+          });
+          return { ok: true as const, idempotent: false, authorization: customerSelfPreview() };
+        }
+        const consumed = await tx.customerDeliveryAuthorization.findFirst({
+          where: {
+            fulfillmentId: scoped.fulfillment.id,
+            status: CustomerDeliveryAuthorizationStatus.CONSUMED,
+          },
+        });
+        if (consumed) {
+          throw new ConflictException({
+            code: 'AUTHORIZATION_CONSUMED',
+            message: 'Delivery recipient authorization is already consumed',
+          });
+        }
+        return { ok: true as const, idempotent: true, authorization: customerSelfPreview() };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  private assertDeliveryActor(
+    token: { customerId: string; authorizationId: string | null },
+    actorUserId?: string,
+  ): { ok: true } | SafeFailure {
+    if (token.authorizationId == null) {
+      if (actorUserId !== token.customerId) {
+        return {
+          ok: false,
+          code: 'CUSTOMER_UNAUTHORIZED',
+          message: 'Delivery handoff not authorized',
+        };
+      }
+      return { ok: true };
+    }
+    if (actorUserId && actorUserId !== token.customerId) {
+      return {
+        ok: false,
+        code: 'CUSTOMER_UNAUTHORIZED',
+        message: 'Delivery handoff not authorized',
+      };
+    }
+    return { ok: true };
+  }
+
+  private previewFromAuthorization(row: {
+    recipientDisplayName: string;
+    recipientCategory: RecipientPreview['recipientCategory'];
+    status: CustomerDeliveryAuthorizationStatus;
+  }): RecipientPreview {
+    return {
+      receiverType: 'AUTHORIZED_RECIPIENT',
+      recipientDisplayName: row.recipientDisplayName,
+      recipientCategory: row.recipientCategory,
+      status: row.status,
+    };
+  }
+
+  private async recipientPreviewForToken(token: {
+    authorizationId: string | null;
+  }): Promise<RecipientPreview> {
+    if (!token.authorizationId) return customerSelfPreview();
+    const row = await this.prisma.customerDeliveryAuthorization.findUnique({
+      where: { id: token.authorizationId },
+    });
+    if (!row) return customerSelfPreview();
+    return this.previewFromAuthorization(row);
+  }
+
+  private async readOwnedOrder(wkOrderId: number, actorUserId: string) {
+    const order = await this.prisma.wkOrder.findUnique({ where: { id: wkOrderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.userId !== actorUserId) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_UNAUTHORIZED',
+        message: 'Delivery recipient not authorized',
+      });
+    }
+    const fulfillment = await this.prisma.orderFulfillment.findUnique({
+      where: { wkOrderId: order.id },
+    });
+    if (!fulfillment || fulfillment.customerId !== actorUserId) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_UNAUTHORIZED',
+        message: 'Delivery recipient not authorized',
+      });
+    }
+    return { order, fulfillment };
+  }
+
+  private async lockOwnedFulfillment(
+    tx: Prisma.TransactionClient,
+    wkOrderId: number,
+    actorUserId: string,
+  ) {
+    const order = await tx.wkOrder.findUnique({ where: { id: wkOrderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    await tx.$queryRaw`
+      SELECT id FROM "orders" WHERE id = ${wkOrderId} FOR UPDATE
+    `;
+    const lockedOrder = await tx.wkOrder.findUniqueOrThrow({ where: { id: wkOrderId } });
+    if (lockedOrder.userId !== actorUserId) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_UNAUTHORIZED',
+        message: 'Delivery recipient not authorized',
+      });
+    }
+    if (['cancelled', 'rejected', 'refunded'].includes(lockedOrder.status)) {
+      throw new ForbiddenException({
+        code: 'ORDER_TERMINAL',
+        message: 'Order is not eligible for recipient authorization',
+      });
+    }
+    const fulfillment = await tx.orderFulfillment.findUnique({
+      where: { wkOrderId: lockedOrder.id },
+    });
+    if (!fulfillment) {
+      throw new ForbiddenException({
+        code: 'FULFILLMENT_MISSING',
+        message: 'No fulfillment for this order',
+      });
+    }
+    await tx.$queryRaw`
+      SELECT id FROM "order_fulfillments" WHERE id = ${fulfillment.id}::uuid FOR UPDATE
+    `;
+    const locked = await tx.orderFulfillment.findUniqueOrThrow({
+      where: { id: fulfillment.id },
+    });
+    if (locked.customerId !== actorUserId) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_UNAUTHORIZED',
+        message: 'Delivery recipient not authorized',
+      });
+    }
+    if (
+      locked.status === FulfillmentStatus.delivered ||
+      locked.status === FulfillmentStatus.cancelled ||
+      locked.status === FulfillmentStatus.returned ||
+      locked.status === FulfillmentStatus.returning
+    ) {
+      throw new ForbiddenException({
+        code: 'FULFILLMENT_NOT_ELIGIBLE',
+        message: 'Fulfillment is no longer eligible for recipient authorization',
+      });
+    }
+    return { order: lockedOrder, fulfillment: locked };
+  }
+
+  private async revokeActiveDeliveryTokens(
+    tx: Prisma.TransactionClient,
+    input: {
+      fulfillmentId: string;
+      wkOrderId: number;
+      actorUserId: string;
+      reason: string;
+      correlationId?: string;
+    },
+  ) {
+    await tx.$queryRaw`
+      SELECT id FROM "customer_delivery_handoff_tokens"
+      WHERE fulfillment_id = ${input.fulfillmentId}::uuid AND status = 'ACTIVE'
+      FOR UPDATE
+    `;
+    const active = await tx.customerDeliveryHandoffToken.findMany({
+      where: {
+        fulfillmentId: input.fulfillmentId,
+        status: CustomerDeliveryHandoffTokenStatus.ACTIVE,
+      },
+    });
+    const now = new Date();
+    for (const token of active) {
+      await tx.customerDeliveryHandoffToken.update({
+        where: { id: token.id },
+        data: {
+          status: CustomerDeliveryHandoffTokenStatus.REVOKED,
+          revokedAt: now,
+          revokeReason: input.reason,
+        },
+      });
+      await this.events.record({
+        tx,
+        aggregateType: 'ORDER_FULFILLMENT',
+        aggregateId: input.fulfillmentId,
+        fulfillmentId: input.fulfillmentId,
+        wkOrderId: input.wkOrderId,
+        actorId: input.actorUserId,
+        actorType: 'CUSTOMER',
+        action: 'DELIVERY_TOKEN_REVOKED',
+        correlationId: input.correlationId,
+        metadata: { tokenId: token.id, reason: input.reason },
+      });
+    }
   }
 }

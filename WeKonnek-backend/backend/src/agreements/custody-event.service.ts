@@ -46,10 +46,17 @@ export class CustodyEventService {
     /** Optional outer transaction (Stage 3A atomic handoff). */
     tx?: Prisma.TransactionClient;
   }) {
+    if (input.eventType === CustodyEventType.CUSTOMER_RECEIVED) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_RECEIVED_REQUIRES_HANDOFF',
+        message: 'Customer receipt requires secured delivery handoff',
+      });
+    }
     return this.recordCore({
       ...input,
       trustedSecureMerchantReturn: false,
       trustedSecureRiderTransfer: false,
+      trustedSecureCustomerDelivery: false,
     });
   }
 
@@ -83,6 +90,40 @@ export class CustodyEventService {
       tx: input.tx,
       trustedSecureMerchantReturn: true,
       trustedSecureRiderTransfer: false,
+      trustedSecureCustomerDelivery: false,
+    });
+  }
+
+  /**
+   * UCE-4 trusted path only — called from DeliveryHandoffService.confirm
+   * after the delivery credential and custodian checks. Public custody
+   * APIs cannot set this authority flag. Does not change RETURN_INITIATED.
+   */
+  async recordSecureCustomerDeliveryInTx(input: {
+    actorUserId: string;
+    wkOrderId: number;
+    fulfillmentId: string;
+    fromUserId: string;
+    toUserId: string;
+    correlationId?: string;
+    metadata?: Prisma.InputJsonValue;
+    tx: Prisma.TransactionClient;
+  }) {
+    return this.recordCore({
+      actorUserId: input.actorUserId,
+      eventType: CustodyEventType.CUSTOMER_RECEIVED,
+      wkOrderId: input.wkOrderId,
+      fulfillmentId: input.fulfillmentId,
+      fromPartyRole: 'RIDER',
+      toPartyRole: 'CUSTOMER',
+      fromUserId: input.fromUserId,
+      toUserId: input.toUserId,
+      correlationId: input.correlationId,
+      metadata: input.metadata,
+      tx: input.tx,
+      trustedSecureMerchantReturn: false,
+      trustedSecureRiderTransfer: false,
+      trustedSecureCustomerDelivery: true,
     });
   }
 
@@ -120,6 +161,7 @@ export class CustodyEventService {
       tx: input.tx,
       trustedSecureMerchantReturn: false,
       trustedSecureRiderTransfer: true,
+      trustedSecureCustomerDelivery: false,
     });
   }
 
@@ -142,6 +184,8 @@ export class CustodyEventService {
     trustedSecureMerchantReturn: boolean;
     /** Server-internal only — only the Stage 7 capability flow may record transfer custody. */
     trustedSecureRiderTransfer: boolean;
+    /** Server-internal only — only delivery-handoff confirm may record customer receipt. */
+    trustedSecureCustomerDelivery: boolean;
   }) {
     const db = input.tx ?? this.prisma;
     if (!input.wkOrderId && !input.fulfillmentId) {
@@ -199,6 +243,8 @@ export class CustodyEventService {
       wkOrderId,
       trustedSecureMerchantReturn: input.trustedSecureMerchantReturn === true,
       trustedSecureRiderTransfer: input.trustedSecureRiderTransfer === true,
+      trustedSecureCustomerDelivery:
+        input.trustedSecureCustomerDelivery === true,
       db,
     });
 
@@ -380,10 +426,20 @@ export class CustodyEventService {
     wkOrderId?: number | null;
     trustedSecureMerchantReturn?: boolean;
     trustedSecureRiderTransfer?: boolean;
+    trustedSecureCustomerDelivery?: boolean;
     readOnly?: boolean;
     db?: Prisma.TransactionClient | PrismaService;
   }) {
     const db = input.db ?? this.prisma;
+    if (
+      input.eventType === CustodyEventType.CUSTOMER_RECEIVED &&
+      !input.trustedSecureCustomerDelivery
+    ) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_RECEIVED_REQUIRES_HANDOFF',
+        message: 'Customer receipt requires secured delivery handoff',
+      });
+    }
     if (
       (input.eventType === CustodyEventType.RIDER_TRANSFER_RELEASED ||
         input.eventType === CustodyEventType.RIDER_TRANSFER_RECEIVED) &&

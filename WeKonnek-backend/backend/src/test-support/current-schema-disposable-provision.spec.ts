@@ -170,6 +170,15 @@ describe('current-schema disposable provision policy', () => {
     expect(names).toContain(
       '20260921200000_stage15c_successor_chain_authority',
     );
+    expect(names).toContain(
+      '20260925120000_uce4_delivery_recipient_authorization',
+    );
+    expect(names).not.toContain(
+      '20260922120000_stage5b_delivery_recipient_authorization',
+    );
+    expect(names).not.toContain(
+      '20260922060000_stage4b_canonical_rider_location',
+    );
     expect(
       Object.keys(CURRENT_SCHEMA_POST_TEMPLATE_MIGRATION_PROBES),
     ).toEqual(
